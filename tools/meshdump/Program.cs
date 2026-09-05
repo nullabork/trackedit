@@ -1133,10 +1133,22 @@ sealed class Dumper(string root, string outDir, string? filter)
                     else
                     {
                         var c = cm!;
+                        var cq = q;
+                        var ct = t;
+                        if (face is "north" or "south" or "east" or "west")
+                        {
+                            // Face-cap mobils look into the adjoining cell.
+                            // Turn them inward about the FACE centre (16,0,32),
+                            // not the unit centre: preserve the attachment plane
+                            // while swapping the ends of asymmetric/banked caps.
+                            cq = Quaternion.Concatenate(
+                                Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI), q);
+                            ct += Vector3.Transform(new Vector3(32f, 0f, 64f), q);
+                        }
                         emit = b =>
                         {
-                            if (c.SolidFid is CPlugSolid cs) AddSolid(b, cs, q, t);
-                            if (c.PrefabFid is CPlugPrefab cp) AddPrefab(b, cp, q, t);
+                            if (c.SolidFid is CPlugSolid cs) AddSolid(b, cs, cq, ct);
+                            if (c.PrefabFid is CPlugPrefab cp) AddPrefab(b, cp, cq, ct);
                         };
                     }
 
@@ -1166,8 +1178,10 @@ sealed class Dumper(string root, string outDir, string? filter)
             Merge(unit.ClipsTop, Quaternion.Identity, new Vector3(0, 8f, 0), "top");
             Merge(unit.ClipsNorth, Quaternion.Identity, Vector3.Zero, "north");
             Merge(unit.ClipsSouth, Yaw(180f), Vector3.Zero, "south");
-            Merge(unit.ClipsEast, Yaw(90f), Vector3.Zero, "east");
-            Merge(unit.ClipsWest, Yaw(-90f), Vector3.Zero, "west");
+            // GBX east is the x=0 face, west is x=32. Positive Y yaw
+            // moves our canonical z=32 clip to x=32 (west), not east.
+            Merge(unit.ClipsEast, Yaw(-90f), Vector3.Zero, "east");
+            Merge(unit.ClipsWest, Yaw(90f), Vector3.Zero, "west");
         }
         builder.SetSource("mobil");
     }
