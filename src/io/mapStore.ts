@@ -41,6 +41,14 @@ export interface StoredMapMeta {
   size: GridCoord;
 }
 
+/** Camera pose (matches render/CameraRig.getState — io/ can't import render/). */
+export interface CameraPose {
+  pos: [number, number, number];
+  yaw: number;
+  pitch: number;
+  distance: number;
+}
+
 export interface StoredMap extends StoredMapMeta {
   globalClampToBase?: boolean;
   /** The map's own custom texture pack URL (from import), if any. */
@@ -49,6 +57,13 @@ export interface StoredMap extends StoredMapMeta {
   activeMod?: string | null;
   /** Palette painted blocks resolve through (core/palettes.ts). */
   colorPalette?: string;
+  /**
+   * Last camera pose, so a map opened on another browser/machine starts
+   * where you left it. Editor convenience only — never exported to Gbx.
+   * The per-browser localStorage pose (fresher: camera moves alone don't
+   * autosave) wins over this when both exist (ui/session.ts).
+   */
+  camera?: CameraPose;
   layers: StoredLayer[];
 }
 
@@ -104,8 +119,9 @@ export function toLayers(rec: StoredMap): Layer[] {
   });
 }
 
-export async function saveMap(doc: MapDocument): Promise<void> {
+export async function saveMap(doc: MapDocument, camera?: CameraPose): Promise<void> {
   const rec = serializeDoc(doc);
+  if (camera) rec.camera = camera;
   const res = await fetch(`/api/maps/${encodeURIComponent(rec.id)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
