@@ -31,12 +31,18 @@ export interface RenderPrefs {
   sky: "image" | "color";
   skyColor: string;
   lighting: "mood" | "flat";
+  /** Grid render distance, 0-100: how far the active layer's grid lines
+   *  reach before dissolving (DocumentRenderer.updateGridFade). */
+  gridFade: number;
+  gridColor: string;
 }
 
 export const DEFAULT_RENDER_PREFS: RenderPrefs = {
-  sky: "image",
+  sky: "color",
   skyColor: "#d8e8f6",
   lighting: "mood",
+  gridFade: 30,
+  gridColor: "#8fb5dc",
 };
 
 /** Lighting presets per mood; the matching skybox is painted in sky.ts
