@@ -186,3 +186,15 @@ Regenerate with `python tools/build_catalog.py <parsed-maps-dir>`.
 - Multi-select, grouping, gizmo translate/rotate
 - Custom item/block support (embedded assets)
 - Instanced rendering for very large maps
+
+### Validating clip geometry
+
+After changing clip attachment transforms, regenerate the block meshes and run
+`python tools/test_curve_clips.py`. This checks the open ends of flat and
+banked quarter curves against exported clip geometry, and verifies that their
+undersides remain present. Banked cap heights are also checked at both ends
+against the road, catching caps that sit on the right face but face backwards.
+`python tools/diagnose_clips.py air RoadTech` provides
+a broader, heuristic attachment report. GBX east attaches at a unit's `x=0`
+face and west at `x=32`; reversing these can put braces across a curved wall
+while still passing a whole-block bounding-box overlap check.
