@@ -12,6 +12,8 @@ import type { ToolManager } from "@tools/ToolManager";
 export interface AppEvents extends Record<string, unknown> {
   /** A block was chosen in the palette (arms the place tool). */
   blockArmed: { name: string };
+  /** The armed block was cleared (Esc in place mode). */
+  blockDisarmed: Record<string, never>;
   /** Place tool switched between grid and free placement. */
   placeModeChanged: { mode: "grid" | "free" };
   /** A real mesh finished loading for this block (visuals were rebuilt). */

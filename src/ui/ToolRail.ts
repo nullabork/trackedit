@@ -56,7 +56,9 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
   });
   ctx.tools.events.on("activeChanged", ({ tool }) => {
     refresh();
-    shell.setDrawerOpen(tool?.id === "place");
+    // Arming for placement makes sure the drawer is up; other tools leave
+    // it as the user set it (its own tab toggles it open/closed).
+    if (tool?.id === "place") shell.setDrawerOpen(true);
     if (tool?.hint) ctx.ui.setStatus(tool.hint);
   });
 
