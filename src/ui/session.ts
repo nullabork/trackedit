@@ -1,5 +1,5 @@
 import type { EditorContext } from "@plugins/api";
-import type { StoredMap } from "@io/mapStore";
+import type { CameraPose, StoredMap } from "@io/mapStore";
 import { saveMap, setCurrentId, toLayers } from "@io/mapStore";
 
 /**
@@ -13,7 +13,9 @@ export const session = { ready: false };
 export async function persistNow(ctx: EditorContext): Promise<void> {
   if (!session.ready) return;
   try {
-    await saveMap(ctx.document);
+    // Camera rides along so the map opens where you left it on OTHER
+    // machines too (freshness caveat: only updates when an edit autosaves).
+    await saveMap(ctx.document, ctx.view.rig.getState());
     setCurrentId(ctx.document.id);
   } catch (err) {
     ctx.ui.setStatus(`Save failed: ${err instanceof Error ? err.message : err}`);
@@ -34,7 +36,7 @@ export function applyStored(ctx: EditorContext, rec: StoredMap): void {
   });
   session.ready = true;
   setCurrentId(rec.id);
-  restoreCamera(ctx);
+  restoreCamera(ctx, rec.camera);
   ctx.ui.setStatus(`Opened ${rec.name} (${rec.placementCount} placements)`);
 }
 
@@ -42,13 +44,22 @@ export function applyStored(ctx: EditorContext, rec: StoredMap): void {
 
 const camKey = (mapId: string) => `trackedit.cam.${mapId}`;
 
-export function restoreCamera(ctx: EditorContext): void {
+/**
+ * Restore priority: this browser's localStorage pose (freshest — saved every
+ * second, while the stored-map pose only updates when an edit autosaves),
+ * else the pose saved in the map record (new browser/machine), else default.
+ */
+export function restoreCamera(ctx: EditorContext, stored?: CameraPose): void {
   try {
     const raw = localStorage.getItem(camKey(ctx.document.id));
-    if (raw) ctx.view.rig.setState(JSON.parse(raw));
+    if (raw) {
+      ctx.view.rig.setState(JSON.parse(raw));
+      return;
+    }
   } catch {
-    /* storage unavailable or corrupt — keep the default pose */
+    /* storage unavailable or corrupt — fall through */
   }
+  if (stored) ctx.view.rig.setState(stored);
 }
 
 /** Call periodically; writes only when the pose actually changed. */
