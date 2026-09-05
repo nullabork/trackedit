@@ -219,6 +219,7 @@ export const instrumentationPlugin: EditorPlugin = {
         // (live-only test hook; the dialog is what persists prefs)
         const [what, value, extra] = (uid ?? "").split(":");
         const prefs = ctx.view.getRenderPrefs();
+        if (!uid) return { ok: true, prefs }; // no arg = read current
         if (what === "sky" && (value === "image" || value === "color")) {
           prefs.sky = value;
           if (extra) prefs.skyColor = extra;

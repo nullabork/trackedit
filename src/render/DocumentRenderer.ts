@@ -9,12 +9,14 @@ import {
   LineBasicMaterial,
   LineLoop,
   LineSegments,
+  MathUtils,
   Matrix4,
   Mesh,
   MeshLambertMaterial,
   Object3D,
   Quaternion,
   Raycaster,
+  ShaderMaterial,
   Vector3,
 } from "three";
 import type { MapDocument } from "@core/document";
@@ -127,6 +129,7 @@ export class DocumentRenderer {
       this.rebuild();
     });
     view.onFrame(() => this.lodTick());
+    view.onFrame(() => this.updateGridFade());
     this.rebuild();
   }
 
@@ -202,7 +205,9 @@ export class DocumentRenderer {
 
   /**
    * Each layer draws its OWN grid: its gridStep spacing, riding the layer's
-   * rotation/translation. Only the active layer's grid is shown.
+   * rotation/translation. Only the active layer's grid is shown. Lines fade
+   * radially around the point the camera is looking at (updateGridFade) —
+   * far away the packed lines would otherwise merge into a dark mass.
    */
   private addLayerGrid(group: Group, layer: Layer): void {
     const w = this.doc.size[0] * CELL[0];
@@ -212,14 +217,95 @@ export class DocumentRenderer {
     const points: Vector3[] = [];
     for (let x = 0; x <= w + 0.001; x += sx) points.push(new Vector3(x, 0, 0), new Vector3(x, 0, d));
     for (let z = 0; z <= d + 0.001; z += sz) points.push(new Vector3(0, 0, z), new Vector3(w, 0, z));
-    const grid = new LineSegments(
-      new BufferGeometry().setFromPoints(points),
-      new LineBasicMaterial({ color: 0x2f3a46, transparent: true, opacity: 0.8 }),
-    );
+    const material = new ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uColor: { value: new Color(0x2f3a46) },
+        uOpacity: { value: 0.8 },
+        uCenter: { value: new Vector3() },
+        uRadius: { value: 1500 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorld;
+        void main() {
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        uniform vec3 uCenter;
+        uniform float uRadius;
+        varying vec3 vWorld;
+        void main() {
+          float d = distance(vWorld, uCenter);
+          float a = uOpacity * (1.0 - smoothstep(uRadius * 0.3, uRadius, d));
+          if (a < 0.004) discard;
+          gl_FragColor = vec4(uColor, a);
+        }`,
+    });
+    const grid = new LineSegments(new BufferGeometry().setFromPoints(points), material);
     grid.name = "layerGrid";
     grid.raycast = () => {};
     grid.userData.step = `${sx}x${sz}`;
     group.add(grid);
+  }
+
+  // Scratch objects for the per-frame grid fade update (no allocations).
+  private gfQuat = new Quaternion();
+  private gfNormal = new Vector3();
+  private gfPlanePt = new Vector3();
+  private gfDir = new Vector3();
+  private gfTmp = new Vector3();
+  private gfCenter = new Vector3();
+
+  /**
+   * Per frame: aim the grid's fade circle at the spot the camera looks at —
+   * view ray ∩ the active layer's (possibly tilted) grid plane. At grazing
+   * angles that hit runs to the horizon, which would center the circle miles
+   * away and fade out everything nearby — so the center is clamped to a
+   * distance proportional to the camera's height over the plane, then
+   * dropped back onto it. Radius scales with the distance to the center and
+   * the user's grid-distance preference (render settings slider).
+   */
+  updateGridFade(): void {
+    const group = this.layerGroups.get(this.doc.activeLayer.id);
+    const grid = group?.getObjectByName("layerGrid") as LineSegments | undefined;
+    if (!group || !grid || !grid.visible) return;
+    const mat = grid.material as ShaderMaterial;
+    if (!mat.uniforms?.uCenter) return;
+
+    const prefs = this.view.getRenderPrefs();
+    const pct = MathUtils.clamp(prefs.gridFade, 0, 100) / 100;
+    if (grid.userData.gridColor !== prefs.gridColor) {
+      (mat.uniforms.uColor.value as Color).set(prefs.gridColor);
+      grid.userData.gridColor = prefs.gridColor;
+    }
+    const normal = this.gfNormal.set(0, 1, 0).applyQuaternion(group.getWorldQuaternion(this.gfQuat));
+    const planePt = group.getWorldPosition(this.gfPlanePt);
+    const cam = this.view.camera;
+    const dir = cam.getWorldDirection(this.gfDir);
+    const denom = dir.dot(normal);
+    const lift = this.gfTmp.copy(cam.position).sub(planePt).dot(normal);
+    const t = Math.abs(denom) > 1e-4
+      ? this.gfTmp.copy(planePt).sub(cam.position).dot(normal) / denom
+      : -1;
+    const maxAhead = Math.abs(lift) * (2 + 8 * pct) + 400;
+    const center = this.gfCenter;
+    if (t > 0) {
+      center.copy(dir).multiplyScalar(Math.min(t, maxAhead)).add(cam.position);
+    } else {
+      center.copy(cam.position);
+    }
+    // Drop the (possibly clamped, off-plane) center onto the grid plane.
+    const off = this.gfTmp.copy(center).sub(planePt).dot(normal);
+    center.addScaledVector(normal, -off);
+
+    (mat.uniforms.uCenter.value as Vector3).copy(center);
+    const reach = (0.35 + 3.15 * pct) * Math.max(cam.position.distanceTo(center), 250);
+    mat.uniforms.uRadius.value = MathUtils.clamp(reach, 300, 20000);
   }
 
   private rebuildPlaneOutlines(): void {

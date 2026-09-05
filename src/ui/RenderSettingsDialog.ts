@@ -73,6 +73,33 @@ export function openRenderSettings(ctx: EditorContext): void {
     colorInput,
   );
 
+  // Grid render distance: how far the layer grid reaches before dissolving.
+  const gridSlider = el("input", { type: "range", min: "0", max: "100", step: "1" }) as HTMLInputElement;
+  gridSlider.value = String(prefs.gridFade);
+  const gridValue = el("span", { class: "grid-fade-value" }, `${prefs.gridFade}%`);
+  gridSlider.addEventListener("input", () => {
+    prefs.gridFade = Number(gridSlider.value);
+    gridValue.textContent = `${prefs.gridFade}%`;
+    apply();
+  });
+  const gridRow = el("div", { class: "field" },
+    el("label", {}, "Grid distance"),
+    el("div", { class: "grid-fade-row" }, gridSlider, gridValue),
+    el("div", { class: "hint" },
+      "How far the layer grid reaches before it dissolves around where you look."),
+  );
+
+  const gridColorInput = el("input", { type: "color" }) as HTMLInputElement;
+  gridColorInput.value = prefs.gridColor;
+  gridColorInput.addEventListener("input", () => {
+    prefs.gridColor = gridColorInput.value;
+    apply();
+  });
+  const gridColorRow = el("div", { class: "field sky-color-row" },
+    el("label", {}, "Grid color"),
+    gridColorInput,
+  );
+
   const content = el("div", { class: "render-settings" },
     el("p", { class: "hint" },
       "Editor viewport only — none of this changes the map or what it looks like in game."),
@@ -85,6 +112,8 @@ export function openRenderSettings(ctx: EditorContext): void {
       ),
     ),
     colorRow,
+    gridRow,
+    gridColorRow,
     el("div", { class: "field" },
       el("label", {}, "Lighting"),
       seg(
