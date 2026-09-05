@@ -21,6 +21,8 @@ export class Shell implements UiHost {
   /** Top-right viewport overlay (mood switcher etc.). */
   readonly viewportCorner: HTMLElement;
   private drawer: HTMLElement;
+  private drawerTab: HTMLElement;
+  private drawerTabIcon: HTMLElement;
   private right: HTMLElement;
   private statusText: HTMLElement;
   private hud: HTMLElement;
@@ -41,12 +43,22 @@ export class Shell implements UiHost {
     this.hud.style.display = "none";
     this.viewportCorner = el("div", { class: "viewport-corner" });
 
+    // Permanent tab on the drawer's seam: shows the panel's name and toggles
+    // it open/closed — visible even while the drawer is fully closed (it
+    // lives on the viewport edge, so the sliding drawer can't clip it).
+    this.drawerTabIcon = el("span", { class: "drawer-tab-icon" }, "◂");
+    this.drawerTab = el("button", { class: "drawer-tab", title: "Toggle the track bits panel" },
+      this.drawerTabIcon,
+      el("span", { class: "drawer-tab-label" }, "Track bits"),
+    );
+    this.drawerTab.addEventListener("click", () => this.setDrawerOpen(!this.drawerOpen));
+
     root.append(
       this.menubar,
       el("div", { class: "main" },
         this.rail,
         this.drawer,
-        el("div", { class: "viewport-wrap" }, this.canvas, this.hud, this.viewportCorner),
+        el("div", { class: "viewport-wrap" }, this.canvas, this.hud, this.viewportCorner, this.drawerTab),
         this.right,
       ),
       el("div", { class: "statusbar" }, this.statusText, this.statusInfo, this.statusActions),
@@ -61,7 +73,7 @@ export class Shell implements UiHost {
     this.applyDrawer();
   }
 
-  /** Slide the block drawer in/out (Place mode). */
+  /** Slide the block drawer in/out (place tool opens it; its tab toggles). */
   setDrawerOpen(open: boolean): void {
     this.drawerOpen = open;
     this.applyDrawer();
@@ -71,6 +83,7 @@ export class Shell implements UiHost {
     this.drawer.classList.toggle("open", this.drawerOpen);
     this.drawer.style.width = this.drawerOpen ? `${this.drawerWidth}px` : "0px";
     this.drawer.style.setProperty("--drawer-w", `${this.drawerWidth}px`);
+    this.drawerTabIcon.textContent = this.drawerOpen ? "◂" : "▸";
   }
 
   /** Drag the drawer's right edge to resize; width persists per browser. */

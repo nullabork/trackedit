@@ -199,6 +199,30 @@ input[type="number"] { font-family: Consolas, monospace; }
   --drawer-w: 260px;
 }
 .drawer.dragging { transition: none; }
+.drawer-tab {
+  position: absolute;
+  left: 0;
+  top: 96px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 3px 9px;
+  background: var(--bg-2);
+  border: 1px solid var(--stroke);
+  border-left: none;
+  color: var(--ink-0);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.drawer-tab:hover { color: var(--teal); border-color: var(--teal); }
+.drawer-tab-label { writing-mode: vertical-rl; }
+.drawer-tab-icon { font-size: 10px; }
 .drawer .panel { display: flex; flex-direction: column; min-height: 0; flex: 1; width: var(--drawer-w); }
 .drawer-grip {
   position: absolute;

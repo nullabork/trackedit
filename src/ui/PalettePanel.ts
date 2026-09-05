@@ -91,6 +91,12 @@ export function createPalettePanel(ctx: EditorContext): HTMLElement {
     return node;
   };
 
+  // Esc in place mode disarms — clear the row highlight to match.
+  ctx.events.on("blockDisarmed", () => {
+    armed = null;
+    for (const other of list.querySelectorAll(".armed")) other.classList.remove("armed");
+  });
+
   search.addEventListener("input", render);
   render();
 

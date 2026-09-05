@@ -293,6 +293,14 @@ export class PlaceTool implements Tool {
       this.releaseConstraint();
       return true;
     }
+    if (ev.key === "Escape") {
+      // Done placing: disarm and hand over to the select tool.
+      this.armed = null;
+      this.refreshGhost();
+      this.ctx.events.emit("blockDisarmed", {});
+      this.ctx.tools.setActive("select");
+      return true;
+    }
   }
 
   private releaseConstraint(): void {
