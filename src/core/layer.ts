@@ -112,7 +112,7 @@ export function clampTransformToBase(
   const lowest = t.translate[1] + minY;
   if (lowest >= 0) return t;
   return {
-    translate: [t.translate[0], -minY, t.translate[2]],
+    translate: [t.translate[0], -minY || 0, t.translate[2]],
     rotDeg: t.rotDeg,
   };
 }
