@@ -186,3 +186,39 @@ Regenerate with `python tools/build_catalog.py <parsed-maps-dir>`.
 - Multi-select, grouping, gizmo translate/rotate
 - Custom item/block support (embedded assets)
 - Instanced rendering for very large maps
+
+### Inspecting rendering problems
+
+Select a block and click **Frame** in the status bar to move the camera around
+its bounds. Click **Isolate** beside it to show only the selected blocks, then
+**Show all** to restore the other blocks. Isolation only affects the current view;
+it does not change saved layer visibility. The placement ID beside these buttons
+can be copied for repeatable debug views.
+With the editor tab open, the development server also provides:
+
+- `/api/debug/command?action=inspect&uid=p_n_etm1`: world bounds, mesh vertex/UV
+  counts, and material texture URLs, sidedness, and vertical-flip settings.
+- `/api/debug/command?action=focus&uid=p_n_etm1&yaw=112&pitch=-5&distance=42`:
+  frame that placement. Angles are degrees; negative pitch looks down. Omit
+  distance to fit the block to the viewport, including narrow viewports.
+- `/api/debug/screenshot?uid=p_n_etm1&yaw=112&pitch=-5&distance=42&isolate=1`:
+  return a PNG with other placements temporarily hidden. Camera and visibility
+  are restored after capture. Omit `isolate=1` to include surrounding blocks.
+- `/api/debug/screenshot?target=view`: capture the current viewport.
+
+Omit `uid` to use the selection. If multiple editor tabs are open, pass
+`client=<client ID from /api/debug/state>` to target the tab that posted that
+snapshot. Missing selections or placement IDs fail rather than capturing an
+unrelated view. These endpoints are for the Vite development server.
+
+### Validating clip geometry
+
+After changing clip attachment transforms, regenerate the block meshes and run
+`python tools/test_curve_clips.py`. This checks the open ends of flat and
+banked quarter curves against exported clip geometry, and verifies that their
+undersides remain present. Banked cap heights are also checked at both ends
+against the road, catching caps that sit on the right face but face backwards.
+`python tools/diagnose_clips.py air RoadTech` provides
+a broader, heuristic attachment report. GBX east attaches at a unit's `x=0`
+face and west at `x=32`; reversing these can put braces across a curved wall
+while still passing a whole-block bounding-box overlap check.
