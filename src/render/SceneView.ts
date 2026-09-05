@@ -39,8 +39,8 @@ export interface RenderPrefs {
 
 export const DEFAULT_RENDER_PREFS: RenderPrefs = {
   sky: "color",
-  skyColor: "#d8e8f6",
-  lighting: "mood",
+  skyColor: "#fcfcfc",
+  lighting: "flat",
   gridFade: 30,
   gridColor: "#8fb5dc",
 };
