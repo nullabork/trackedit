@@ -28,3 +28,4 @@ jobs:
         with:
           dotnet-version: 8.x
       - run: dotnet build tools/meshdump -c Release
+      - run: dotnet run --project tools/meshdump.tests -c Release

@@ -6,6 +6,7 @@
 //   meshdump probe  <file.pak>                     - check pak readability
 //   meshdump blocks <GameDataRoot> <outDir> [filter]
 //   meshdump items  <GameDataRoot> <outDir> [filter]
+//   meshdump map    <input.Map.Gbx> <output.json>
 //
 // Output layout under <outDir> (the editor's public/meshes):
 //   <BlockName>/{air|ground}.obj       one OBJ per block, usemtl per material
@@ -44,6 +45,24 @@ if (args.Length < 2)
 
 switch (args[0])
 {
+    case "map":
+        if (args.Length != 3)
+        {
+            Console.Error.WriteLine("usage: meshdump map <input.Map.Gbx> <output.json>");
+            return 2;
+        }
+        try
+        {
+            var map = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
+            var json = Trackedit.MapDump.Serialize(map);
+            File.WriteAllText(args[2], json);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"map conversion failed: {ex.Message}");
+            return 1;
+        }
     case "probe":
         return await ProbeAsync(args[1]);
     case "blocks":
