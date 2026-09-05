@@ -24,8 +24,8 @@ FILTER = sys.argv[2] if len(sys.argv) > 2 else None
 FACES = {
     "north": (2, +1, 32.0),
     "south": (2, -1, 0.0),
-    "east": (0, +1, 32.0),
-    "west": (0, -1, 0.0),
+    "east": (0, -1, 0.0),
+    "west": (0, +1, 32.0),
     "top": (1, +1, 8.0),
     "bottom": (1, -1, 0.0),
 }
