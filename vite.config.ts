@@ -6,9 +6,10 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createMapConverter } from "./tools/mapConverter";
 
-/** Machine-local settings (gitignored): the Openplanet folder, and the path
- *  to a gbxdump build from the companion tracko toolchain (TMX import). */
+/** Machine-local settings (gitignored): Openplanet folder and optional
+ *  external gbxdump override. TMX import otherwise uses meshdump's map command. */
 const localCfg = (): { openplanetDir?: string; gbxdump?: string } => {
   try {
     return JSON.parse(readFileSync(join(process.cwd(), ".trackedit.local.json"), "utf-8"));
@@ -23,12 +24,13 @@ const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
 
 /**
  * Dev-server bridge to TrackmaniaExchange: the browser can't call TMX (CORS)
- * or run gbxdump (native exe), but the dev server can do both.
+ * or run the .NET converter, but the dev server can do both.
  *
  *   GET /api/tmx/search?q=name   -> TMX map search JSON
  *   GET /api/tmx/load/:id        -> downloads the map, runs gbxdump, returns dump JSON
  */
 function tmxBridge(): Plugin {
+  const convertMap = createMapConverter(process.cwd());
   return {
     name: "tmx-bridge",
     configureServer(server) {
@@ -51,9 +53,6 @@ function tmxBridge(): Plugin {
           const id = (req.url ?? "").split("/").filter(Boolean).pop();
           if (!id || !/^\d+$/.test(id)) throw new Error("bad map id");
           const GBXDUMP = gbxdumpPath();
-          if (!GBXDUMP)
-            throw new Error(
-              'gbxdump not configured — set TRACKEDIT_GBXDUMP or "gbxdump" in .trackedit.local.json (see README)');
           const upstream = await fetch(`https://trackmania.exchange/maps/download/${id}`, {
             headers: { "User-Agent": "trackedit-dev" },
           });
@@ -62,16 +61,13 @@ function tmxBridge(): Plugin {
           const gbx = join(dir, "map.Map.Gbx");
           const out = join(dir, "map.json");
           await writeFile(gbx, Buffer.from(await upstream.arrayBuffer()));
-          await new Promise<void>((resolve, reject) => {
-            execFile(GBXDUMP, [gbx, out], { timeout: 120_000 }, (err, stdout, stderr) => {
-              if (!err) return resolve();
-              // Keep the map for post-mortem: the temp dir is wiped below.
-              const kept = join(tmpdir(), `trackedit-tmx-failed-${id}.Map.Gbx`);
-              void copyFile(gbx, kept).catch(() => {});
-              const detail = [stderr, stdout].map((s) => s?.toString().trim()).filter(Boolean).join(" | ");
-              reject(new Error(`gbxdump failed: ${detail || err.message} (map kept at ${kept})`));
-            });
-          });
+          try {
+            await convertMap(gbx, out, GBXDUMP);
+          } catch (err) {
+            const kept = join(tmpdir(), `trackedit-tmx-failed-${id}.Map.Gbx`);
+            await copyFile(gbx, kept);
+            throw new Error(`${err instanceof Error ? err.message : String(err)} (map kept at ${kept})`);
+          }
           // Best-effort: pull the map's embedded custom blocks/items into the
           // mesh library so they render (meshdump joins names for us).
           await new Promise<void>((resolve) => {

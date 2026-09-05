@@ -1,8 +1,9 @@
 # trackedit
 
 A web-based Trackmania 2020 map editor: three.js viewport, searchable block
-palette, layers with per-layer grid settings and transforms, and lossless
-import/export to real `.Map.Gbx` via the gbxdump/gbxbuild toolchain.
+palette, layers with per-layer grid settings and transforms, and `.Map.Gbx`
+import through a bundled GBX.NET converter. Export produces placement JSON
+for the separate gbxbuild toolchain.
 
 ## Getting started
 
@@ -41,18 +42,28 @@ commit or redistribute them.
 ## Map pipeline
 
 ```
-.Map.Gbx --(tracko gbxdump)--> map.json --Import--> edit --Export--> placements.json --(tracko gbxbuild)--> .Map.Gbx
+.Map.Gbx --(meshdump map)--> map.json --Import--> edit --Export--> placements.json --(tracko gbxbuild)--> .Map.Gbx
 ```
 
-- `gbxdump` / `gbxbuild` come from the companion **tracko** toolchain (built
-  on [GBX.NET](https://github.com/BigBang1112/gbx-net)) and are not part of
-  this repo. Point the dev server at your `gbxdump` build via the
-  `TRACKEDIT_GBXDUMP` env var or a `"gbxdump"` entry in
-  `.trackedit.local.json`; the editor works without it — only TMX import
-  needs it.
-- Fields the editor doesn't model (flags, variants, waypoints, colors) ride
-  along in `placement.meta` and export unchanged, so editing an existing map
-  never destroys data.
+- TMX import uses the `map` command in [`tools/meshdump`](tools/meshdump), built on
+  [GBX.NET](https://github.com/BigBang1112/gbx-net). The dev server builds it
+  on first import using the .NET 8 SDK (or a newer SDK with the .NET 8 runtime)
+  and runs its managed DLL on Linux, Windows, or macOS. First build needs
+  NuGet access unless packages are already cached. No local configuration
+  is needed. Existing `TRACKEDIT_GBXDUMP` / `.trackedit.local.json` `gbxdump`
+  settings override the bundled converter with an external executable.
+- To convert a local map manually:
+  `dotnet run --project tools/meshdump -c Release -- map input.Map.Gbx output.json`.
+  Run converter contract checks with
+  `dotnet run --project tools/meshdump.tests -c Release`.
+- Writing `.Map.Gbx` still requires `gbxbuild` from the companion **tracko**
+  toolchain; this repo does not include that writer.
+- The converter reads placed blocks and items, including grid/free transforms,
+  flags, variants, colors, waypoint fields, skins, item pivots and scales.
+  Extra placement fields ride along in `placement.meta` and export unchanged.
+  This is not a full archival dump: arbitrary GBX chunks, replay data, and
+  all game-specific metadata are not preserved. Capturing pivot/scale metadata
+  does not add support for those transforms to the renderer.
 - Layers with a non-identity transform (translate/rotate) export as *free
   blocks* — the game grid can't represent them, but the game renders them fine.
 - `npx tsx tools/export_cli.ts <map.json> <out.placements.json>` runs the same
