@@ -35,7 +35,7 @@ export interface RenderPrefs {
 
 export const DEFAULT_RENDER_PREFS: RenderPrefs = {
   sky: "image",
-  skyColor: "#6f9fd8",
+  skyColor: "#d8e8f6",
   lighting: "mood",
 };
 
