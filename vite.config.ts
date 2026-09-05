@@ -545,6 +545,11 @@ function debugBridge(): Plugin {
           id,
           target: q.get("target") ?? "selection",
           uid: q.get("uid") ?? undefined,
+          client: q.get("client") ?? undefined,
+          yaw: q.has("yaw") ? Number(q.get("yaw")) : undefined,
+          pitch: q.has("pitch") ? Number(q.get("pitch")) : undefined,
+          distance: q.has("distance") ? Number(q.get("distance")) : undefined,
+          isolate: q.get("isolate") === "1",
         });
         try {
           const dataUrl = await shot;
@@ -582,6 +587,11 @@ function debugBridge(): Plugin {
           id,
           action: q.get("action") ?? "",
           uid: q.get("uid") ?? undefined,
+          client: q.get("client") ?? undefined,
+          yaw: q.has("yaw") ? Number(q.get("yaw")) : undefined,
+          pitch: q.has("pitch") ? Number(q.get("pitch")) : undefined,
+          distance: q.has("distance") ? Number(q.get("distance")) : undefined,
+          isolate: q.get("isolate") === "1",
         });
         res.setHeader("content-type", "application/json");
         try {

@@ -1,4 +1,5 @@
-import { Box3, Vector3 } from "three";
+import { captureDebugSubject, frameDebugSubject, inspectDebugSubject, type DebugViewOptions } from "@render/debugView";
+import { Vector3 } from "three";
 import type { EditorContext, EditorPlugin } from "./api";
 import type { Layer, Placement } from "@core/layer";
 import { getCurrentId } from "@io/mapStore";
@@ -48,6 +49,7 @@ export const instrumentationPlugin: EditorPlugin = {
   id: "builtin.instrumentation",
   name: "State instrumentation",
   init(ctx: EditorContext): void {
+    const client = crypto.randomUUID();
     let placeMode: "grid" | "free" = "grid";
     ctx.events.on("placeModeChanged", ({ mode }) => (placeMode = mode));
 
@@ -75,6 +77,7 @@ export const instrumentationPlugin: EditorPlugin = {
       const active = doc.activeLayer;
       const cam = ctx.view.camera.position;
       return {
+        client,
         at: new Date().toISOString(),
         map: {
           id: getCurrentId(),
@@ -133,43 +136,13 @@ export const instrumentationPlugin: EditorPlugin = {
     // --- screenshots over the vite dev websocket ---
     // GET /api/debug/screenshot[?target=view|selection][&uid=p-…] on the dev
     // server round-trips through here: frame the subject, render, reply PNG.
-    const capture = (target: string, uid?: string): string => {
-      const cam = ctx.view.camera;
-      if (target !== "view") {
-        const ids = uid ? [uid] : ctx.selection.list.map((e) => e.placementId);
-        const box = new Box3();
-        let found = false;
-        for (const id of ids) {
-          const obj = ctx.renderer.getObject(id);
-          if (obj) {
-            box.expandByObject(obj);
-            found = true;
-          }
-        }
-        if (found) {
-          const center = box.getCenter(new Vector3());
-          const size = box.getSize(new Vector3());
-          const radius = Math.max(size.x, size.y, size.z, 8) * 0.5;
-          const dist = (radius / Math.tan((cam.fov * Math.PI) / 360)) * 1.5;
-          const savedPos = cam.position.clone();
-          const savedQuat = cam.quaternion.clone();
-          cam.position.copy(center).addScaledVector(new Vector3(1, 0.8, 1).normalize(), dist);
-          cam.lookAt(center);
-          const png = ctx.view.captureFrame();
-          cam.position.copy(savedPos);
-          cam.quaternion.copy(savedQuat);
-          ctx.view.captureFrame(); // repaint the user's view, no flash
-          return png;
-        }
-      }
-      return ctx.view.captureFrame();
-    };
     if (import.meta.hot) {
       const hot = import.meta.hot;
-      hot.on("trackedit:capture", (msg: { id: string; target?: string; uid?: string }) => {
+      hot.on("trackedit:capture", (msg: DebugViewOptions & { id: string; target?: string }) => {
+        if (msg.client && msg.client !== client) return;
         let dataUrl = "";
         try {
-          dataUrl = capture(msg.target ?? "selection", msg.uid);
+          dataUrl = captureDebugSubject(ctx, msg.target ?? "selection", msg);
         } catch {
           /* reply empty; server reports the failure */
         }
@@ -177,10 +150,11 @@ export const instrumentationPlugin: EditorPlugin = {
       });
       // Generic command channel: GET /api/debug/command?action=…&uid=… on
       // the dev server lands here; the reply travels back over the ws.
-      hot.on("trackedit:command", (msg: { id: string; action: string; uid?: string }) => {
+      hot.on("trackedit:command", (msg: DebugViewOptions & { id: string; action: string }) => {
+        if (msg.client && msg.client !== client) return;
         let result: Record<string, unknown>;
         try {
-          result = runCommand(msg.action, msg.uid);
+          result = runCommand(msg.action, msg.uid, msg);
         } catch (err) {
           result = { ok: false, error: String(err) };
         }
@@ -188,7 +162,13 @@ export const instrumentationPlugin: EditorPlugin = {
       });
     }
 
-    const runCommand = (action: string, uid?: string): Record<string, unknown> => {
+    const runCommand = (action: string, uid?: string, options: DebugViewOptions = {}): Record<string, unknown> => {
+      if (action === "inspect") return { ok: true, ...inspectDebugSubject(ctx, options) };
+      if (action === "focus") {
+        frameDebugSubject(ctx, options);
+        push();
+        return { ok: true, ...inspectDebugSubject(ctx, options) };
+      }
       if (action === "select") {
         if (!uid) {
           ctx.selection.clear();
@@ -240,7 +220,19 @@ export const instrumentationPlugin: EditorPlugin = {
     const render = () => {
       clear(host);
       const entries = ctx.selection.list;
-      if (entries.length === 0) return;
+      const isolating = ctx.renderer.isIsolating;
+      const isolate = el("button", {
+        class: "uid-copy", title: isolating ? "Exit isolation" : "Show only selected blocks",
+        "aria-pressed": String(isolating),
+      }, isolating ? "Show all" : "Isolate");
+      isolate.addEventListener("click", () => {
+        ctx.renderer.setIsolation(isolating ? null : entries.map(e => e.placementId));
+        render();
+      });
+      if (entries.length === 0) {
+        if (isolating) host.append(isolate);
+        return;
+      }
       const first = ctx.document
         .getLayer(entries[0].layerId)
         ?.placements.get(entries[0].placementId);
@@ -255,10 +247,17 @@ export const instrumentationPlugin: EditorPlugin = {
           .then(() => ctx.ui.setStatus(`Copied ${uid}`))
           .catch(() => ctx.ui.setStatus("Clipboard unavailable"));
       });
+      const focus = el("button", { class: "uid-copy", title: "Frame selected blocks" }, "Frame");
+      focus.addEventListener("click", () => {
+        try { frameDebugSubject(ctx, {}); push(); }
+        catch (err) { ctx.ui.setStatus(String(err)); }
+      });
       host.append(
         el("span", { class: "sel-label" }, entries.length > 1 ? `${label} +${entries.length - 1}` : label),
         el("span", { class: "sel-uid" }, uid),
         copy,
+        focus,
+        isolate,
       );
     };
     ctx.selection.events.on("changed", render);
