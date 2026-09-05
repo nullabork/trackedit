@@ -87,6 +87,24 @@ export class DocumentRenderer {
   /** blockName -> placement ids, so mesh hot-swaps touch only their own. */
   private byBlock = new Map<string, Set<string>>();
   private root = new Group();
+  private isolatedIds: Set<string> | null = null;
+
+  get isIsolating(): boolean { return this.isolatedIds !== null; }
+
+  /** View-only filter: never changes layer visibility or map data. */
+  setIsolation(ids: readonly string[] | null): void {
+    this.isolatedIds = ids?.length ? new Set(ids) : null;
+    if (this.isolatedIds) for (const id of this.isolatedIds) {
+      const info = this.lodInfo.get(id);
+      if (info && this.farSet.has(id)) {
+        const layer = this.doc.getLayer(info.layerId);
+        if (layer) this.promote(id, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
+      }
+    }
+    for (const [id, obj] of this.placementObjects)
+      obj.visible = !this.isolatedIds || this.isolatedIds.has(id);
+    for (const pool of this.pools.values()) pool.visible = !this.isolatedIds;
+  }
 
   // --- LOD state ---
   private largeMap = false;
@@ -125,6 +143,7 @@ export class DocumentRenderer {
       }
     });
     ev.on("reset", () => {
+      this.isolatedIds = null;
       this.lastPalette = doc.colorPalette;
       this.rebuild();
     });
@@ -407,7 +426,7 @@ export class DocumentRenderer {
     if (this.largeMap) {
       const xf = this.layerXf(layer);
       const wp = this.worldOf(info, xf, new Vector3());
-      if (wp.distanceToSquared(this.view.camera.position) > xf.far2) {
+      if (!this.isolatedIds?.has(p.id) && wp.distanceToSquared(this.view.camera.position) > xf.far2) {
         // Far: no Object3D at all — just an entry in the layer's far pool.
         this.geometry.hintPosition?.(p.block, wp.x, wp.y, wp.z);
         this.farSet.add(p.id);
@@ -426,6 +445,7 @@ export class DocumentRenderer {
     if (!group) return;
     const obj = this.buildObject(p, !this.largeMap, layer);
     if (this.wireframeOn) this.addWireframe(obj);
+    obj.visible = !this.isolatedIds || this.isolatedIds.has(p.id);
     obj.userData.placementId = p.id;
     obj.userData.layerId = layer.id;
     obj.userData.blockName = p.block;
@@ -443,6 +463,7 @@ export class DocumentRenderer {
       obj.removeFromParent();
       this.placementObjects.delete(placementId);
     }
+    if (this.isolatedIds?.delete(placementId) && this.isolatedIds.size === 0) this.setIsolation(null);
     const info = this.lodInfo.get(placementId);
     if (info) {
       this.byBlock.get(info.block)?.delete(placementId);
@@ -615,6 +636,10 @@ export class DocumentRenderer {
       let o: Object3D | null = hit.object;
       while (o && !o.userData.placementId) o = o.parent;
       if (o?.userData.placementId) {
+        let visible = true;
+        for (let parent: Object3D | null = o; parent; parent = parent.parent)
+          if (!parent.visible) { visible = false; break; }
+        if (!visible) continue;
         return {
           layerId: o.userData.layerId,
           placementId: o.userData.placementId,
@@ -650,7 +675,7 @@ export class DocumentRenderer {
       const d2 = this.worldOf(info, xf, wp).distanceToSquared(cam);
       if (this.farSet.has(id)) {
         if (d2 < xf.near2) this.promote(id, info, wp);
-      } else if (d2 > xf.far2) {
+      } else if (d2 > xf.far2 && !this.isolatedIds?.has(id)) {
         this.demote(id, info);
       }
     }
@@ -705,6 +730,7 @@ export class DocumentRenderer {
       group.add(pool);
     }
 
+    pool.visible = !this.isolatedIds;
     const m = new Matrix4();
     const q = new Quaternion();
     const e = new Euler();
