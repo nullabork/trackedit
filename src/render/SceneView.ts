@@ -22,6 +22,23 @@ import { applySky } from "./sky";
  * Owns the WebGL canvas, camera rig, lights and the base grid. Knows nothing
  * about the document — DocumentRenderer adds content into `scene`.
  */
+/**
+ * Editor-only render preferences (how the viewport draws, never map data):
+ * skybox as the mood photo or a flat color, lighting as time-of-day mood
+ * (tinted sun + shadows) or flat white (even illumination, no shadows).
+ */
+export interface RenderPrefs {
+  sky: "image" | "color";
+  skyColor: string;
+  lighting: "mood" | "flat";
+}
+
+export const DEFAULT_RENDER_PREFS: RenderPrefs = {
+  sky: "image",
+  skyColor: "#6f9fd8",
+  lighting: "mood",
+};
+
 /** Lighting presets per mood; the matching skybox is painted in sky.ts
  *  (its sun/moon glow uses these sunDir values, keep them in sync). */
 const MOODS_PRESETS: Record<string, { sun: number; sunIntensity: number; sunDir: [number, number, number]; ambient: number; ambientIntensity: number }> = {
@@ -144,22 +161,52 @@ export class SceneView {
   }
 
   private skyToken = 0;
+  private prefs: RenderPrefs = { ...DEFAULT_RENDER_PREFS };
+  private lastMood = "Day";
+  private lastBase: "stadium" | "void" = "stadium";
 
-  /** Mood lighting + the skybox (dimmed for void/no-stadium bases). */
+  getRenderPrefs(): RenderPrefs {
+    return { ...this.prefs };
+  }
+
+  /** Editor-only view preferences; re-applies the current ambience. */
+  setRenderPrefs(prefs: RenderPrefs): void {
+    this.prefs = { ...prefs };
+    this.setAmbience(this.lastMood, this.lastBase);
+  }
+
+  /** Mood lighting + the skybox (dimmed for void/no-stadium bases),
+   *  filtered through the editor render prefs (solid sky / flat light). */
   setAmbience(mood: string, baseType: "stadium" | "void"): void {
+    this.lastMood = mood;
+    this.lastBase = baseType;
     const p = MOODS_PRESETS[mood] ?? MOODS_PRESETS.Day;
     // applySky calls back twice (procedural now, photo when loaded) — the
-    // token drops the late photo if the mood changed again meanwhile.
+    // token drops the late photo if the mood/prefs changed again meanwhile.
     const token = ++this.skyToken;
-    applySky(mood, (tex) => {
-      if (this.skyToken === token) this.scene.background = tex;
-    });
+    if (this.prefs.sky === "color") {
+      this.scene.background = new Color(this.prefs.skyColor);
+    } else {
+      applySky(mood, (tex) => {
+        if (this.skyToken === token) this.scene.background = tex;
+      });
+    }
     this.scene.backgroundIntensity = baseType === "void" ? 0.45 : 1;
-    this.sun.color.set(p.sun);
-    this.sun.intensity = p.sunIntensity;
+    if (this.prefs.lighting === "flat") {
+      // Even white studio light: no mood tint, no shadows.
+      this.sun.color.set(0xffffff);
+      this.sun.intensity = 1.0;
+      this.sun.castShadow = false;
+      this.ambient.color.set(0xffffff);
+      this.ambient.intensity = 1.5;
+    } else {
+      this.sun.color.set(p.sun);
+      this.sun.intensity = p.sunIntensity;
+      this.sun.castShadow = true;
+      this.ambient.color.set(p.ambient);
+      this.ambient.intensity = p.ambientIntensity;
+    }
     this.sun.position.set(...p.sunDir).multiplyScalar(1200);
-    this.ambient.color.set(p.ambient);
-    this.ambient.intensity = p.ambientIntensity;
   }
 
   /** Ray from a pointer event, in normalized device coords. */

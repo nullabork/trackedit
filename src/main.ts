@@ -21,6 +21,7 @@ import { buildToolRail } from "@ui/ToolRail";
 import { buildMenuBar } from "@ui/MenuBar";
 import { openMapBrowser } from "@ui/MapBrowserDialog";
 import { fetchSetupStatus, openSetupDialog, setupIncomplete } from "@ui/SetupDialog";
+import { loadRenderPrefs } from "@ui/RenderSettingsDialog";
 import { applyStored, persistNow, saveCamera, session } from "@ui/session";
 import { applyModBySlug } from "@ui/mods";
 import { getCurrentId, loadMap } from "@io/mapStore";
@@ -66,6 +67,9 @@ async function boot(): Promise<void> {
 
   // Sequence shortcuts (c/t/r/s…) get first refusal on all raw input.
   tools.setInterceptor(new InputEngine(ctx));
+
+  // Editor render prefs (skybox/lighting overrides) persist per machine.
+  view.setRenderPrefs(loadRenderPrefs());
 
   // Map base / mood drive the grid size and viewport ambience.
   const applyMap = () => {

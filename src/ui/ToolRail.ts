@@ -10,6 +10,7 @@ import { exportJsonFlow, importJsonFlow } from "./mapActions";
 import { openModPicker, toggleMod } from "./mods";
 import { mountPaintSwatch } from "./PaintSwatch";
 import { fetchSetupStatus, openSetupDialog } from "./SetupDialog";
+import { openRenderSettings } from "./RenderSettingsDialog";
 import { MOOD_ICONS, baseListEl, moodRowEl } from "./mapFormParts";
 
 function railButton(
@@ -135,11 +136,12 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
   shell.rail.append(modBtn);
   refreshModBtn();
 
-  // Global settings pinned to the rail bottom: game-asset management
-  // (re-import / relocate / wipe — the same dialog as first-run setup,
-  // but closable) and the map settings gear.
+  // Global settings pinned to the rail bottom: render settings (editor
+  // viewport only), game-asset management (re-import / relocate / wipe —
+  // the same dialog as first-run setup, but closable), map settings gear.
   shell.rail.append(
     el("div", { class: "rail-spacer" }),
+    railButton("sliders", "Render settings", null, () => openRenderSettings(ctx)),
     railButton("assets", "Game assets", null, () => {
       void fetchSetupStatus().then((s) => {
         if (s) openSetupDialog(s, { locked: false });

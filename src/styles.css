@@ -601,6 +601,20 @@ input[type="number"] { font-family: Consolas, monospace; }
   color: var(--ink-1);
 }
 
+/* ---- render settings dialog ---- */
+.render-settings { display: flex; flex-direction: column; gap: 10px; }
+.seg-row { display: flex; gap: 0; }
+.seg-btn { flex: 1; }
+.seg-row .seg-btn + .seg-btn { border-left: none; }
+.sky-color-row input[type="color"] {
+  width: 100%;
+  height: 26px;
+  padding: 2px;
+  background: var(--bg-3);
+  border: 1px solid var(--stroke);
+  cursor: pointer;
+}
+
 /* ---- map settings dialog ---- */
 .settings-dialog .field { margin-bottom: 10px; }
 .settings-dialog .input { width: 100%; }
