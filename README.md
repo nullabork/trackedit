@@ -120,6 +120,10 @@ included) and `materials.json`. The editor picks everything up on reload.
 Extracted game assets are Nadeo's copyrighted content — keep them local,
 never commit or redistribute them (`public/meshes/` is gitignored).
 
+The mood skyboxes in `public/sky/` are CC0 sky photographs from
+[Poly Haven](https://polyhaven.com/), baked to 2k equirects by
+`tools/fetch_skies.py`.
+
 ## Controls
 
 - **Left click** — active tool, **P** — place mode (press again to toggle

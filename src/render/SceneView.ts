@@ -16,17 +16,19 @@ import {
 } from "three";
 import { CELL, MAP_SIZE } from "@core/math";
 import { CameraRig } from "./CameraRig";
+import { applySky } from "./sky";
 
 /**
  * Owns the WebGL canvas, camera rig, lights and the base grid. Knows nothing
  * about the document — DocumentRenderer adds content into `scene`.
  */
-/** Lighting/backdrop presets per mood, with a darker take for void bases. */
-const MOODS_PRESETS: Record<string, { bg: number; bgVoid: number; sun: number; sunIntensity: number; sunDir: [number, number, number]; ambient: number; ambientIntensity: number }> = {
-  Day: { bg: 0x1a2129, bgVoid: 0x0d1116, sun: 0xffffff, sunIntensity: 2.2, sunDir: [0.6, 1, 0.35], ambient: 0x8fa3bd, ambientIntensity: 1.1 },
-  Sunrise: { bg: 0x241f2b, bgVoid: 0x120f16, sun: 0xffc9a0, sunIntensity: 1.9, sunDir: [1, 0.35, 0.2], ambient: 0x9a8fb0, ambientIntensity: 0.9 },
-  Sunset: { bg: 0x2a1d22, bgVoid: 0x140e11, sun: 0xff9a66, sunIntensity: 1.8, sunDir: [-1, 0.3, -0.25], ambient: 0xb08f9a, ambientIntensity: 0.9 },
-  Night: { bg: 0x0b1018, bgVoid: 0x06090e, sun: 0x9fb8ff, sunIntensity: 1.0, sunDir: [0.3, 1, 0.5], ambient: 0x3a4a66, ambientIntensity: 0.8 },
+/** Lighting presets per mood; the matching skybox is painted in sky.ts
+ *  (its sun/moon glow uses these sunDir values, keep them in sync). */
+const MOODS_PRESETS: Record<string, { sun: number; sunIntensity: number; sunDir: [number, number, number]; ambient: number; ambientIntensity: number }> = {
+  Day: { sun: 0xffffff, sunIntensity: 2.2, sunDir: [0.6, 1, 0.35], ambient: 0x8fa3bd, ambientIntensity: 1.1 },
+  Sunrise: { sun: 0xffc9a0, sunIntensity: 1.9, sunDir: [1, 0.35, 0.2], ambient: 0x9a8fb0, ambientIntensity: 0.9 },
+  Sunset: { sun: 0xff9a66, sunIntensity: 1.8, sunDir: [-1, 0.3, -0.25], ambient: 0xb08f9a, ambientIntensity: 0.9 },
+  Night: { sun: 0x9fb8ff, sunIntensity: 1.0, sunDir: [0.3, 1, 0.5], ambient: 0x3a4a66, ambientIntensity: 0.8 },
 };
 
 export class SceneView {
@@ -141,10 +143,18 @@ export class SceneView {
     this.scene.add(line);
   }
 
-  /** Mood lighting + a darker backdrop for void (no-stadium) bases. */
+  private skyToken = 0;
+
+  /** Mood lighting + the skybox (dimmed for void/no-stadium bases). */
   setAmbience(mood: string, baseType: "stadium" | "void"): void {
     const p = MOODS_PRESETS[mood] ?? MOODS_PRESETS.Day;
-    this.scene.background = new Color(baseType === "void" ? p.bgVoid : p.bg);
+    // applySky calls back twice (procedural now, photo when loaded) — the
+    // token drops the late photo if the mood changed again meanwhile.
+    const token = ++this.skyToken;
+    applySky(mood, (tex) => {
+      if (this.skyToken === token) this.scene.background = tex;
+    });
+    this.scene.backgroundIntensity = baseType === "void" ? 0.45 : 1;
     this.sun.color.set(p.sun);
     this.sun.intensity = p.sunIntensity;
     this.sun.position.set(...p.sunDir).multiplyScalar(1200);

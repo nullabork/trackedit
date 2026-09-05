@@ -207,6 +207,13 @@ export const instrumentationPlugin: EditorPlugin = {
         renderer.setWireframe?.(uid !== "off");
         return { ok: true, wireframe: uid !== "off" };
       }
+      if (action === "mood") {
+        // uid doubles as the value slot: ?action=mood&uid=Night
+        if (uid !== "Day" && uid !== "Night" && uid !== "Sunrise" && uid !== "Sunset")
+          return { ok: false, error: `bad mood ${uid ?? "(none)"}` };
+        ctx.document.setMood(uid);
+        return { ok: true, mood: uid };
+      }
       return { ok: false, error: `unknown action ${action}` };
     };
 
