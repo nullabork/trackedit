@@ -1,0 +1,6 @@
+[meta]
+name = "Trackedit Extract"
+author = "aaron"
+category = "Utility"
+version = "0.2.0"
+description = "Extracts the game files trackedit's meshdump needs (block/item meshes, materials, textures) to OpenplanetNext/Extract."

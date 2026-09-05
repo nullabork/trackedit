@@ -1,0 +1,10 @@
+node_modules/
+dist/
+public/meshes/
+public/dev/
+maps/
+tools/meshdump/bin/
+tools/meshdump/obj/
+tools/meshdump/missing_files.txt
+tools/meshdump/extract_list.txt
+.trackedit.local.json
