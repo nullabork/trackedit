@@ -80,11 +80,12 @@ export class ToolManager {
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
     // Plain wheel steps the build plane up/down ("how far away we place");
-    // Alt+wheel is the camera's dolly (see CameraRig).
+    // Alt+wheel is the camera's dolly, Ctrl+wheel its world-Y elevator
+    // (both in CameraRig).
     canvas.addEventListener(
       "wheel",
       (e) => {
-        if (e.altKey) return;
+        if (e.altKey || e.ctrlKey) return;
         e.preventDefault();
         this.setBuildLevel(this.buildLevel - Math.sign(e.deltaY));
       },

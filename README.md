@@ -154,7 +154,8 @@ The mood skyboxes in `public/sky/` are CC0 sky photographs from
   - type digits for exact values (`t` `x` `-` `9` `9` → −99 m), Backspace
     edits, Enter confirms
 - **MMB drag** — orbit, **Shift+MMB** — pan, **Alt+scroll** — slide the
-  camera along its view direction
+  camera along its view direction, **Ctrl+scroll** — raise/lower the camera
+  straight up/down (world axis, ignores layer tilt)
 - **Hold RMB** — fly: mouselook + **WASD**, **Space/C** up/down, steady pace
   with **Ctrl** sneak and **Shift** sprint
 

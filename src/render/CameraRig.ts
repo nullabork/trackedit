@@ -6,6 +6,8 @@ import { PerspectiveCamera, Vector3 } from "three";
  * - middle-drag: orbit around the focus point (a point `distance` ahead)
  * - shift+middle-drag: pan
  * - alt+wheel: slide the camera along its view vector (fast dolly)
+ * - ctrl+wheel: raise/lower the camera straight along world Y (global
+ *   ground normal — independent of any layer tilt or view direction)
  * - hold right mouse: fly mode — pointer-locked mouselook (rotates in place,
  *   FPS style), WASD to move, Space/C up/down, steady medium pace with
  *   Ctrl as sneak (slow) and Shift as sprint
@@ -106,6 +108,14 @@ export class CameraRig {
       "wheel",
       (e) => {
         if (this.suspended) return;
+        if (e.ctrlKey) {
+          // Straight world-Y elevator (also blocks the browser's ctrl+wheel
+          // page zoom). Scroll up = rise.
+          e.preventDefault();
+          const step = Math.max(24, this.distance * 0.1);
+          this.pos.y -= Math.sign(e.deltaY) * step;
+          return;
+        }
         if (!e.altKey) return; // plain wheel belongs to the tools layer
         e.preventDefault();
         const step = Math.max(48, this.distance * 0.2);
