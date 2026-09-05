@@ -28,6 +28,7 @@ export const ICONS: Record<string, string> = {
   brush: '<path d="M10 2l4 4-6 6-4-4zM4 8l-1.5 4.5L7 11"/>',
   spinner: '<path d="M8 2a6 6 0 1 1-6 6"/>',
   assets: '<path d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7z"/><path d="M2.5 4.5L8 7.5l5.5-3M8 7.5V14"/>',
+  sliders: '<path d="M2 4.5h6M11 4.5h3M2 11.5h3M8 11.5h6"/><circle cx="9.5" cy="4.5" r="1.6"/><circle cx="6.5" cy="11.5" r="1.6"/>',
 };
 
 export function icon(name: string): HTMLElement {

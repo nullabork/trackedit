@@ -214,6 +214,22 @@ export const instrumentationPlugin: EditorPlugin = {
         ctx.document.setMood(uid);
         return { ok: true, mood: uid };
       }
+      if (action === "render") {
+        // uid: "sky:image" | "sky:color[:#rrggbb]" | "light:mood" | "light:flat"
+        // (live-only test hook; the dialog is what persists prefs)
+        const [what, value, extra] = (uid ?? "").split(":");
+        const prefs = ctx.view.getRenderPrefs();
+        if (what === "sky" && (value === "image" || value === "color")) {
+          prefs.sky = value;
+          if (extra) prefs.skyColor = extra;
+        } else if (what === "light" && (value === "mood" || value === "flat")) {
+          prefs.lighting = value;
+        } else {
+          return { ok: false, error: `bad render arg ${uid ?? "(none)"}` };
+        }
+        ctx.view.setRenderPrefs(prefs);
+        return { ok: true, prefs: { ...prefs } };
+      }
       return { ok: false, error: `unknown action ${action}` };
     };
 
