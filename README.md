@@ -8,7 +8,8 @@ import/export to real `.Map.Gbx` via the gbxdump/gbxbuild toolchain.
 
 The repo ships **no game assets** — block meshes and textures are Nadeo's
 content, so you extract them once from your own TM2020 install. You need:
-Trackmania 2020, [Openplanet](https://openplanet.dev/), Node 20+, and the
+Trackmania 2020, [Openplanet](https://openplanet.dev/), Node 22+ (there's a
+`mise.toml` if you use [mise](https://mise.jdx.dev/)), and the
 [.NET 8 SDK](https://dotnet.microsoft.com/) (for the converter).
 
 ```
