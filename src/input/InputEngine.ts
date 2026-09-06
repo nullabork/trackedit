@@ -1,3 +1,4 @@
+import { frameDebugSubject } from "@render/debugView";
 import type { EditorContext } from "@plugins/api";
 import type { Operator } from "./Operator";
 import type { AxisName } from "./frames";
@@ -16,7 +17,12 @@ export class InputEngine {
   private prefix: string[] = [];
   private op: Operator | null = null;
 
-  constructor(private ctx: EditorContext) {}
+  constructor(private ctx: EditorContext) {
+    ctx.view.rig.controls.events.on("changed", () => {
+      this.finish(false);
+      this.clearPrefix();
+    });
+  }
 
   get modal(): boolean {
     return this.op !== null;
@@ -27,6 +33,7 @@ export class InputEngine {
     if (this.op) {
       if (e.key === "Enter") return this.finish(true), true;
       if (e.key === "Escape") return this.finish(false), true;
+      if (e.ctrlKey || e.metaKey || e.altKey) return true;
       if (this.op.onKey(e)) {
         this.refreshHud();
         return true;
@@ -34,6 +41,14 @@ export class InputEngine {
       return true; // modal swallows everything else
     }
 
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+    const controls = this.ctx.view.rig.controls;
+    if ((controls.id === "blender" && e.code === "NumpadDecimal") ||
+        (controls.id === "plasticity" && e.key === "/")) {
+      try { frameDebugSubject(this.ctx, {}); }
+      catch { this.ctx.ui.setStatus("Select a block to frame it"); }
+      return true;
+    }
     const k = e.key.toLowerCase();
     if (this.prefix.length === 0) {
       if (k === "c") {
@@ -41,8 +56,10 @@ export class InputEngine {
         this.showPrefixHud();
         return true;
       }
-      if (k === "t" || k === "r") {
-        this.startTransform(k === "t" ? "translate" : "rotate");
+      if (k === controls.scheme.translate || k === "r") {
+        // Armed block rotation belongs to the placement tool.
+        if (k === "r" && this.ctx.tools.activeTool?.id === "place") return false;
+        this.startTransform(k === controls.scheme.translate ? "translate" : "rotate");
         return true;
       }
       // Tool shortcuts. `s` stays free for WASD flying (S = backward).
@@ -83,7 +100,7 @@ export class InputEngine {
   handlePointerDown(e: PointerEvent): boolean {
     if (this.op) {
       if (e.button === 0) this.finish(true);
-      else if (e.button === 2) this.finish(false);
+      else if (e.button === 2) this.finish(this.ctx.view.rig.controls.id === "plasticity");
       return true;
     }
     if (this.prefix.length > 0) this.clearPrefix();
@@ -111,6 +128,7 @@ export class InputEngine {
   private start(op: Operator): void {
     this.prefix = [];
     this.op = op;
+    this.ctx.view.rig.resetInput();
     this.ctx.view.rig.suspended = true;
     this.refreshHud();
   }

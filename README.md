@@ -137,6 +137,34 @@ The mood skyboxes in `public/sky/` are CC0 sky photographs from
 
 ## Controls
 
+Open **Controls** in the top menu to choose **Trackedit** (the existing
+default), **Blender**, or **Plasticity**. Changes apply immediately and are
+remembered in this browser across maps and reloads. The dialog shows the
+active shortcuts.
+
+| Action | Trackedit | Blender | Plasticity |
+| --- | --- | --- | --- |
+| Orbit | MMB drag | MMB drag | MMB drag |
+| Pan | Shift+MMB | Shift+MMB | RMB or Shift+MMB |
+| Zoom | Alt+wheel (dolly) | Wheel or Ctrl+MMB | Wheel or Ctrl+MMB |
+| Build height | Wheel | Alt+wheel | Alt+wheel |
+| Move / rotate | T / R | G / R | G / R |
+| Frame selection | Frame button | Numpad . | / |
+| Fly mode | F or hold RMB | Shift+backtick | Shift+backtick |
+| Confirm transform | Enter / left click | Enter / left click | Enter / left or right click |
+| Cancel transform | Esc / right click | Esc / right click | Esc |
+
+Blender and Plasticity use WASD + Space/C only in fly mode. Esc, the fly
+shortcut, or a click exits toggled flight. P (place/grid ↔ free), E (select),
+Delete, and Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z remain editor shortcuts. X also
+deletes in the select tool with either modeling preset. Presets cover
+navigation and supported transforms; scaling and mesh-editing commands
+are not implemented. Reference mappings:
+[Blender navigation](https://docs.blender.org/manual/en/4.3/editors/3dview/navigate/navigation.html)
+and [Plasticity keymap](https://github.com/nkallen/plasticity/blob/master/src/startup/default-keymap.ts).
+
+The following describes the default **Trackedit** scheme:
+
 - **Left click** — active tool, **P** — place mode (press again to toggle
   **grid ↔ free** placement; free places anywhere on the layer plane at the
   build height), **E** — select mode

@@ -790,3 +790,7 @@ input[type="number"] { font-family: Consolas, monospace; }
 .mod-row:hover { border-color: var(--accent, #14d0a4); }
 .status-actions .tbtn { width: 24px; height: 20px; }
 .status-actions .tbtn svg { width: 13px; height: 13px; }
+.control-reference { width: 100%; border-collapse: collapse; font-size: 12px; }
+.control-reference th, .control-reference td { padding: 4px; border-bottom: 1px solid var(--stroke); text-align: left; }
+.control-reference th { color: var(--ink-1); font-weight: 400; }
+.control-reference td { color: var(--ink-0); }

@@ -11,7 +11,9 @@ import type { Tool, ToolPointerEvent } from "./Tool";
 export class SelectTool implements Tool {
   readonly id = "select";
   readonly label = "Select";
-  readonly hint = "Click: select · Del: delete · T/R: move/rotate (modal)";
+  get hint(): string {
+    return `Click: select · Del: delete · ${this.ctx.view.rig.controls.scheme.translate.toUpperCase()}/R: move/rotate (modal)`;
+  }
 
   private outlines: Box3Helper[] = [];
 
@@ -40,7 +42,7 @@ export class SelectTool implements Tool {
       ]);
       const layer = this.ctx.document.getLayer(ev.pick.layerId);
       const p = layer?.placements.get(ev.pick.placementId);
-      this.ctx.ui.setStatus(p ? `Selected ${p.block} — T translate, R rotate, Del delete` : "");
+      this.ctx.ui.setStatus(p ? `Selected ${p.block} — ${this.ctx.view.rig.controls.scheme.translate.toUpperCase()} translate, R rotate, Del delete` : "");
     } else {
       this.ctx.selection.clear();
     }
@@ -48,7 +50,8 @@ export class SelectTool implements Tool {
 
   onKeyDown(ev: KeyboardEvent): boolean | void {
     if (this.ctx.selection.isEmpty) return;
-    if (ev.key === "Delete" || ev.key === "Backspace") {
+    if (ev.key === "Delete" || ev.key === "Backspace" ||
+        (this.ctx.view.rig.controls.id !== "trackedit" && ev.key.toLowerCase() === "x")) {
       const cmds: Command[] = this.ctx.selection.list.map(
         (e) => new RemovePlacementCmd(e.layerId, e.placementId, "Delete selection"),
       );

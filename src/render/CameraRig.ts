@@ -1,21 +1,13 @@
 import { PerspectiveCamera, Vector3 } from "three";
 
-/**
- * Blender-ish camera controls plus free-fly:
- *
- * - middle-drag: orbit around the focus point (a point `distance` ahead)
- * - shift+middle-drag: pan
- * - alt+wheel: slide the camera along its view vector (fast dolly)
- * - ctrl+wheel: raise/lower the camera straight along world Y (global
- *   ground normal — independent of any layer tilt or view direction)
- * - hold right mouse: fly mode — pointer-locked mouselook (rotates in place,
- *   FPS style), WASD to move, Space/C up/down, steady medium pace with
- *   Ctrl as sneak (slow) and Shift as sprint
- *
- * Plain wheel is deliberately left to the tools layer (build level), and the
- * left button always belongs to the editor tools.
- */
+import { ControlPreferences, blocksEditorInput, dragAction, wheelAction } from "@input/ControlScheme";
+
+/** Camera navigation driven by the active control preset. */
 export class CameraRig {
+  readonly controls = new ControlPreferences();
+  private zooming = false;
+  private dragButton: number | null = null;
+
   /** True while right-mouse fly mode is engaged; tools ignore keys then. */
   isFlying = false;
   /** Set while a modal operator owns the mouse — rig ignores its own inputs. */
@@ -30,7 +22,7 @@ export class CameraRig {
   private keys = new Set<string>();
   private panning = false;
   private orbiting = false;
-  /** Fly entered via the F toggle (no RMB held) — exits on F or any click. */
+  /** Fly entered via a keyboard toggle; a click lands it. */
   private toggledFly = false;
   /** RMB is down but fly hasn't engaged yet (waits for actual movement). */
   private rmbPending: { x: number; y: number } | null = null;
@@ -39,28 +31,32 @@ export class CameraRig {
     private camera: PerspectiveCamera,
     private dom: HTMLElement,
   ) {
+    this.controls.events.on("changed", () => this.resetInput());
     dom.addEventListener("pointerdown", (e) => {
       if (this.suspended) return;
       if (this.toggledFly) {
         // Any click lands the toggled fly.
         e.preventDefault();
         this.toggleFly();
+        e.stopImmediatePropagation();
         return;
       }
-      if (e.button === 1) {
+      const action = dragAction(this.controls.id, e);
+      if (action === "fly") {
         e.preventDefault();
-        if (e.shiftKey) this.panning = true;
-        else this.orbiting = true;
-        dom.setPointerCapture(e.pointerId);
-      } else if (e.button === 2) {
-        e.preventDefault();
-        // Don't engage fly yet: a quick right CLICK belongs to the active
-        // tool (e.g. rotate-while-placing). Fly starts on actual movement.
         this.rmbPending = { x: e.clientX, y: e.clientY };
+      } else if (action) {
+        e.preventDefault();
+        this.dragButton = e.button;
+        this.panning = action === "pan";
+        this.orbiting = action === "orbit";
+        this.zooming = action === "zoom";
+        dom.setPointerCapture(e.pointerId);
       }
     });
 
     dom.addEventListener("pointermove", (e) => {
+      if (this.suspended) return;
       if (this.rmbPending && !this.isFlying && !this.suspended) {
         const moved = Math.hypot(e.clientX - this.rmbPending.x, e.clientY - this.rmbPending.y);
         if (moved > 4) {
@@ -78,6 +74,8 @@ export class CameraRig {
         this.yaw -= e.movementX * 0.005;
         this.addPitch(-e.movementY * 0.005);
         this.pos.copy(focus).addScaledVector(this.forwardVec(), -this.distance);
+      } else if (this.zooming) {
+        this.zoom(e.movementY * 0.01);
       } else if (this.panning) {
         const scale = this.distance * 0.0012;
         this.pos.addScaledVector(this.rightVec(), -e.movementX * scale);
@@ -86,7 +84,10 @@ export class CameraRig {
     });
 
     const stop = (e: PointerEvent) => {
-      if (e.button === 1) this.panning = this.orbiting = false;
+      if (e.button === this.dragButton) {
+        this.panning = this.orbiting = this.zooming = false;
+        this.dragButton = null;
+      }
       if (e.button === 2) {
         this.rmbPending = null;
         if (this.isFlying && !this.toggledFly) {
@@ -96,7 +97,11 @@ export class CameraRig {
       }
     };
     dom.addEventListener("pointerup", stop);
-    dom.addEventListener("pointercancel", stop);
+    dom.addEventListener("pointercancel", () => this.resetInput());
+    dom.addEventListener("lostpointercapture", () => {
+      this.panning = this.orbiting = this.zooming = false;
+      this.dragButton = null;
+    });
     document.addEventListener("pointerlockchange", () => {
       if (!document.pointerLockElement && this.isFlying) {
         this.isFlying = false;
@@ -108,7 +113,14 @@ export class CameraRig {
       "wheel",
       (e) => {
         if (this.suspended) return;
-        if (e.ctrlKey) {
+        const action = wheelAction(this.controls.id, e);
+        if (action === "height") return;
+        e.preventDefault();
+        if (action === "zoom") {
+          this.zoom(Math.sign(e.deltaY) * 0.15);
+          return;
+        }
+        if (action === "elevate") {
           // Straight world-Y elevator (also blocks the browser's ctrl+wheel
           // page zoom). Scroll up = rise.
           e.preventDefault();
@@ -116,7 +128,6 @@ export class CameraRig {
           this.pos.y -= Math.sign(e.deltaY) * step;
           return;
         }
-        if (!e.altKey) return; // plain wheel belongs to the tools layer
         e.preventDefault();
         const step = Math.max(48, this.distance * 0.2);
         this.pos.addScaledVector(this.forwardVec(), -Math.sign(e.deltaY) * step);
@@ -124,16 +135,32 @@ export class CameraRig {
       { passive: false },
     );
 
-    const typing = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      return !!t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA");
-    };
     window.addEventListener("keydown", (e) => {
-      if (!typing(e)) this.keys.add(e.code);
+      if (!blocksEditorInput(e.target)) this.keys.add(e.code);
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
-    window.addEventListener("blur", () => this.keys.clear());
+    window.addEventListener("blur", () => this.resetInput());
     document.addEventListener("focusin", () => this.keys.clear());
+  }
+
+  get isNavigating(): boolean {
+    return this.isFlying || this.dragButton !== null;
+  }
+
+  resetInput(): void {
+    this.keys.clear();
+    this.panning = this.orbiting = this.zooming = false;
+    this.dragButton = null;
+    this.rmbPending = null;
+    this.isFlying = this.toggledFly = false;
+    if (document.pointerLockElement === this.dom) document.exitPointerLock();
+  }
+
+  /** Dolly towards a fixed orbit pivot, without passing through it. */
+  private zoom(amount: number): void {
+    const next = Math.min(100000, Math.max(1, this.distance * Math.exp(amount)));
+    this.pos.addScaledVector(this.forwardVec(), this.distance - next);
+    this.distance = next;
   }
 
   /** Snapshot of the camera position, for modal camera moves. */
@@ -167,7 +194,7 @@ export class CameraRig {
     if (s.distance) this.distance = s.distance;
   }
 
-  /** Hands-free fly (F): mouselook + WASD without holding RMB; F or a click exits. */
+  /** Toggle mouselook and WASD flight using the preset shortcut. */
   toggleFly(): void {
     if (this.isFlying) {
       this.isFlying = false;
@@ -194,9 +221,8 @@ export class CameraRig {
 
   /** Advance fly movement and write the camera transform. Call once per frame. */
   update(dt: number): void {
-    // Flight movement keys are ALWAYS live (nothing else binds WASD/Space/C);
-    // only mouselook needs fly mode (F toggle or RMB hold).
-    if (!this.suspended) {
+    if (!this.suspended && !blocksEditorInput(document.activeElement) &&
+        (this.isFlying || this.controls.scheme.alwaysMove)) {
       // Steady medium pace; Ctrl sneaks, Shift sprints.
       const pace = this.ctrl() ? 0.2 : this.shift() ? 3 : 1;
       const speed = this.flySpeed * pace * dt;
