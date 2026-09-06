@@ -126,7 +126,7 @@ export class TransformOperator implements Operator {
   // --- HUD ---
 
   hud(): Array<[string, string]> {
-    const letters: string[] = [this.mode === "translate" ? "T" : "R"];
+    const letters: string[] = [this.mode === "translate" ? this.ctx.view.rig.controls.scheme.translate.toUpperCase() : "R"];
     const words: string[] = [this.mode === "translate" ? "Translate" : "Rotate"];
     if (this.onLayers) {
       letters.push("L");

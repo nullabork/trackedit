@@ -49,6 +49,10 @@ export class PlaceTool implements Tool {
   private lastPaintKey: string | null = null;
 
   constructor(private ctx: EditorContext) {
+    ctx.view.rig.controls.events.on("changed", () => {
+      this.releaseConstraint();
+      this.endStroke();
+    });
     ctx.events.on("blockArmed", ({ name }) => {
       this.armed = name;
       this.refreshGhost();
@@ -71,9 +75,11 @@ export class PlaceTool implements Tool {
   }
 
   get hint(): string {
+    const height = this.ctx.view.rig.controls.scheme.height.toLowerCase();
+    const rotate = this.ctx.view.rig.controls.id === "plasticity" ? "R rotate" : "R/right-click rotate";
     return this.modeState === "grid"
-      ? "Grid place · click/drag paints · X/Y/Z constrain · R/right-click rotate · scroll height · P free mode"
-      : "Free place · click places on the plane · X/Y/Z constrain · R/right-click rotate · scroll height · P grid mode";
+      ? `Grid place · click/drag paints · X/Y/Z constrain · ${rotate} · ${height} height · P free mode`
+      : `Free place · click places on the plane · X/Y/Z constrain · ${rotate} · ${height} height · P grid mode`;
   }
 
   setMode(mode: PlaceMode): void {
