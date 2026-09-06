@@ -11,7 +11,9 @@ import type { Tool, ToolPointerEvent } from "./Tool";
 export class SelectTool implements Tool {
   readonly id = "select";
   readonly label = "Select";
-  readonly hint = "Click: select · Shift+click: add/remove · Del: delete · T/R: move/rotate";
+  get hint(): string {
+    return `Click: select · Shift+click: add/remove · Del: delete · ${this.ctx.view.rig.controls.scheme.translate.toUpperCase()}/R: move/rotate (modal)`;
+  }
 
   private outlines: Box3Helper[] = [];
 
@@ -41,20 +43,22 @@ export class SelectTool implements Tool {
       // click by click; a plain click starts over with just this one.
       if (additive) this.ctx.selection.toggle(entry);
       else this.ctx.selection.set([entry]);
-      const layer = this.ctx.document.getLayer(ev.pick.layerId);
-      const p = layer?.placements.get(ev.pick.placementId);
-      const n = this.ctx.selection.list.length;
-      this.ctx.ui.setStatus(
-        n > 1 ? `${n} selected — T translate, R rotate, Del delete` :
-        p ? `Selected ${p.block} — T translate, R rotate, Del delete` : "");
     } else if (!additive) {
       this.ctx.selection.clear();
     }
+    const entries = this.ctx.selection.list;
+    const entry = entries[0];
+    const p = entry && this.ctx.document.getLayer(entry.layerId)?.placements.get(entry.placementId);
+    const shortcuts = `${this.ctx.view.rig.controls.scheme.translate.toUpperCase()} translate, R rotate, Del delete`;
+    this.ctx.ui.setStatus(
+      entries.length > 1 ? `${entries.length} selected — ${shortcuts}` :
+      p ? `Selected ${p.block} — ${shortcuts}` : "");
   }
 
   onKeyDown(ev: KeyboardEvent): boolean | void {
     if (this.ctx.selection.isEmpty) return;
-    if (ev.key === "Delete" || ev.key === "Backspace") {
+    if (ev.key === "Delete" || ev.key === "Backspace" ||
+        (this.ctx.view.rig.controls.id !== "trackedit" && ev.key.toLowerCase() === "x")) {
       const cmds: Command[] = this.ctx.selection.list.map(
         (e) => new RemovePlacementCmd(e.layerId, e.placementId, "Delete selection"),
       );

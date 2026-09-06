@@ -1,3 +1,4 @@
+import { blocksEditorInput, dragAction, flyShortcut, wheelAction } from "@input/ControlScheme";
 import { Emitter } from "@core/events";
 import type { MapDocument } from "@core/document";
 import { clampCoord } from "@core/math";
@@ -35,7 +36,7 @@ export class ToolManager {
   private interceptor: InputInterceptor | null = null;
   private lastPointer: PointerEvent | null = null;
   private rightDownAt: { t: number; moved: number } | null = null;
-  /** Current build Y level in cells; Q/E move it. */
+  /** Current build Y level in cells. */
   buildLevel = 0;
 
   setInterceptor(i: InputInterceptor): void {
@@ -51,6 +52,7 @@ export class ToolManager {
     canvas.addEventListener("pointerdown", (e) => {
       if (view.rig.isFlying) return; // clicks land the fly, never place blocks
       if (this.interceptor?.handlePointerDown(e)) return;
+      if (view.rig.isNavigating || (!view.rig.suspended && dragAction(view.rig.controls.id, e) === "pan")) return;
       if (e.button === 0) this.active?.onPointerDown?.(this.enrich(e));
       else if (e.button === 2) {
         this.rightDownAt = { t: performance.now(), moved: 0 };
@@ -61,7 +63,7 @@ export class ToolManager {
       this.lastPointer = e;
       if (this.rightDownAt)
         this.rightDownAt.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
-      if (view.rig.isFlying) return;
+      if (view.rig.isNavigating) return;
       if (this.interceptor?.handlePointerMove(e)) return;
       this.active?.onPointerMove?.(this.enrich(e));
     });
@@ -77,15 +79,15 @@ export class ToolManager {
           this.active?.onRightClick?.(this.enrich(e));
       }
     });
+    canvas.addEventListener("pointercancel", () => { this.rightDownAt = null; });
+    view.rig.controls.events.on("changed", () => { this.rightDownAt = null; });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-    // Plain wheel steps the build plane up/down ("how far away we place");
-    // Alt+wheel is the camera's dolly, Ctrl+wheel its world-Y elevator
-    // (both in CameraRig).
+    // Resolve wheel ownership from the same preset as CameraRig.
     canvas.addEventListener(
       "wheel",
       (e) => {
-        if (e.altKey || e.ctrlKey) return;
+        if (view.rig.suspended || view.rig.isFlying || wheelAction(view.rig.controls.id, e) !== "height") return;
         e.preventDefault();
         this.setBuildLevel(this.buildLevel - Math.sign(e.deltaY));
       },
@@ -93,25 +95,28 @@ export class ToolManager {
     );
 
     window.addEventListener("keydown", (e) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA"))
-        return;
-      // While flying, WASD/Space/C belong to the camera — except F, which exits.
+      if (blocksEditorInput(e.target)) return;
       if (view.rig.isFlying) {
-        if (e.key === "f" || e.key === "F") view.rig.toggleFly();
+        if ((!e.repeat && flyShortcut(view.rig.controls.id, e)) || e.key === "Escape") {
+          e.preventDefault();
+          view.rig.resetInput();
+        }
         return;
       }
       if (this.interceptor?.handleKey(e)) {
         // A consumed key must not double as flight input (`c` = sequence
         // prefix AND descend).
+        e.preventDefault();
         view.rig.clearKey(e.code);
         return;
       }
-      if (e.key === "f" || e.key === "F") {
+      if (flyShortcut(view.rig.controls.id, e) && !e.repeat) {
+        e.preventDefault();
         view.rig.toggleFly();
         return;
       }
-      this.active?.onKeyDown?.(e);
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (this.active?.onKeyDown?.(e)) e.preventDefault();
     });
   }
 

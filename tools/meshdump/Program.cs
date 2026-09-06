@@ -613,7 +613,7 @@ public static class TerrainModifiers
     /// <summary>"…/NoBrake.TerrainModifier .Gbx" -> "NoBrake" (the folder name).</summary>
     public static string TagFromFileName(string path)
     {
-        var name = Path.GetFileName(path);
+        var name = Path.GetFileName(path.Replace('\\', '/'));
         var dot = name.IndexOf('.');
         return (dot > 0 ? name[..dot] : name).Trim();
     }

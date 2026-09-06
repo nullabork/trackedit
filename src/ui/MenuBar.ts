@@ -3,6 +3,7 @@ import { clear, el } from "./dom";
 import { cloneFlow, exportJsonFlow, importJsonFlow, newMapGuarded } from "./mapActions";
 import { openMapBrowser } from "./MapBrowserDialog";
 import { openTmxDialog } from "./TmxDialog";
+import { openControlSettings } from "./ControlSettingsDialog";
 
 interface MenuEntry {
   label: string;
@@ -78,6 +79,7 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
   host.append(
     el("span", { class: "menu-brand" }, "trackedit"),
     menuButton("File", fileEntries),
+    el("button", { class: "menu-btn", onclick: () => openControlSettings(ctx) }, "Controls"),
     el("span", { class: "menu-spacer" }),
     title,
   );
