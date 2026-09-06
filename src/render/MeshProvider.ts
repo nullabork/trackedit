@@ -1,4 +1,5 @@
 import {
+  AdditiveBlending,
   CanvasTexture,
   DoubleSide,
   Mesh,
@@ -64,7 +65,16 @@ interface MeshIndex {
 
 type MaterialIndex = Record<
   string,
-  { texture: string | null; color?: string; colorable?: boolean; hueMask?: string }
+  {
+    texture: string | null;
+    color?: string;
+    colorable?: boolean;
+    hueMask?: string;
+    /** Decal shader: an alpha layer drawn ON another surface (coplanar). */
+    decal?: boolean;
+    /** "add" = additive glow strip (the game's TAdd shaders). */
+    blend?: "add";
+  }
 >;
 
 export type MeshVariant = "air" | "ground";
@@ -158,6 +168,29 @@ export class MeshProvider implements GeometryProvider {
     if (!mat) {
       if (flat) {
         mat = new MeshLambertMaterial({ color: flat, side: DoubleSide });
+      } else if (texture && entry?.blend === "add") {
+        // Glow strips (turbo/boost FX): additive, never occlude anything.
+        mat = new MeshLambertMaterial({
+          map: this.loadTexture(this.baseUrl + texture),
+          transparent: true,
+          blending: AdditiveBlending,
+          depthWrite: false,
+          side: DoubleSide,
+        });
+      } else if (texture && entry?.decal) {
+        // Decals sit exactly ON the surface they mark (the game's decal
+        // shaders depth-bias them). Without the offset the two coplanar
+        // layers z-fight: half the top face shows the base, half the decal.
+        mat = new MeshLambertMaterial({
+          map: this.loadTexture(this.baseUrl + texture),
+          transparent: true,
+          alphaTest: 0.02,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -4,
+          side: DoubleSide,
+        });
       } else if (texture) {
         const map = this.loadTexture(this.baseUrl + texture);
         // alphaTest handles cut-out textures (fences, grates) without sorting.

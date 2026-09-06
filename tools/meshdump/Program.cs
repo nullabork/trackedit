@@ -74,6 +74,15 @@ switch (args[0])
         }
         var dumper = new Dumper(args[1], args[2], args.Length > 3 ? args[3] : null);
         return args[0] == "blocks" ? dumper.DumpBlocks() : dumper.DumpItems();
+    case "clipinfo":
+        // meshdump clipinfo <GameDataRoot> <ClipId> — raw (unplaced) bounds of a
+        // clip's geometry per variant, for checking attachment conventions.
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("usage: meshdump clipinfo <GameDataRoot> <ClipId>");
+            return 1;
+        }
+        return new Dumper(args[1], Path.GetTempPath(), null).ClipInfo(args[2]);
     case "embedded":
         {
             // Extract a map's embedded custom blocks/items into the editor's
@@ -185,7 +194,8 @@ switch (args[0])
                                 if (ent.Model is CPlugStaticObjectModel { Mesh.Materials: { } mm })
                                     mats += " " + string.Join(",", mm.Select(x =>
                                         Path.GetFileNameWithoutExtension(x.File?.FilePath ?? "?")));
-                        Console.WriteLine($"  [{a}][{b}] {solid} {prefab}{mats}");
+                        var file = mob?.PrefabFidFile?.FilePath ?? mob?.SolidFidFile?.FilePath ?? "";
+                        Console.WriteLine($"  [{a}][{b}] {solid} {prefab} {Path.GetFileName(file)}{mats}");
                     }
             }
             Dump("air", bi.VariantBaseAir);
@@ -577,6 +587,67 @@ sealed class EmbeddedDumper(string outDir)
     }
 }
 
+/// <summary>Pure helpers for the terrain-modifier files (kept free of game
+/// data so the contract tests can cover them).</summary>
+public static class TerrainModifiers
+{
+    /// <summary>"Media\Material\DecalSpecialTurbo.Material.Gbx" -> "DecalSpecialTurbo".</summary>
+    public static string Stem(string pathOrId)
+    {
+        var name = Path.GetFileName(pathOrId.Replace('\\', '/'));
+        foreach (var suffix in new[] { ".Material.Gbx", ".Material.gbx", ".gbx", ".Gbx" })
+            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return name[..^suffix.Length];
+        return name;
+    }
+
+    /// <summary>The modifier folder a material path lives in, or null:
+    /// "Media\Modifier\PlatformDirt\PlatformTech.Material.Gbx" -> "PlatformDirt".</summary>
+    public static string? ModifierFolder(string pathOrId)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            pathOrId, @"(?:^|[\\/])Modifier[\\/]([A-Za-z0-9_ ]+)[\\/][^\\/]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value.Trim() : null;
+    }
+
+    /// <summary>"…/NoBrake.TerrainModifier .Gbx" -> "NoBrake" (the folder name).</summary>
+    public static string TagFromFileName(string path)
+    {
+        var name = Path.GetFileName(path.Replace('\\', '/'));
+        var dot = name.IndexOf('.');
+        return (dot > 0 ? name[..dot] : name).Trim();
+    }
+
+    /// <summary>Reads the game-skin name and modifier folder out of a
+    /// decompressed CPlugGameSkinAndFolder body, e.g. "Specials" and
+    /// "Fragile" from "…Specials.GameSkin.gbx…Media\Modifier\Fragile\\".</summary>
+    public static (string? Skin, string? Folder) ParseBody(string body)
+    {
+        var skin = System.Text.RegularExpressions.Regex.Match(body, @"([A-Za-z0-9_]+)\.GameSkin\.gbx", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var folder = System.Text.RegularExpressions.Regex.Match(body, @"Modifier[\\/]([A-Za-z0-9_ ]+)[\\/]");
+        return (skin.Success ? skin.Groups[1].Value : null,
+                folder.Success ? folder.Groups[1].Value.Trim() : null);
+    }
+
+    /// <summary>Slot entries of a decompressed CPlugGameSkin body: each slot
+    /// name is followed (after a 4-byte length prefix) by the material path it
+    /// normally uses, e.g. "TrackWall" then "Stadium\Media\Material\TrackWall.Material.Gbx".
+    /// Header and body repeat the list; duplicates are dropped.</summary>
+    public static List<(string Slot, string Path)> ParseSkinSlots(string body)
+    {
+        var result = new List<(string, string)>();
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"([A-Za-z][A-Za-z0-9_]*)[^A-Za-z0-9_\\]{1,8}((?:[A-Za-z0-9_]+\\)+[A-Za-z0-9_]+\.(?:Material|Light)\.Gbx)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        foreach (System.Text.RegularExpressions.Match m in rx.Matches(body))
+        {
+            var entry = (m.Groups[1].Value, m.Groups[2].Value);
+            if (!result.Contains(entry)) result.Add(entry);
+        }
+        return result;
+    }
+}
+
 static class RefPaths
 {
     /// <summary>Ref-table paths are relative to the Gbx file's directory raised by AncestorLevel.</summary>
@@ -657,8 +728,22 @@ sealed class Dumper(string root, string outDir, string? filter)
     private readonly Dictionary<string, string?> materialImages = [];
     /// <summary>Material name -> opacity-mask image (decal lettering etc.).</summary>
     private readonly Dictionary<string, string> materialOpacity = [];
-    /// <summary>Materials whose shader projects the texture from world axes.</summary>
-    private readonly HashSet<string> materialProjected = [];
+    /// <summary>Materials whose shader projects the texture from world axes:
+    /// name -> texture repeats per world unit (from the bitmap's
+    /// DefaultTexCoordScale; 1/32 = one tile per grid cell).</summary>
+    private readonly Dictionary<string, float> materialProjected = [];
+    /// <summary>Material name -> shader file stem (drives decal/additive flags).</summary>
+    private readonly Dictionary<string, string> materialShader = [];
+    /// <summary>"Null" materials (no shader, no textures) — the game draws
+    /// nothing for these, e.g. the platform edge strip on special blocks.</summary>
+    private readonly HashSet<string> materialInvisible = [];
+    /// <summary>Terrain modifiers of the block being exported, in application
+    /// order (MaterialModifier, then MaterialModifier2 — the later wins).</summary>
+    private readonly List<TerrainModifier> activeModifiers = [];
+    private readonly Dictionary<string, TerrainModifier?> modifierCache = [];
+    private Dictionary<string, Dictionary<string, List<string>>>? skinSlots;
+    /// <summary>Block (or item) currently being exported, for diagnostics.</summary>
+    private string currentBlock = "";
     private int ok, failed, skipped;
 
     public int DumpBlocks()
@@ -688,8 +773,20 @@ sealed class Dumper(string root, string outDir, string? filter)
 
                 var size = UnitsSize(info.VariantBaseAir) ?? UnitsSize(info.VariantBaseGround);
                 var blockDir = Path.Combine(outDir, name);
-                var air = ExportVariant(info.VariantBaseAir, blockDir, "air");
-                var ground = ExportVariant(info.VariantBaseGround, blockDir, "ground");
+                currentBlock = name;
+                // Variant blocks (PlatformDirt*, *SpecialFragile*, …) share the
+                // base mesh and swap materials through terrain modifiers.
+                SetModifiers(info.MaterialModifierFile?.FilePath, info.MaterialModifier2File?.FilePath);
+                string? air, ground;
+                try
+                {
+                    air = ExportVariant(info.VariantBaseAir, blockDir, "air");
+                    ground = ExportVariant(info.VariantBaseGround, blockDir, "ground");
+                }
+                finally
+                {
+                    activeModifiers.Clear();
+                }
                 if (air is null && ground is null)
                 {
                     clipFallbacks.Add((name, file, size));
@@ -909,6 +1006,50 @@ sealed class Dumper(string root, string outDir, string? filter)
     }
 
     /** The mobil row with the most prefab ents = the standalone wall look. */
+    /// <summary>Debug: print each variant's raw geometry bounds for a clip, the
+    /// way AddUnitClips would probe it (wall prefab rows vs mobil solids).</summary>
+    public int ClipInfo(string clipId)
+    {
+        var clipDir = Path.Combine(root, "GameCtnBlockInfo", "GameCtnBlockInfoClip");
+        var file = new[] { ".EDVerticalClip.Gbx", ".EDClip.Gbx", ".EDHorizontalClip.Gbx" }
+            .Select(ext => Fs.Fix(Path.Combine(clipDir, clipId + ext)))
+            .FirstOrDefault(File.Exists);
+        if (file is null || Gbx.ParseNode(file) is not CGameCtnBlockInfo clip)
+        {
+            Console.Error.WriteLine($"clip {clipId} not found under {clipDir}");
+            return 1;
+        }
+        Console.WriteLine($"{clip.Ident.Id}: {clip.GetType().Name} ({Path.GetFileName(file)})");
+        foreach (var (tag, variant) in new (string, CGameCtnBlockInfoVariant?)[] { ("air", clip.VariantBaseAir), ("ground", clip.VariantBaseGround) })
+        {
+            Console.WriteLine($"[{tag}] mobil rows: {variant?.Mobils?.Length ?? 0}");
+            var rowIndex = 0;
+            foreach (var row in variant?.Mobils ?? [])
+            {
+                var mob = row.Length > 0 ? row[0] : null;
+                var b = new ObjBuilder();
+                if (mob?.SolidFid is CPlugSolid s) AddSolid(b, s, Quaternion.Identity, Vector3.Zero);
+                if (mob?.PrefabFid is CPlugPrefab p) AddPrefab(b, p, Quaternion.Identity, Vector3.Zero);
+                var ents = (mob?.PrefabFid as CPlugPrefab)?.Ents?.Length ?? 0;
+                Console.WriteLine(b.IsEmpty
+                    ? $"  row {rowIndex}: (no geometry) solid={mob?.SolidFid is not null} prefab ents={ents}"
+                    : $"  row {rowIndex}: ents={ents} bounds x {b.Min.X:0.#}..{b.Max.X:0.#} y {b.Min.Y:0.#}..{b.Max.Y:0.#} z {b.Min.Z:0.#}..{b.Max.Z:0.#}");
+                if (mob?.PrefabFid is CPlugPrefab pf)
+                    foreach (var ent in pf.Ents ?? [])
+                        Console.WriteLine($"      ent {ent.Model?.GetType().Name} pos={ent.Position} rot={ent.Rotation}");
+                rowIndex++;
+            }
+            var wall = DensestWallRow(clip, tag == "ground");
+            if (wall is not null)
+            {
+                var wb = new ObjBuilder();
+                AddPrefab(wb, wall, Quaternion.Identity, Vector3.Zero);
+                Console.WriteLine($"  densest wall row: ents={wall.Ents?.Length ?? 0} bounds x {wb.Min.X:0.#}..{wb.Max.X:0.#} y {wb.Min.Y:0.#}..{wb.Max.Y:0.#} z {wb.Min.Z:0.#}..{wb.Max.Z:0.#}");
+            }
+        }
+        return 0;
+    }
+
     private static CPlugPrefab? DensestWallRow(CGameCtnBlockInfo clip, bool preferGround)
     {
         CPlugPrefab? best = null;
@@ -1006,6 +1147,11 @@ sealed class Dumper(string root, string outDir, string? filter)
         // point needs its own transform — a yaw about the unit centre for the
         // other faces, a -8 drop for the bottom.
         var center = new Vector3(16f, 0f, 16f);
+        // The block's own cells: caps are trimmed to this box (terrain
+        // blending skirts on ground undersides spread far beyond it).
+        var cells = UnitsSize(variant) ?? [1, 1, 1];
+        var footprint = (new Vector3(0f, float.MinValue, 0f),
+                         new Vector3(cells[0] * 32f, float.MaxValue, cells[2] * 32f));
         foreach (var unit in variant.BlockUnitModels ?? [])
         {
             if (unit is null) continue;
@@ -1077,34 +1223,53 @@ sealed class Dumper(string root, string outDir, string? filter)
                         var bodyZs = ObjBuilder.Slope(builder.MaxYByZ, zLo, zHi);
                         var bodyXs = ObjBuilder.Slope(builder.MaxYByX, xLo, xHi);
                         var tall = rawMax.Y - rawMin.Y > 3f;
-                        var flip = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
                         float Err(Quaternion cq)
                         {
                             var ct = off + extraEff + center - Vector3.Transform(center, cq);
-                            var sc = new ObjBuilder();
+                            var sc = new ObjBuilder { ClipBox = footprint };
                             void em(ObjBuilder b2)
                             {
                                 if (cm.SolidFid is CPlugSolid s2) AddSolid(b2, s2, cq, ct);
                                 if (cm.PrefabFid is CPlugPrefab p2) AddPrefab(b2, p2, cq, ct);
                             }
                             em(sc);
+                            // First of all a cap must sit OVER the body: a thin
+                            // wall's coping strip turned 90° runs along the
+                            // empty edge of the cell, matching every height
+                            // test while covering nothing.
+                            // Every cap must MEET the body per cell of its
+                            // footprint: a top cap's underside against the
+                            // body's top, a bottom cap's top against the
+                            // body's underside. Mirrored or quarter-turned
+                            // placements have nothing, or the wrong height,
+                            // beneath them (a twisted tilt-transition
+                            // underside only fits one way).
+                            var err = sc.CapMismatch(builder, face == "top");
                             if (tall)
                             {
-                                // Tall shells must RISE where the body rises.
+                                // Tall shells must also RISE where the body
+                                // rises — a cheap tiebreaker for symmetric
+                                // profiles.
                                 var zs = ObjBuilder.Slope(sc.MaxYByZ, zLo, zHi);
                                 var xs = ObjBuilder.Slope(sc.MaxYByX, xLo, xHi);
-                                return MathF.Abs(zs - bodyZs) + MathF.Abs(xs - bodyXs);
+                                err += MathF.Abs(zs - bodyZs) + MathF.Abs(xs - bodyXs);
                             }
-                            // Flat caps/strips (a ramp's coping plate) must
-                            // TOUCH the body under their own footprint — the
-                            // mirrored end has nothing at their level.
-                            var bodyZ = ObjBuilder.RangeMax(builder.MaxYByZ, sc.Min.Z, sc.Max.Z);
-                            var bodyX = ObjBuilder.RangeMax(builder.MaxYByX, sc.Min.X, sc.Max.X);
-                            var level = face == "top" ? sc.Max.Y : sc.Min.Y;
-                            return MathF.Abs(level - MathF.Min(bodyZ, bodyX));
+                            return err;
                         }
-                        if (Err(Quaternion.Concatenate(flip, q)) + 0.5f < Err(q))
-                            q = Quaternion.Concatenate(flip, q);
+                        // Try every quarter turn, not just the mirror: a
+                        // sideways-tilted platform reuses the straight
+                        // slope's underside, which must turn 90° to follow
+                        // the tilt (unturned it pokes up through the deck).
+                        var best = q;
+                        var bestErr = Err(q) - 0.5f; // keep the default unless clearly better
+                        foreach (var deg in new[] { 90f, 180f, 270f })
+                        {
+                            var cand = Quaternion.Concatenate(
+                                Quaternion.CreateFromAxisAngle(Vector3.UnitY, deg * MathF.PI / 180f), q);
+                            var e = Err(cand);
+                            if (e < bestErr) { bestErr = e; best = cand; }
+                        }
+                        q = best;
                     }
                     var t = off + extraEff + center - Vector3.Transform(center, q);
 
@@ -1121,14 +1286,34 @@ sealed class Dumper(string root, string outDir, string? filter)
                         var qc = Quaternion.Concatenate(flip, q);
                         var tc = Vector3.Transform(new Vector3(32f, 0f, 32f + rawMin.Z), q) + t;
                         var w = wall!;
-                        emit = b => AddPrefab(b, w, qc, tc);
+                        emit = b =>
+                        {
+                            // Ground rows of these compositions add terrain
+                            // skirts that reach into the neighbouring cells.
+                            if (preferGround) b.ClipBox = footprint;
+                            AddPrefab(b, w, qc, tc);
+                            b.ClipBox = null;
+                        };
                     }
                     else if (isWall)
                     {
-                        // Pre-positioned one-piece wall panels (shaped loop/
-                        // deco profiles) already sit in place — merge as-is.
+                        // One-piece wall panels (shaped loop/deco profiles) are
+                        // authored like face caps: on the z=32 plane, looking
+                        // INTO the adjoining cell. Turn them inward about the
+                        // face centre exactly like the mobil caps below —
+                        // asymmetric panels (the 48-wide loop-start walls
+                        // overhang one end) otherwise land end-for-end
+                        // reversed, hanging outside the block.
                         var w = wall!;
-                        emit = b => AddPrefab(b, w, q, t);
+                        var wq = Quaternion.Concatenate(
+                            Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI), q);
+                        var wt = t + Vector3.Transform(new Vector3(32f, 0f, 64f), q);
+                        emit = b =>
+                        {
+                            if (preferGround) b.ClipBox = footprint;
+                            AddPrefab(b, w, wq, wt);
+                            b.ClipBox = null;
+                        };
                     }
                     else
                     {
@@ -1145,10 +1330,13 @@ sealed class Dumper(string root, string outDir, string? filter)
                                 Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI), q);
                             ct += Vector3.Transform(new Vector3(32f, 0f, 64f), q);
                         }
+                        var trim = face is "bottom" or "top" || preferGround;
                         emit = b =>
                         {
+                            if (trim) b.ClipBox = footprint;
                             if (c.SolidFid is CPlugSolid cs) AddSolid(b, cs, cq, ct);
                             if (c.PrefabFid is CPlugPrefab cp) AddPrefab(b, cp, cq, ct);
+                            b.ClipBox = null;
                         };
                     }
 
@@ -1173,15 +1361,28 @@ sealed class Dumper(string root, string outDir, string? filter)
             Quaternion Yaw(float deg) =>
                 Quaternion.CreateFromAxisAngle(Vector3.UnitY, deg * MathF.PI / 180f);
 
-            Merge(unit.ClipsBottom, Quaternion.Identity, new Vector3(0, -8f, 0), "bottom");
-            // Top caps are modeled at y=0; the top face sits at y=8.
-            Merge(unit.ClipsTop, Quaternion.Identity, new Vector3(0, 8f, 0), "top");
-            Merge(unit.ClipsNorth, Quaternion.Identity, Vector3.Zero, "north");
-            Merge(unit.ClipsSouth, Yaw(180f), Vector3.Zero, "south");
-            // GBX east is the x=0 face, west is x=32. Positive Y yaw
-            // moves our canonical z=32 clip to x=32 (west), not east.
-            Merge(unit.ClipsEast, Yaw(-90f), Vector3.Zero, "east");
-            Merge(unit.ClipsWest, Yaw(90f), Vector3.Zero, "west");
+            void Sides()
+            {
+                Merge(unit.ClipsNorth, Quaternion.Identity, Vector3.Zero, "north");
+                Merge(unit.ClipsSouth, Yaw(180f), Vector3.Zero, "south");
+                // GBX east is the x=0 face, west is x=32. Positive Y yaw
+                // moves our canonical z=32 clip to x=32 (west), not east.
+                Merge(unit.ClipsEast, Yaw(-90f), Vector3.Zero, "east");
+                Merge(unit.ClipsWest, Yaw(90f), Vector3.Zero, "west");
+            }
+            void Caps()
+            {
+                Merge(unit.ClipsBottom, Quaternion.Identity, new Vector3(0, -8f, 0), "bottom");
+                // Top caps are modeled at y=0; the top face sits at y=8.
+                Merge(unit.ClipsTop, Quaternion.Identity, new Vector3(0, 8f, 0), "top");
+            }
+            // Blocks assembled purely from clips (deco walls, arches, tilt
+            // transitions) have no body for the cap-orientation test to
+            // read — so seat the side walls first and test caps against
+            // them. Blocks with a body keep caps first: their walls would
+            // only muddy the body's height map.
+            if (builder.IsEmpty) { Sides(); Caps(); }
+            else { Caps(); Sides(); }
         }
         builder.SetSource("mobil");
     }
@@ -1261,7 +1462,8 @@ sealed class Dumper(string root, string outDir, string? filter)
         if (tree.Visual is CPlugVisualIndexedTriangles visual)
         {
             var mat = RegisterMaterial(tree.ShaderFile?.FilePath, (tree.Shader as CPlugMaterial));
-            b.AddVisual(visual, q, t, mat, materialProjected.Contains(mat));
+            if (!materialInvisible.Contains(mat))
+                b.AddVisual(visual, q, t, mat, ProjectedScale(mat));
         }
 
         foreach (var child in tree.Children ?? [])
@@ -1287,8 +1489,136 @@ sealed class Dumper(string root, string outDir, string? filter)
             else if (s2m.Materials?.Length > geom.MaterialIndex)
                 mat = RegisterMaterial(s2m.Materials[geom.MaterialIndex].File?.FilePath, s2m.Materials[geom.MaterialIndex].Node);
 
-            b.AddVisual(visual, q, t, mat, materialProjected.Contains(mat));
+            if (materialInvisible.Contains(mat)) continue;
+            b.AddVisual(visual, q, t, mat, ProjectedScale(mat));
         }
+    }
+
+    private float? ProjectedScale(string mat) =>
+        materialProjected.TryGetValue(mat, out var s) ? s : null;
+
+    // --- terrain modifiers ---
+
+    /// <summary>One block-level material swap: a game-skin names the material
+    /// SLOTS (slot name -> the material file it normally uses) and a folder
+    /// holds replacements named after those slots.</summary>
+    private sealed record TerrainModifier(string Tag, string Folder, Dictionary<string, List<string>> SlotsByStem);
+
+    private void SetModifiers(params string?[] modifierFiles)
+    {
+        activeModifiers.Clear();
+        foreach (var rel in modifierFiles)
+        {
+            if (string.IsNullOrEmpty(rel)) continue;
+            var mod = LoadModifier(rel);
+            if (mod is not null) activeModifiers.Add(mod);
+        }
+    }
+
+    private TerrainModifier? LoadModifier(string rel)
+    {
+        if (modifierCache.TryGetValue(rel, out var cached)) return cached;
+        TerrainModifier? result = null;
+        try
+        {
+            var path = Fs.Fix(Path.Combine(root, rel.Replace('\\', Path.DirectorySeparatorChar)));
+            if (File.Exists(path))
+            {
+                // GBX.NET can't parse CPlugGameSkinAndFolder, but the body is
+                // tiny: read the skin + folder references straight from it.
+                using var body = new MemoryStream();
+                Gbx.Decompress(path, body);
+                var (skin, folder) = TerrainModifiers.ParseBody(Encoding.Latin1.GetString(body.ToArray()));
+                var tag = folder ?? TerrainModifiers.TagFromFileName(path);
+                var dir = Fs.Fix(Path.Combine(Path.GetDirectoryName(path)!, tag));
+                if (Directory.Exists(dir))
+                    result = new TerrainModifier(tag, dir, SkinSlots(skin));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"  modifier {rel}: {ex.Message}");
+        }
+        modifierCache[rel] = result;
+        return result;
+    }
+
+    /// <summary>Slot table of one game-skin (material file stem -> slot names).
+    /// An unknown skin swaps nothing: guessing (e.g. the union of all skins)
+    /// once turned 146 tech platforms grass because the one-slot
+    /// TrackWallToDecoCliff skin was unreadable.</summary>
+    private Dictionary<string, List<string>> SkinSlots(string? skin)
+    {
+        skinSlots ??= LoadSkins();
+        if (skin is not null && skinSlots.TryGetValue(skin, out var one)) return one;
+        if (skin is not null)
+            Console.Error.WriteLine($"  gameskin {skin}: unknown, modifier applies no swaps");
+        return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private Dictionary<string, Dictionary<string, List<string>>> LoadSkins()
+    {
+        var skins = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+        var dir = Fs.Fix(Path.Combine(root, "GameSkin"));
+        if (!Directory.Exists(dir)) return skins;
+        var fromRaw = 0;
+        foreach (var file in Directory.EnumerateFiles(dir, "*.GameSkin.gbx", Fs.Recurse))
+        {
+            var name = Path.GetFileName(file);
+            var key = name[..name.IndexOf('.')];
+            var table = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            void Add(string slot, string materialPath)
+            {
+                var stem = TerrainModifiers.Stem(materialPath);
+                var list = table.GetValueOrDefault(stem) ?? (table[stem] = []);
+                if (!list.Contains(slot)) list.Add(slot);
+            }
+            try
+            {
+                if (Gbx.ParseNode(file) is CPlugGameSkin gs)
+                    foreach (var fid in gs.HeaderFids ?? [])
+                        if (fid?.Name is not null && !string.IsNullOrEmpty(fid.Directory))
+                            Add(fid.Name, fid.Directory);
+            }
+            catch (Exception)
+            {
+                // A few skins carry chunks GBX.NET can't read (e.g.
+                // TrackWallToDecoCliff). Their slot list is still plain in
+                // the decompressed bytes: "<Slot> … <Media\Material\X.Material.Gbx>".
+                try
+                {
+                    using var body = new MemoryStream();
+                    Gbx.Decompress(file, body);
+                    foreach (var (slot, path) in TerrainModifiers.ParseSkinSlots(Encoding.Latin1.GetString(body.ToArray())))
+                        Add(slot, path);
+                    fromRaw++;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  gameskin {name}: {ex.Message}");
+                }
+            }
+            skins[key] = table;
+        }
+        Console.WriteLine($"gameskins: {skins.Count} loaded ({fromRaw} from raw bytes)");
+        return skins;
+    }
+
+    /// <summary>The replacement for material <paramref name="stem"/> under the
+    /// active modifiers, or null when none applies.</summary>
+    private (string Path, string Tag)? ResolveOverride(string stem)
+    {
+        (string, string)? hit = null;
+        foreach (var mod in activeModifiers)
+        {
+            if (!mod.SlotsByStem.TryGetValue(stem, out var slots)) continue;
+            foreach (var slot in slots)
+            {
+                var candidate = Fs.Fix(Path.Combine(mod.Folder, slot + ".Material.Gbx"));
+                if (File.Exists(candidate)) { hit = (candidate, mod.Tag); break; }
+            }
+        }
+        return hit;
     }
 
     // --- material/texture library ---
@@ -1297,11 +1627,26 @@ sealed class Dumper(string root, string outDir, string? filter)
     private string RegisterMaterial(string? pathOrId, CPlugMaterial? node)
     {
         if (string.IsNullOrEmpty(pathOrId)) return "default";
-        var name = Path.GetFileName(pathOrId.Replace('\\', '/'));
-        foreach (var suffix in new[] { ".Material.Gbx", ".Material.gbx", ".gbx", ".Gbx" })
-            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                name = name[..^suffix.Length];
-        name = Sanitize(name);
+        var name = Sanitize(TerrainModifiers.Stem(pathOrId));
+
+        string? overridePath = null;
+        if (TerrainModifiers.ModifierFolder(pathOrId) is string direct)
+        {
+            // A mesh that references a replacement material directly (e.g.
+            // OpenDirtRoadToRoadInGrass -> Modifier\PlatformDirt\PlatformTech)
+            // must not be exported under the BASE name: that would hand every
+            // plain tech platform the dirt texture. No further swap applies —
+            // the skins key on the base material paths only.
+            name = Sanitize($"{direct}.{name}");
+        }
+        else if (ResolveOverride(name) is var (ovr, tag))
+        {
+            // Terrain modifier in effect for this block? Export the
+            // replacement under its own name so blocks sharing the base mesh
+            // don't collide.
+            overridePath = ovr;
+            name = Sanitize($"{tag}.{TerrainModifiers.Stem(ovr)}");
+        }
 
         if (!materialImages.ContainsKey(name))
         {
@@ -1310,15 +1655,39 @@ sealed class Dumper(string root, string outDir, string? filter)
             {
                 // Materials referenced by id alone carry no node — load their
                 // .Material.Gbx from the extracted game data instead.
-                var mat = node ?? LoadMaterial(name);
+                var mat = overridePath is not null
+                    ? Gbx.ParseNode(overridePath) as CPlugMaterial
+                    : node ?? LoadMaterial(name);
+                // A material with neither shader nor textures draws nothing
+                // in-game (modifiers use these to hide parts of the base mesh).
+                if (mat is not null && mat.CustomMaterial is null &&
+                    string.IsNullOrEmpty(mat.ShaderFile?.FilePath) && mat.Shader is null)
+                {
+                    materialInvisible.Add(name);
+                    materialImages.Remove(name); // nothing to export for it
+                    return name;
+                }
                 var (img, slot) = FindDiffuse(mat);
                 materialImages[name] = img;
+                // MESHDUMP_TRACE_MATERIAL=<name>: which block/reference first
+                // registered a material (for "wrong texture on X" hunts).
+                if (string.Equals(Environment.GetEnvironmentVariable("MESHDUMP_TRACE_MATERIAL"), name, StringComparison.OrdinalIgnoreCase))
+                    Console.WriteLine($"trace {name}: block={currentBlock} ref={pathOrId} node={(node is null ? "none" : "given")} override={overridePath ?? "-"} image={img}");
+                var shader = mat?.ShaderFile?.FilePath;
+                if (!string.IsNullOrEmpty(shader))
+                    materialShader[name] = Path.GetFileName(shader.Replace('\\', '/'));
                 // Py*/Pxz* slots = the shader projects the texture from
-                // world axes; mesh UVs are meaningless for these.
+                // world axes; mesh UVs are meaningless for these. The bitmap
+                // carries the tiling (repeats per world unit).
                 if (slot is not null &&
                     (slot.StartsWith("Py", StringComparison.Ordinal) ||
                      slot.StartsWith("Pxz", StringComparison.Ordinal)))
-                    materialProjected.Add(name);
+                {
+                    var bmp = mat?.CustomMaterial?.Textures?
+                        .FirstOrDefault(x => x.Name == slot)?.Texture as CPlugBitmap;
+                    var scale = bmp?.DefaultTexCoordScale.X ?? 0f;
+                    materialProjected[name] = scale > 0f ? scale : 1f / 32f;
+                }
                 // Decal shaders shape their content with an opacity mask
                 // (TOpacity — e.g. the TRACKMANIA lettering over a plain
                 // white base). Remember it so conversion bakes it into alpha.
@@ -1373,7 +1742,13 @@ sealed class Dumper(string root, string outDir, string? filter)
             return (null, null);
         }
 
-        var r = byName(n => n is "BaseColor" or "BaseColorOp" or "Diffuse");
+        // Sign/chrono panels (Tech3 *_DispIn shaders) show their content —
+        // arrows, checkpoint digits — through the MulInside slot; the
+        // BaseColor is just the LED-cell backdrop. Blank slots hold Rgba0000.
+        var r = byName(n => n is "MulInside");
+        if (r.Item1 is not null && Path.GetFileName(r.Item1).StartsWith("Rgba0000", StringComparison.OrdinalIgnoreCase))
+            r = (null, null);
+        if (r.Item1 is null) r = byName(n => n is "BaseColor" or "BaseColorOp" or "Diffuse");
         if (r.Item1 is null) r = byName(n => n is not null && n.Contains("BaseColor") && !n.Contains("HueMask"));
         if (r.Item1 is null) r = byName(n => n is "Blend3" or "Albedo");
         if (r.Item1 is null) r = byName(_ => true);
@@ -1399,9 +1774,15 @@ sealed class Dumper(string root, string outDir, string? filter)
             var pngRel = $"textures/{name}.png";
             var pngPath = Path.Combine(outDir, pngRel);
             var opacity = materialOpacity.GetValueOrDefault(name);
+            // Which game image this PNG was made from: a re-import after a
+            // slot-selection change (or game update) must not keep a stale
+            // PNG just because a file of that name exists.
+            var source = Path.GetRelativePath(root, image).Replace('\\', '/') +
+                         (opacity is null ? "" : "+" + Path.GetFileName(opacity));
+            var previous = json[name]?["source"]?.GetValue<string>();
             // Opacity-masked materials always regenerate: the mask must be
             // baked into the PNG's alpha (decal lettering, cut-outs).
-            if (!File.Exists(pngPath) || opacity is not null)
+            if (!File.Exists(pngPath) || opacity is not null || previous != source)
             {
                 try
                 {
@@ -1416,7 +1797,15 @@ sealed class Dumper(string root, string outDir, string? filter)
                     continue;
                 }
             }
-            var entry = new JsonObject { ["texture"] = pngRel };
+            var entry = new JsonObject { ["texture"] = pngRel, ["source"] = source };
+            // Shader-driven render hints for the editor: decal shaders draw
+            // an alpha layer ON a surface (needs depth bias, no z-fight with
+            // the base); TAdd shaders are additive glow strips.
+            if (materialShader.TryGetValue(name, out var shader))
+            {
+                if (shader.Contains("Decal", StringComparison.OrdinalIgnoreCase)) entry["decal"] = true;
+                if (shader.Contains("TAdd", StringComparison.OrdinalIgnoreCase)) entry["blend"] = "add";
+            }
             // A HueMask sibling means the game can repaint this material
             // (block color painting). The mask is per-pixel: only masked
             // texels change color in-game — export it so the editor can
@@ -1692,8 +2081,70 @@ sealed class ObjBuilder
     private int vertCount;
     public bool IsEmpty => vertCount == 0;
 
+    /** When set, triangles whose centre lies outside this XZ box (1u slack)
+     * are dropped. Used for caps: the game's ground undersides carry terrain
+     * blending skirts that spread several cells into the neighbours. */
+    public (Vector3 Min, Vector3 Max)? ClipBox;
+
+    /** Clips one triangle to ClipBox in XZ (Sutherland–Hodgman, 1u slack).
+     * null = untouched (no box, or fully inside); an empty list = fully
+     * outside; otherwise the polygon that remains, UVs interpolated. Big
+     * skirt triangles straddling the edge keep their inside part instead of
+     * being dropped or kept whole. */
+    private List<(Vector3 P, Vector2 UV)>? ClipTriangle((Vector3 P, Vector2 UV) a, (Vector3 P, Vector2 UV) b, (Vector3 P, Vector2 UV) c)
+    {
+        if (ClipBox is not var (lo, hi)) return null;
+        float x0 = lo.X - 1f, x1 = hi.X + 1f, z0 = lo.Z - 1f, z1 = hi.Z + 1f;
+        bool Inside(Vector3 p) => p.X >= x0 && p.X <= x1 && p.Z >= z0 && p.Z <= z1;
+        if (Inside(a.P) && Inside(b.P) && Inside(c.P)) return null;
+        var poly = new List<(Vector3 P, Vector2 UV)> { a, b, c };
+        foreach (var f in new Func<Vector3, float>[] { p => p.X - x0, p => x1 - p.X, p => p.Z - z0, p => z1 - p.Z })
+        {
+            if (poly.Count == 0) break;
+            var next = new List<(Vector3 P, Vector2 UV)>();
+            for (var i = 0; i < poly.Count; i++)
+            {
+                var cur = poly[i];
+                var prev = poly[(i + poly.Count - 1) % poly.Count];
+                float fc = f(cur.P), fp = f(prev.P);
+                if (fc >= 0f)
+                {
+                    if (fp < 0f) next.Add(Lerp(prev, cur, fp / (fp - fc)));
+                    next.Add(cur);
+                }
+                else if (fp >= 0f) next.Add(Lerp(prev, cur, fp / (fp - fc)));
+            }
+            poly = next;
+        }
+        return poly;
+    }
+
+    private static (Vector3 P, Vector2 UV) Lerp((Vector3 P, Vector2 UV) a, (Vector3 P, Vector2 UV) b, float t) =>
+        (Vector3.Lerp(a.P, b.P, t), Vector2.Lerp(a.UV, b.UV, t));
+
+    /** Appends a polygon as new vertices + a triangle fan, tagged with the
+     * current source. */
+    private void EmitPolygon(StringBuilder faces, List<(Vector3 P, Vector2 UV)> poly)
+    {
+        if (poly.Count < 3) return;
+        var start = vertCount + 1;
+        foreach (var (p, uv) in poly)
+        {
+            Grow(p);
+            v.Append("v ").Append(N(p.X)).Append(' ').Append(N(p.Y)).Append(' ').Append(N(p.Z)).Append('\n');
+            vt.Append("vt ").Append(N(uv.X)).Append(' ').Append(N(uv.Y)).Append('\n');
+        }
+        RecordSource(start, poly.Count);
+        vertCount += poly.Count;
+        for (var i = 1; i + 1 < poly.Count; i++)
+        {
+            Cover(poly[0].P, poly[i].P, poly[i + 1].P);
+            faces.Append("f ").Append(F(start)).Append(' ').Append(F(start + i)).Append(' ').Append(F(start + i + 1)).Append('\n');
+        }
+    }
+
     public void AddVisual(
-        CPlugVisualIndexedTriangles visual, Quaternion q, Vector3 t, string material, bool projected = false)
+        CPlugVisualIndexedTriangles visual, Quaternion q, Vector3 t, string material, float? projectedScale = null)
     {
         Vector3[] positions;
         Vec2[]? uvs = null;
@@ -1716,14 +2167,14 @@ sealed class ObjBuilder
         var indices = visual.IndexBuffer?.Indices;
         if (indices is null || indices.Length < 3) return;
 
-        if (projected)
+        if (projectedScale is float s)
         {
             // The game's Py/Pxz shaders ignore mesh UVs and project the
             // texture from WORLD axes (top faces from above, side faces
             // from their dominant horizontal axis). Reproduce that per
             // face — mesh UVs would smear/rotate the pattern on curved
-            // tops and cut faces. One texture tile per grid cell (32u).
-            const float s = 1f / 32f;
+            // tops and cut faces. `s` = repeats per world unit (1/32 = one
+            // tile per grid cell) from the bitmap's DefaultTexCoordScale.
             if (!facesByMaterial.TryGetValue(material, out var pf))
                 facesByMaterial[material] = pf = new StringBuilder();
             for (var i = 0; i + 2 < indices.Length; i += 3)
@@ -1733,27 +2184,20 @@ sealed class ObjBuilder
                 var w2 = Vector3.Transform(positions[indices[i + 2]], q) + t;
                 var n = Vector3.Cross(w1 - w0, w2 - w0);
                 var (ax, ay, az) = (MathF.Abs(n.X), MathF.Abs(n.Y), MathF.Abs(n.Z));
-                var start = vertCount + 1;
-                foreach (var w in new[] { w0, w1, w2 })
-                {
-                    Grow(w);
-                    var uv = ay >= ax && ay >= az ? new Vector2(w.X, w.Z)
-                        : ax >= az ? new Vector2(w.Z, w.Y)
-                        : new Vector2(w.X, w.Y);
-                    v.Append("v ").Append(N(w.X)).Append(' ').Append(N(w.Y)).Append(' ').Append(N(w.Z)).Append('\n');
-                    vt.Append("vt ").Append(N(uv.X * s)).Append(' ').Append(N(uv.Y * s)).Append('\n');
-                }
-                RecordSource(start, 3);
-                vertCount += 3;
-                pf.Append("f ").Append(F(start)).Append(' ').Append(F(start + 1)).Append(' ').Append(F(start + 2)).Append('\n');
+                Vector2 Proj(Vector3 w) => (ay >= ax && ay >= az ? new Vector2(w.X, w.Z)
+                    : ax >= az ? new Vector2(w.Z, w.Y)
+                    : new Vector2(w.X, w.Y)) * s;
+                var tri = new List<(Vector3 P, Vector2 UV)> { (w0, Proj(w0)), (w1, Proj(w1)), (w2, Proj(w2)) };
+                EmitPolygon(pf, ClipTriangle(tri[0], tri[1], tri[2]) ?? tri);
             }
             return;
         }
 
         var baseIndex = vertCount + 1; // OBJ is 1-based
+        var world = new Vector3[positions.Length];
         for (var i = 0; i < positions.Length; i++)
         {
-            var w = Vector3.Transform(positions[i], q) + t;
+            var w = world[i] = Vector3.Transform(positions[i], q) + t;
             Grow(w);
             v.Append("v ").Append(N(w.X)).Append(' ').Append(N(w.Y)).Append(' ').Append(N(w.Z)).Append('\n');
             var uv = uvs is not null && i < uvs.Length ? uvs[i] : default;
@@ -1766,9 +2210,24 @@ sealed class ObjBuilder
             facesByMaterial[material] = f = new StringBuilder();
         for (var i = 0; i + 2 < indices.Length; i += 3)
         {
-            f.Append("f ").Append(F(baseIndex + indices[i]))
-             .Append(' ').Append(F(baseIndex + indices[i + 1]))
-             .Append(' ').Append(F(baseIndex + indices[i + 2])).Append('\n');
+            int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+            if (ClipBox is not null)
+            {
+                Vector2 Uv(int k) => uvs is not null && k < uvs.Length ? new Vector2(uvs[k].X, uvs[k].Y) : default;
+                var poly = ClipTriangle((world[i0], Uv(i0)), (world[i1], Uv(i1)), (world[i2], Uv(i2)));
+                if (poly is not null)
+                {
+                    // Straddles or lies outside the box: the surviving part
+                    // goes in as fresh vertices (fan), the original triangle
+                    // is dropped.
+                    EmitPolygon(f, poly);
+                    continue;
+                }
+            }
+            Cover(world[i0], world[i1], world[i2]);
+            f.Append("f ").Append(F(baseIndex + i0))
+             .Append(' ').Append(F(baseIndex + i1))
+             .Append(' ').Append(F(baseIndex + i2)).Append('\n');
         }
     }
 
@@ -1781,6 +2240,70 @@ sealed class ObjBuilder
     /// used to ORIENT asymmetric caps against the body they must hug. */
     public readonly float[] MaxYByZ = Enumerable.Repeat(float.MinValue, 64).ToArray();
     public readonly float[] MaxYByX = Enumerable.Repeat(float.MinValue, 64).ToArray();
+    /** Coarse XZ height map (4-unit cells, −64..192): per cell the highest
+     * and lowest Y of any triangle touching it. Rasterised from triangle
+     * bounding boxes, not vertices, so a four-vertex slab still counts as
+     * covered inside. Unset cells hold MinValue / MaxValue. */
+    public readonly float[,] CellMaxY = NewGrid(float.MinValue);
+    public readonly float[,] CellMinY = NewGrid(float.MaxValue);
+    private int footprintCells;
+
+    private static float[,] NewGrid(float fill)
+    {
+        var g = new float[64, 64];
+        for (var i = 0; i < 64; i++) for (var j = 0; j < 64; j++) g[i, j] = fill;
+        return g;
+    }
+
+    private static int Bucket(float v) => Math.Clamp((int)((v + 64f) / 4f), 0, 63);
+
+    private void Cover(Vector3 a, Vector3 b, Vector3 c)
+    {
+        int x0 = Bucket(MathF.Min(a.X, MathF.Min(b.X, c.X))), x1 = Bucket(MathF.Max(a.X, MathF.Max(b.X, c.X)));
+        int z0 = Bucket(MathF.Min(a.Z, MathF.Min(b.Z, c.Z))), z1 = Bucket(MathF.Max(a.Z, MathF.Max(b.Z, c.Z)));
+        float yLo = MathF.Min(a.Y, MathF.Min(b.Y, c.Y)), yHi = MathF.Max(a.Y, MathF.Max(b.Y, c.Y));
+        for (var xi = x0; xi <= x1; xi++)
+            for (var zi = z0; zi <= z1; zi++)
+            {
+                if (CellMaxY[xi, zi] == float.MinValue) footprintCells++;
+                if (yHi > CellMaxY[xi, zi]) CellMaxY[xi, zi] = yHi;
+                if (yLo < CellMinY[xi, zi]) CellMinY[xi, zi] = yLo;
+            }
+    }
+
+    /** Fraction (0..1) of this geometry's footprint cells with nothing of
+     * <paramref name="body"/> beneath them — 0 when it sits fully over the body. */
+    public float UncoveredBy(ObjBuilder body)
+    {
+        if (footprintCells == 0) return 0f;
+        var missing = 0;
+        for (var xi = 0; xi < 64; xi++)
+            for (var zi = 0; zi < 64; zi++)
+                if (CellMaxY[xi, zi] != float.MinValue && body.CellMaxY[xi, zi] == float.MinValue) missing++;
+        return (float)missing / footprintCells;
+    }
+
+    /** How badly this flat cap misses the body it should sit on, per cell of
+     * its own footprint: a top cap's underside against the body's top, a
+     * bottom cap's top against the body's underside. Cells with no body at
+     * all count as a full 32-unit miss. Orientation-sensitive where range
+     * maxima are not: a coping strip turned 90° along a quarter pipe's side
+     * floats above the curve for most of its length. */
+    public float CapMismatch(ObjBuilder body, bool top)
+    {
+        if (footprintCells == 0) return 0f;
+        var sum = 0f;
+        for (var xi = 0; xi < 64; xi++)
+            for (var zi = 0; zi < 64; zi++)
+            {
+                if (CellMaxY[xi, zi] == float.MinValue) continue;
+                if (body.CellMaxY[xi, zi] == float.MinValue) { sum += 32f; continue; }
+                sum += top
+                    ? MathF.Abs(CellMinY[xi, zi] - body.CellMaxY[xi, zi])
+                    : MathF.Abs(CellMaxY[xi, zi] - body.CellMinY[xi, zi]);
+            }
+        return sum / footprintCells;
+    }
 
     private void Grow(Vector3 w)
     {
@@ -1855,6 +2378,7 @@ sealed class ObjBuilder
             facesByMaterial[material] = f = new StringBuilder();
         for (var i = 0; i + 2 < indices.Length; i += 3)
         {
+            Cover(positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]);
             f.Append("f ").Append(F(baseIndex + indices[i]))
              .Append(' ').Append(F(baseIndex + indices[i + 1]))
              .Append(' ').Append(F(baseIndex + indices[i + 2])).Append('\n');

@@ -10,3 +10,4 @@ tools/meshdump.tests/obj/
 tools/meshdump/missing_files.txt
 tools/meshdump/extract_list.txt
 .trackedit.local.json
+sheets/

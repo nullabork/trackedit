@@ -2,7 +2,8 @@ import { captureDebugSubject, frameDebugSubject, inspectDebugSubject, type Debug
 import { Vector3 } from "three";
 import type { EditorContext, EditorPlugin } from "./api";
 import type { Layer, Placement } from "@core/layer";
-import { getCurrentId } from "@io/mapStore";
+import { getCurrentId, loadMap } from "@io/mapStore";
+import { applyStored } from "@ui/session";
 import { el, clear } from "@ui/dom";
 
 /**
@@ -186,6 +187,23 @@ export const instrumentationPlugin: EditorPlugin = {
         const renderer = ctx.renderer as { setWireframe?: (on: boolean) => void };
         renderer.setWireframe?.(uid !== "off");
         return { ok: true, wireframe: uid !== "off" };
+      }
+      if (action === "open") {
+        // ?action=open&uid=<mapId>: open a stored map (e.g. one a script just
+        // wrote through /api/maps) without the map browser. Loads async; the
+        // reply only confirms the request was accepted.
+        if (!uid) return { ok: false, error: "map id required" };
+        void loadMap(uid).then((rec) => {
+          if (rec) applyStored(ctx, rec);
+          else ctx.ui.setStatus(`No stored map ${uid}`);
+        });
+        return { ok: true, opening: uid };
+      }
+      if (action === "reload") {
+        // Fresh page (e.g. after re-importing meshes): edits autosave, so
+        // nothing is lost; the reply goes out before the unload.
+        window.setTimeout(() => window.location.reload(), 50);
+        return { ok: true, reloading: true };
       }
       if (action === "mood") {
         // uid doubles as the value slot: ?action=mood&uid=Night

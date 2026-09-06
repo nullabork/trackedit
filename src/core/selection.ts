@@ -41,4 +41,14 @@ export class SelectionModel {
     if (!this.entries.some((e) => e.placementId === placementId)) return;
     this.set(this.entries.filter((e) => e.placementId !== placementId));
   }
+
+  has(placementId: string): boolean {
+    return this.entries.some((e) => e.placementId === placementId);
+  }
+
+  /** Shift-click semantics: add when absent, drop when present. */
+  toggle(entry: SelectionEntry): void {
+    if (this.has(entry.placementId)) this.remove(entry.placementId);
+    else this.set([...this.entries, entry]);
+  }
 }
