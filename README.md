@@ -163,14 +163,25 @@ Getting started above) automates the whole flow through the dev server's
   dotnet run -c Release -- items  "%USERPROFILE%\OpenplanetNext\Extract\GameData\Stadium" ..\..\public\meshes
   ```
 
+  The optional filter is a name substring, or `@names.txt` for a file of
+  exact block names (re-export a hand-picked set in seconds).
+  `python tools/reimport_selection.py` does that for whatever is selected
+  in the editor tab (Shift+click a set) and reloads the tab — the loop for
+  iterating on a few problem blocks without the ~40 min library pass.
+
   Other meshdump commands: `missing <root> <out.txt>` (after a game update,
   regenerate the list of newly-referenced files to append to
   `extract_list.txt`), `refs`/`matinfo`/`iteminfo <file>` (debug single
-  files), `unitinfo <BlockInfo.Gbx>` (which clip attaches to which unit
-  face), `clipinfo <root> <ClipId>` (a clip's raw, unplaced geometry bounds
-  per variant). Set `MESHDUMP_TRACE_MATERIAL=<name>` to print which block
-  and reference first registered a material — the tool for "why does X
-  have the wrong texture".
+  files), `nodeinfo <file>` (every parsed property, one level into the
+  variants and mobils — where the geometry transforms show up),
+  `unitinfo <BlockInfo.Gbx>` (which clip attaches to which unit face),
+  `clipinfo <root> <ClipId>` (a clip's raw, unplaced geometry bounds per
+  mobil row), `clipobj <root> <ClipId> <air|ground> <row> <out.obj>` (that
+  raw geometry as OBJ), `geomxf <root>` (every mobil carrying a geometry
+  transform), `icons <root> <outDir>` (each block's editor icon as WebP —
+  the game's own render, the ground truth for reviewing exports). Set
+  `MESHDUMP_TRACE_MATERIAL=<name>` to print which block and reference first
+  registered a material — the tool for "why does X have the wrong texture".
 
 This writes one OBJ per block variant and item, diffuse textures
 (DDS → PNG ≤512px) in `public/meshes/textures/`, `index.json` (footprints
@@ -212,6 +223,30 @@ How the materials are resolved (the parts that go wrong when skipped):
 - The UV vertical convention needs no flip: on every vertical face carrying
   the upright TRACKMANIA logo, V grows with world up, which matches
   three.js's default `flipY`.
+- **Water and glass.** Water surfaces ship only a normal map
+  (`Water_SxSySz`), glass walls an alpha texture (`*_T`); they are flagged
+  `water` / `translucent` in `materials.json` and drawn translucent instead
+  of as opaque grey lids.
+
+How the geometry is assembled (`meshdump nodeinfo` shows the fields):
+
+- **Mobil geometry transforms.** A block's mobil can carry
+  `GeomRotation`/`GeomTranslation` (270 do): the game rotates the referenced
+  prefab before placing it. The wall checkpoints reuse the flat ground
+  checkpoint prefab stood up against the wall this way (`(-90, 0, 180)` +
+  `(32, 32, 32)` for "Down"); most bottom caps carry a plain +8 lift.
+  Rotation is (x, y, z) degrees applied in that order. Ignoring it left the
+  checkpoint arches lying on the floor.
+- **Vertical clip rows.** A vertical clip (`*VFC`) is a table of wall
+  segments, not one mesh: air rows are Middle, Top, Bottom, TopBottom, then
+  merged Middle×2/3/4/8/16/32; ground rows are Bottom and TopBottom. The
+  segment a unit shows depends on whether the same wall continues on the
+  unit above/below within the block (a lone 8u wall is TopBottom; a 32u
+  platform wall is Bottom, Middle, Middle, Top). The names in the prefab
+  files confirm the order; they are matched by name with the index as
+  fallback.
+- **Ground bodies** carry the same terrain-blending skirts as ground clips
+  and are trimmed to the block's cells the same way.
 Extracted game assets are Nadeo's copyrighted content — keep them local,
 never commit or redistribute them (`public/meshes/` is gitignored).
 
@@ -347,10 +382,17 @@ inward turn they hang outside the block. Top and bottom caps carry no
 direction either; they are tried at all four yaws and keep the one that
 sits on the body — per cell of the cap's footprint, the body's height must
 meet the cap (a coping strip turned 90° along a quarter pipe floats above
-the curve; a thin wall's strip turned 90° covers empty cell). Caps, and
+the curve; a thin wall's strip turned 90° covers empty cell). A cap the
+game attaches to several units of one block (chicanes, diagonals) is one
+plate split into point-symmetric halves, so each placement is also scored
+on staying inside the block and off the copies already placed. Caps, and
 every clip of a ground variant, are trimmed to the block's own cells: the
 game's ground undersides and wall rows carry terrain-blending skirts that
-spread several cells into the neighbours.
+spread several cells into the neighbours. A clip is kept only if it seats
+against the block body; on blocks with no body of their own (deco cliffs,
+stage supports are pure clip assemblies) it must reach the block's cells
+instead — earlier the first wall merged rejected every wall on the far
+faces.
 
 Two more checks for a whole-library pass:
 
@@ -366,4 +408,19 @@ Two more checks for a whole-library pass:
   saves it through `/api/maps` and opens it in the editor tab.
 - Reviewing by hand: in the select tool, Shift+click adds to or removes from
   the selection. `/api/debug/state` lists the selected placements with their
-  block names, so a hand-picked set can be read back by a script.
+  block names, so a hand-picked set can be read back by a script and fed to
+  `block_sheets.py --list names.txt` (one exact name per line).
+- Ground truth: `meshdump icons <root> sheets/icons` dumps the game's own
+  editor icon for every block. The WebP data is stored bottom-up (flip it
+  vertically before comparing — unflipped, side faces appear on the far
+  edges). Flipped, the icons match the sheets' first view (yaw 315,
+  pitch -30; checked on chiral blocks — the wall checkpoints, the loop
+  starts, the expandable gates), so an icon pasted beside a sheet is a
+  direct A/B. Blocks with a non-zero `IconQuarterRotationY` are turned
+  by quarter turns in their icon.
+  `python tools/icon_match.py sheets/catalog sheets/icons` scores every
+  sheet against its icon by silhouette; the bottom of that list is a
+  coarse "look here first" (blank/wireframe icons are skipped).
+- `python tools/sheet_diff.py sheets_before sheets_after` ranks blocks by
+  how much their sheet changed between two captures — after a library-wide
+  importer change, eyeball the top of that list instead of all 5000 blocks.
