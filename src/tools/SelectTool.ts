@@ -11,7 +11,7 @@ import type { Tool, ToolPointerEvent } from "./Tool";
 export class SelectTool implements Tool {
   readonly id = "select";
   readonly label = "Select";
-  readonly hint = "Click: select · Del: delete · T/R: move/rotate (modal)";
+  readonly hint = "Click: select · Shift+click: add/remove · Del: delete · T/R: move/rotate";
 
   private outlines: Box3Helper[] = [];
 
@@ -34,14 +34,20 @@ export class SelectTool implements Tool {
   }
 
   onPointerDown(ev: ToolPointerEvent): void {
+    const additive = ev.native.shiftKey;
     if (ev.pick) {
-      this.ctx.selection.set([
-        { layerId: ev.pick.layerId, placementId: ev.pick.placementId },
-      ]);
+      const entry = { layerId: ev.pick.layerId, placementId: ev.pick.placementId };
+      // Shift toggles membership so a set can be built up (or trimmed)
+      // click by click; a plain click starts over with just this one.
+      if (additive) this.ctx.selection.toggle(entry);
+      else this.ctx.selection.set([entry]);
       const layer = this.ctx.document.getLayer(ev.pick.layerId);
       const p = layer?.placements.get(ev.pick.placementId);
-      this.ctx.ui.setStatus(p ? `Selected ${p.block} — T translate, R rotate, Del delete` : "");
-    } else {
+      const n = this.ctx.selection.list.length;
+      this.ctx.ui.setStatus(
+        n > 1 ? `${n} selected — T translate, R rotate, Del delete` :
+        p ? `Selected ${p.block} — T translate, R rotate, Del delete` : "");
+    } else if (!additive) {
       this.ctx.selection.clear();
     }
   }

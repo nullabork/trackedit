@@ -123,11 +123,52 @@ Getting started above) automates the whole flow through the dev server's
   Other meshdump commands: `missing <root> <out.txt>` (after a game update,
   regenerate the list of newly-referenced files to append to
   `extract_list.txt`), `refs`/`matinfo`/`iteminfo <file>` (debug single
-  files).
+  files), `unitinfo <BlockInfo.Gbx>` (which clip attaches to which unit
+  face), `clipinfo <root> <ClipId>` (a clip's raw, unplaced geometry bounds
+  per variant). Set `MESHDUMP_TRACE_MATERIAL=<name>` to print which block
+  and reference first registered a material — the tool for "why does X
+  have the wrong texture".
 
 This writes one OBJ per block variant and item, diffuse textures
 (DDS → PNG ≤512px) in `public/meshes/textures/`, `index.json` (footprints
 included) and `materials.json`. The editor picks everything up on reload.
+
+How the materials are resolved (the parts that go wrong when skipped):
+
+- **Terrain modifiers.** Variant blocks (`PlatformDirt*`, `PlatformPlastic*`,
+  every `*Special<Effect>*`, the gameplay gates) reuse one base mesh and
+  swap materials through the block's `MaterialModifier`/`MaterialModifier2`
+  references. Each points at a game-skin (`GameSkin/*.GameSkin.gbx`, the
+  list of swappable slots and the material each normally uses) plus a
+  folder under `Media/Modifier/` holding replacements named after those
+  slots. meshdump applies both, second wins, and exports the result as
+  `<Folder>.<Slot>` (e.g. `Fragile.Decal`, `PlatformDirt.PlatformTech`).
+  Without this every special platform shows Turbo chevrons and every dirt
+  platform the tech surface. A replacement with no shader and no textures
+  is a "null" material: the game draws nothing for it, so those faces are
+  dropped. GBX.NET can't read some skins (`TrackWallToDecoCliff`, the
+  obstacle and penalty ones); their slot lists are recovered from the
+  decompressed bytes. An unknown skin swaps nothing — never guess a slot
+  list, the one-slot `TrackWallToDecoCliff` skin is what every plain tech
+  platform references.
+- **Sign / chrono panels** (`*_DispIn` shaders) put their content — turbo
+  arrows, checkpoint digits — in the `MulInside` slot; the base color is
+  just the LED-cell backdrop. That slot is preferred as the exported
+  texture, so the backdrop-only look means an old texture cache.
+- **Decals** (`DecalGeom` shaders) are flagged `decal` in `materials.json`.
+  They sit exactly on the surface they mark; the renderer draws them with
+  a depth bias and alpha blending so they don't z-fight the base surface
+  (the "half the top face is grey" symptom). `TAdd` glow strips are
+  flagged `blend: "add"`.
+- **Projected textures** (`Py*`/`Pxz*` slots) ignore mesh UVs; UVs are
+  synthesised from world position with the bitmap's `DefaultTexCoordScale`
+  (1/32 = one tile per grid cell; plastic and canopy tile at 1/8).
+- Each `materials.json` entry records its `source` image, so a re-import
+  regenerates a PNG whenever the chosen slot changes rather than trusting a
+  file of the same name.
+- The UV vertical convention needs no flip: on every vertical face carrying
+  the upright TRACKMANIA logo, V grows with world up, which matches
+  three.js's default `flipY`.
 Extracted game assets are Nadeo's copyrighted content — keep them local,
 never commit or redistribute them (`public/meshes/` is gitignored).
 
@@ -198,6 +239,8 @@ With the editor tab open, the development server also provides:
 
 - `/api/debug/command?action=inspect&uid=p_n_etm1`: world bounds, mesh vertex/UV
   counts, and material texture URLs, sidedness, and vertical-flip settings.
+- `/api/debug/command?action=reload`: reload the editor tab (after a mesh
+  re-import; edits autosave, so nothing is lost).
 - `/api/debug/command?action=focus&uid=p_n_etm1&yaw=112&pitch=-5&distance=42`:
   frame that placement. Angles are degrees; negative pitch looks down. Omit
   distance to fit the block to the viewport, including narrow viewports.
@@ -222,3 +265,34 @@ against the road, catching caps that sit on the right face but face backwards.
 a broader, heuristic attachment report. GBX east attaches at a unit's `x=0`
 face and west at `x=32`; reversing these can put braces across a curved wall
 while still passing a whole-block bounding-box overlap check.
+
+The clip meshes themselves follow one authoring convention (`meshdump
+clipinfo` shows it for any clip): a panel in the plane `z=32` spanning
+`x 0..32`, looking into the adjoining cell. Every side-face clip — face caps
+and one-piece wall panels alike — is therefore placed the same way: yaw to
+the face, then turn inward about the face centre. Asymmetric panels (the
+48-wide loop-start walls overhang one end) are the tell-tale: without the
+inward turn they hang outside the block. Top and bottom caps carry no
+direction either; they are tried at all four yaws and keep the one that
+sits on the body — per cell of the cap's footprint, the body's height must
+meet the cap (a coping strip turned 90° along a quarter pipe floats above
+the curve; a thin wall's strip turned 90° covers empty cell). Caps, and
+every clip of a ground variant, are trimmed to the block's own cells: the
+game's ground undersides and wall rows carry terrain-blending skirts that
+spread several cells into the neighbours.
+
+Two more checks for a whole-library pass:
+
+- `python tools/check_clips.py` scans every exported block for clip
+  geometry outside its footprint and lists the worst offenders — compare
+  the counts before and after a meshdump change.
+- `python tools/block_sheets.py --reload` (editor tab open) captures every
+  placement of the open map in isolation from three angles and writes one
+  contact sheet per block to `sheets/`, for reviewing a whole map at once.
+- `python tools/catalog_sample_map.py --per 21 --spread --open` builds a
+  review map with blocks from every catalog category laid out in rows (evenly
+  spread through each family, or the most-used ones without `--spread`),
+  saves it through `/api/maps` and opens it in the editor tab.
+- Reviewing by hand: in the select tool, Shift+click adds to or removes from
+  the selection. `/api/debug/state` lists the selected placements with their
+  block names, so a hand-picked set can be read back by a script.
