@@ -1,0 +1,10 @@
+[meta]
+name = "Trackedit Live"
+author = "trackedit"
+category = "Map Editor"
+version = "0.2.0"
+description = "Synchronizes blocks between trackedit and the running game editor."
+
+[script]
+dependencies = ["Editor"]
+timeout = 45000

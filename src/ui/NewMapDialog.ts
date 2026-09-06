@@ -1,6 +1,6 @@
 import type { EditorContext } from "@plugins/api";
 import type { MapBase, Mood } from "@core/mapbase";
-import { MAP_BASES } from "@core/mapbase";
+import { MAP_BASES, initialBuildLevel } from "@core/mapbase";
 import { newId } from "@core/math";
 import { el } from "./dom";
 import { openDialog } from "./dialog";
@@ -33,6 +33,7 @@ export function openNewMapDialog(ctx: EditorContext): void {
     ctx.document.reset([], { name });
     ctx.document.setMapBase(base);
     ctx.document.setMood(mood);
+    ctx.tools.setBuildLevel(initialBuildLevel(base.type));
     session.ready = true;
     void persistNow(ctx);
     ctx.ui.setStatus(`New track "${name}" on ${base.label} (${mood})`);

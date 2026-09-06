@@ -56,6 +56,13 @@ export class History {
     this.notify();
   }
 
+  /** A remote edit or document replacement invalidates stored local command targets. */
+  clear(): void {
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this.notify();
+  }
+
   private notify(): void {
     this.events.emit("changed", {
       undoLabel: this.undoStack.at(-1)?.label,
