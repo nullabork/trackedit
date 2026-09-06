@@ -72,6 +72,10 @@ type MaterialIndex = Record<
     hueMask?: string;
     /** Decal shader: an alpha layer drawn ON another surface (coplanar). */
     decal?: boolean;
+    /** Water surface (the game ships only a normal map): draw as translucent blue. */
+    water?: boolean;
+    /** Alpha-textured glass wall: draw translucent. */
+    translucent?: boolean;
     /** "add" = additive glow strip (the game's TAdd shaders). */
     blend?: "add";
   }
@@ -162,12 +166,30 @@ export class MeshProvider implements GeometryProvider {
     // Flat-color materials cover content with no texture on disk (e.g. the
     // proxy meshes for procedural vegetation).
     const flat = !texture && entry?.color ? entry.color : null;
-    const key =
-      texture ?? (flat ? `flat:${flat}` : `tint:${CATEGORY_COLORS[category ?? ""] ?? 0x9aa4ae}`);
+    const key = entry?.water
+      ? "water"
+      : (texture ?? (flat ? `flat:${flat}` : `tint:${CATEGORY_COLORS[category ?? ""] ?? 0x9aa4ae}`)) +
+        (entry?.translucent ? "|t" : "");
     let mat = this.materials.get(key);
     if (!mat) {
       if (flat) {
         mat = new MeshLambertMaterial({ color: flat, side: DoubleSide });
+      } else if (entry?.water) {
+        mat = new MeshLambertMaterial({
+          color: 0x5cc3ea,
+          transparent: true,
+          opacity: 0.55,
+          depthWrite: false,
+          side: DoubleSide,
+        });
+      } else if (texture && entry?.translucent) {
+        mat = new MeshLambertMaterial({
+          map: this.loadTexture(this.baseUrl + texture),
+          transparent: true,
+          opacity: 0.6,
+          depthWrite: false,
+          side: DoubleSide,
+        });
       } else if (texture && entry?.blend === "add") {
         // Glow strips (turbo/boost FX): additive, never occlude anything.
         mat = new MeshLambertMaterial({

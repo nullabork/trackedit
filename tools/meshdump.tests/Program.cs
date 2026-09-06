@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text.Json;
 using GBX.NET;
 using GBX.NET.Engines.Game;
@@ -76,6 +77,36 @@ Check(slots.Count == 2, "skin slots deduplicated across header and body");
 Check(slots[0] == ("TrackWall", @"Stadium\Media\Material\TrackWall.Material.Gbx"), "first skin slot");
 Check(slots[1].Slot == "Decal" && slots[1].Path.EndsWith("DecalSpecialTurbo.Material.Gbx"), "second skin slot");
 Console.WriteLine("Terrain modifier tests passed.");
+
+// Mobil geometry transforms: the wall checkpoints reuse the flat ground
+// checkpoint prefab (x 0..32, y 0..~10, z 0..32) and stand it against the
+// wall through GeomRotation/GeomTranslation. Every variant must land
+// inside its cell, upright, protruding from the wall at z=32.
+static bool Near(System.Numerics.Vector3 a, float x, float y, float z) =>
+    MathF.Abs(a.X - x) < 0.01f && MathF.Abs(a.Y - y) < 0.01f && MathF.Abs(a.Z - z) < 0.01f;
+var down = MobilGeom.Compose(new(-90, 0, 180), new(32, 32, 32));
+Check(Near(MobilGeom.Apply(down, new(0, 0, 0)), 32, 32, 32), "Down checkpoint: origin corner");
+Check(Near(MobilGeom.Apply(down, new(32, 10, 32)), 0, 0, 22), "Down checkpoint: arch top protrudes from the wall");
+var up = MobilGeom.Compose(new(-90, 0, 0), new(0, 0, 32));
+Check(Near(MobilGeom.Apply(up, new(32, 10, 32)), 32, 32, 22), "Up checkpoint: arch top");
+var left = MobilGeom.Compose(new(-90, 0, -90), new(0, 32, 32));
+Check(Near(MobilGeom.Apply(left, new(32, 10, 32)), 32, 0, 22), "Left checkpoint: arch top");
+var right = MobilGeom.Compose(new(-90, 0, 90), new(32, 0, 32));
+Check(Near(MobilGeom.Apply(right, new(32, 10, 32)), 0, 32, 22), "Right checkpoint: arch top");
+var lift = MobilGeom.Compose(new(0, 0, 0), new(0, 8, 0));
+Check(Near(MobilGeom.Apply(lift, new(1, 2, 3)), 1, 10, 3), "translation-only FCB lift");
+
+// Vertical clip rows: which wall segment shows depends on the stack.
+Check(MobilGeom.WallSegment(above: false, below: false) == "TopBottom", "lone wall segment");
+Check(MobilGeom.WallSegment(above: true, below: false) == "Bottom", "bottom of a stack");
+Check(MobilGeom.WallSegment(above: false, below: true) == "Top", "top of a stack");
+Check(MobilGeom.WallSegment(above: true, below: true) == "Middle", "middle of a stack");
+Check(MobilGeom.SegmentKind(@"Media\Prefab\X\VFCCornerInLeft_TopBottom_Air.Prefab.Gbx") == "TopBottom", "TopBottom row by name");
+Check(MobilGeom.SegmentKind("Base_VFCMiddle2.Prefab.Gbx") == "Middle", "merged middle row by name");
+Check(MobilGeom.SegmentKind("VFC_Bottom.Prefab.Gbx") == "Bottom", "bottom row by name");
+Check(MobilGeom.SegmentKind("WallStraight_VFCLeftTop_Air.Prefab.Gbx") == "Top", "top row by name");
+Check(MobilGeom.SegmentKind("Curve1.Prefab.Gbx") == "", "unnamed row");
+Console.WriteLine("Mobil geometry tests passed.");
 
 static void Check(bool condition, string label)
 {

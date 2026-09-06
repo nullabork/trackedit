@@ -9,7 +9,8 @@ One PNG per placement: <n>_<block>.png with three views side by side
 (front-left high, back-right high, front-right low). Review them in bulk to
 spot misplaced clips, wrong surfaces, or missing parts without clicking
 through the map by hand.  --reload refreshes the tab first so a re-import is
-picked up.  --only <substring> limits to matching block names.
+picked up.  --only <substring> limits to matching block names; --list <file>
+limits to the exact names listed one per line.
 """
 import argparse
 import io
@@ -24,7 +25,9 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("needs Pillow: pip install pillow")
 
-VIEWS = [("front-left", 45, -30), ("back-right", 225, -30), ("front-right low", 135, -8)]
+# View 1 is the game's block-icon camera (icons are stored bottom-up; flip
+# them and they line up with this view), so icon-beside-sheet is a direct A/B.
+VIEWS = [("icon view", 315, -30), ("opposite", 135, -30), ("front-left low", 45, -8)]
 
 
 def get(url, timeout=40):
@@ -54,18 +57,21 @@ def main():
     ap.add_argument("--map", help="map id (default: the one open in the editor)")
     ap.add_argument("--out", default="sheets")
     ap.add_argument("--only", help="substring filter on block names")
+    ap.add_argument("--list", help="file with one exact block name per line (e.g. a hand-picked set)")
+    ap.add_argument("--client", help="client id from /api/debug/state: target that editor tab when several are open")
     ap.add_argument("--reload", action="store_true", help="reload the editor tab first")
     ap.add_argument("--width", type=int, default=640, help="width of each view in the sheet")
     args = ap.parse_args()
 
+    cl = f"&client={args.client}" if args.client else ""
     if args.reload:
-        get(f"{args.base}/api/debug/command?action=reload")
+        get(f"{args.base}/api/debug/command?action=reload{cl}")
         time.sleep(10)
     state = json.loads(get(f"{args.base}/api/debug/state"))["state"]
     map_id = args.map or state["map"]["id"]
-    if args.map and state["map"]["id"] != args.map:
+    if args.map and (state["map"]["id"] != args.map or args.client):
         # The bridge screenshots the map the tab has open — switch it.
-        get(f"{args.base}/api/debug/command?action=open&uid={args.map}")
+        get(f"{args.base}/api/debug/command?action=open&uid={args.map}{cl}")
         time.sleep(4)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -73,13 +79,16 @@ def main():
     items = placements(args.base, map_id)
     if args.only:
         items = [p for p in items if args.only.lower() in p["block"].lower()]
+    if args.list:
+        wanted = {l.strip() for l in Path(args.list).read_text().splitlines() if l.strip()}
+        items = [p for p in items if p["block"] in wanted]
     print(f"{len(items)} placements in {map_id}")
     w = args.width
     for n, p in enumerate(items, 1):
         uid, block = p["id"], p["block"]
         tiles = []
         for label, yaw, pitch in VIEWS:
-            url = f"{args.base}/api/debug/screenshot?uid={uid}&yaw={yaw}&pitch={pitch}&isolate=1"
+            url = f"{args.base}/api/debug/screenshot?uid={uid}&yaw={yaw}&pitch={pitch}&isolate=1{cl}"
             try:
                 img = Image.open(io.BytesIO(get(url))).convert("RGB")
             except Exception as ex:  # keep going; note the failure on the sheet

@@ -211,14 +211,98 @@ switch (args[0])
             if (node is null) return 1;
             foreach (var ch in node.Chunks)
                 Console.WriteLine($"  chunk 0x{ch.Id:X8} {ch.GetType().Name}");
-            foreach (var p in node.GetType().GetProperties())
+            void DumpProps(object obj, string indent)
             {
-                object? v;
-                try { v = p.GetValue(node); } catch { continue; }
-                if (v is null || p.Name is "Chunks" or "GameVersion") continue;
-                var desc = v is System.Collections.ICollection col ? $"[{col.Count}]" : v.ToString();
-                Console.WriteLine($"  .{p.Name}: {p.PropertyType.Name} = {desc}");
+                foreach (var p in obj.GetType().GetProperties())
+                {
+                    object? v;
+                    try { v = p.GetValue(obj); } catch { continue; }
+                    if (v is null || p.Name is "Chunks" or "GameVersion") continue;
+                    var desc = v is System.Collections.ICollection col ? $"[{col.Count}]" : v.ToString();
+                    Console.WriteLine($"{indent}.{p.Name}: {p.PropertyType.Name} = {desc}");
+                    // One level into small collections so links (pillars, base
+                    // blocks, external fids) show up without a dedicated command.
+                    if (v is System.Collections.ICollection { Count: > 0 and <= 8 } items && v is not string)
+                        foreach (var item in items)
+                            if (item is not null && !item.GetType().IsPrimitive && item is not string)
+                            {
+                                Console.WriteLine($"{indent}  - {item}");
+                                if (item is GBX.NET.Engines.MwFoundations.CMwNod or System.Runtime.CompilerServices.ITuple || item.GetType().IsValueType)
+                                    DumpProps(item, indent + "      ");
+                                else if (item is System.Collections.ICollection { Count: > 0 and <= 8 } inner)
+                                    foreach (var sub in inner)
+                                        if (sub is GBX.NET.Engines.MwFoundations.CMwNod)
+                                        {
+                                            Console.WriteLine($"{indent}    - {sub}");
+                                            DumpProps(sub, indent + "        ");
+                                        }
+                            }
+                }
             }
+            DumpProps(node, "  ");
+            if (node is CGameCtnBlockInfo bi)
+            {
+                foreach (var (tag, v) in new (string, CGameCtnBlockInfoVariant?)[] { ("air", bi.VariantBaseAir), ("ground", bi.VariantBaseGround) })
+                {
+                    if (v is null) continue;
+                    Console.WriteLine($"[{tag}] {v.GetType().Name}");
+                    foreach (var ch in v.Chunks) Console.WriteLine($"    chunk 0x{ch.Id:X8} {ch.GetType().Name}");
+                    DumpProps(v, "    ");
+                }
+            }
+            return 0;
+        }
+    case "geomxf":
+        {
+            // Survey: which block/clip mobils carry a geometry transform
+            // (HasGeomTransformation) — the game rotates/translates the
+            // referenced prefab before placing it.
+            var n = 0; var total = 0;
+            foreach (var f in Directory.EnumerateFiles(Path.Combine(args[1], "GameCtnBlockInfo"), "*.Gbx", SearchOption.AllDirectories))
+            {
+                CGameCtnBlockInfo? bi;
+                try { bi = Gbx.ParseNode(f) as CGameCtnBlockInfo; } catch { continue; }
+                if (bi is null) continue;
+                total++;
+                foreach (var (tag, v) in new (string, CGameCtnBlockInfoVariant?)[] { ("air", bi.VariantBaseAir), ("ground", bi.VariantBaseGround) })
+                    foreach (var row in v?.Mobils ?? [])
+                        foreach (var mob in row)
+                            if (mob is { HasGeomTransformation: true })
+                            {
+                                n++;
+                                var file = Path.GetFileName(mob.PrefabFidFile?.FilePath ?? mob.SolidFidFile?.FilePath ?? "?");
+                                Console.WriteLine($"{bi.Name}	{tag}	{mob.GeomTranslation}	{mob.GeomRotation}	{file}");
+                            }
+            }
+            Console.Error.WriteLine($"geomxf: {n} transformed mobils in {total} block infos");
+            return 0;
+        }
+    case "clipobj":
+        {
+            // Raw geometry of one clip mobil row (air/ground) as OBJ, in the
+            // clip's own frame: meshdump clipobj <root> <ClipId> <air|ground> <row> <out.obj>
+            var d = new Dumper(args[1], Path.GetTempPath(), null);
+            return d.ClipObj(args[2], args[3], int.Parse(args[4]), args[5]);
+        }
+    case "icons":
+        {
+            // Dump every block's editor icon (the game's own render of the
+            // block) as <outDir>/<Name>.webp — ground truth for what a block
+            // should look like when reviewing our exports.
+            var outDir = args[2];
+            Directory.CreateDirectory(outDir);
+            var n = 0;
+            foreach (var f in Directory.EnumerateFiles(Path.Combine(args[1], "GameCtnBlockInfo"), "*.Gbx", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if (Gbx.ParseHeaderNode(f) is not CGameCtnBlockInfo bi || bi.IconWebP is not { Length: > 0 } webp) continue;
+                    File.WriteAllBytes(Path.Combine(outDir, bi.Name + ".webp"), webp);
+                    n++;
+                }
+                catch (Exception ex) { Console.Error.WriteLine($"{Path.GetFileName(f)}: {ex.Message}"); }
+            }
+            Console.WriteLine($"icons: {n} written to {outDir}");
             return 0;
         }
     case "refs":
@@ -313,7 +397,14 @@ switch (args[0])
                             }
                             else if (v is not null) clipProps.Add($"{prop.Name}={v}");
                         }
-                    Console.WriteLine($"  unit {u.RelativeOffset}: {string.Join(" | ", clipProps)}");
+                    Console.WriteLine($"  unit {u.RelativeOffset} dir={u.Dir} multi={u.MultiDir}: {string.Join(" | ", clipProps)}");
+                    if (Environment.GetEnvironmentVariable("MESHDUMP_UNIT_CHUNKS") is not null)
+                        foreach (var ch in u.Chunks)
+                        {
+                            var raw = ch.GetType().GetProperty("Data")?.GetValue(ch) as byte[];
+                            var hex = raw is null ? "" : " " + BitConverter.ToString(raw.Take(96).ToArray()).Replace("-", "");
+                            Console.WriteLine($"      chunk 0x{ch.Id:X8} {ch.GetType().Name}{hex}");
+                        }
                 }
             }
             return 0;
@@ -589,6 +680,47 @@ sealed class EmbeddedDumper(string outDir)
 
 /// <summary>Pure helpers for the terrain-modifier files (kept free of game
 /// data so the contract tests can cover them).</summary>
+/// <summary>Mobil geometry transforms and vertical-clip row selection —
+/// pure functions, pinned by tools/meshdump.tests.</summary>
+public static class MobilGeom
+{
+    /// <summary>GeomRotation is (x, y, z) degrees applied in that order
+    /// (right-handed, System.Numerics conventions); the translation follows.
+    /// Verified on the wall checkpoints: the flat ground checkpoint prefab
+    /// rotated (-90, 0, 180) and moved (32, 32, 32) stands on the wall
+    /// inside the cell for the "Down" variant.</summary>
+    public static (Quaternion Q, Vector3 T) Compose(Vector3 rotDeg, Vector3 translation)
+    {
+        const float d2r = MathF.PI / 180f;
+        var q = Quaternion.Concatenate(
+            Quaternion.Concatenate(
+                Quaternion.CreateFromAxisAngle(Vector3.UnitX, rotDeg.X * d2r),
+                Quaternion.CreateFromAxisAngle(Vector3.UnitY, rotDeg.Y * d2r)),
+            Quaternion.CreateFromAxisAngle(Vector3.UnitZ, rotDeg.Z * d2r));
+        return (q, translation);
+    }
+
+    public static Vector3 Apply((Quaternion Q, Vector3 T) xf, Vector3 p) =>
+        Vector3.Transform(p, xf.Q) + xf.T;
+
+    /// <summary>Which wall segment a vertical clip shows on a unit, from
+    /// whether the same wall continues on the unit above / below.</summary>
+    public static string WallSegment(bool above, bool below) =>
+        above && below ? "Middle" : below ? "Top" : above ? "Bottom" : "TopBottom";
+
+    /// <summary>Segment kind encoded in a clip prefab's file name
+    /// ("VFCCornerInLeft_TopBottom_Air", "Base_VFCMiddle2"), "" if none.</summary>
+    public static string SegmentKind(string prefabFileName)
+    {
+        var f = Path.GetFileNameWithoutExtension(prefabFileName ?? "");
+        if (f.Contains("TopBottom", StringComparison.OrdinalIgnoreCase)) return "TopBottom";
+        if (f.Contains("Middle", StringComparison.OrdinalIgnoreCase)) return "Middle";
+        if (f.Contains("Bottom", StringComparison.OrdinalIgnoreCase)) return "Bottom";
+        if (f.Contains("Top", StringComparison.OrdinalIgnoreCase)) return "Top";
+        return "";
+    }
+}
+
 public static class TerrainModifiers
 {
     /// <summary>"Media\Material\DecalSpecialTurbo.Material.Gbx" -> "DecalSpecialTurbo".</summary>
@@ -724,6 +856,16 @@ static class Fs
 
 sealed class Dumper(string root, string outDir, string? filter)
 {
+    /// <summary>[filter] is a name substring, or "@file" naming a file with
+    /// one exact block name per line (re-export a hand-picked set).</summary>
+    private readonly HashSet<string>? filterNames = filter is { Length: > 1 } && filter[0] == '@'
+        ? File.ReadAllLines(filter[1..]).Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase)
+        : null;
+
+    private bool MatchesFilter(string name) =>
+        filterNames is not null ? filterNames.Contains(name)
+        : filter is null || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Material name -> diffuse image full path (null = looked up, none found).</summary>
     private readonly Dictionary<string, string?> materialImages = [];
     /// <summary>Material name -> opacity-mask image (decal lettering etc.).</summary>
@@ -769,7 +911,7 @@ sealed class Dumper(string root, string outDir, string? filter)
             {
                 if (Gbx.ParseNode(file) is not CGameCtnBlockInfo info) { skipped++; continue; }
                 var name = info.Ident.Id;
-                if (filter is not null && !name.Contains(filter, StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+                if (!MatchesFilter(name)) { skipped++; continue; }
 
                 var size = UnitsSize(info.VariantBaseAir) ?? UnitsSize(info.VariantBaseGround);
                 var blockDir = Path.Combine(outDir, name);
@@ -864,7 +1006,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                 var gbx = Gbx.Parse(file);
                 if (gbx.Node is not CGameItemModel item) { skipped++; continue; }
                 var name = item.Ident.Id;
-                if (filter is not null && !name.Contains(filter, StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+                if (!MatchesFilter(name)) { skipped++; continue; }
 
                 var builder = new ObjBuilder();
                 AddItemEntityModel(builder, item.EntityModel);
@@ -978,10 +1120,18 @@ sealed class Dumper(string root, string outDir, string? filter)
         var mobil = variant.Mobils[0].Length > 0 ? variant.Mobils[0][0] : null;
         if (mobil is null) return null;
 
-        if (mobil.SolidFid is CPlugSolid solid)
-            AddSolid(builder, solid, Quaternion.Identity, Vector3.Zero);
-        if (mobil.PrefabFid is CPlugPrefab prefab)
-            AddPrefab(builder, prefab, Quaternion.Identity, Vector3.Zero);
+        if (tag == "ground")
+        {
+            // Ground bodies carry terrain-blend skirts (GrassFence & co.) that
+            // reach a whole cell past the footprint; in-game they merge into
+            // the terrain, in isolation they are stray green slabs. Trim
+            // them like the ground clips.
+            var c = UnitsSize(variant) ?? [1, 1, 1];
+            builder.ClipBox = (new Vector3(0f, float.MinValue, 0f),
+                               new Vector3(c[0] * 32f, float.MaxValue, c[2] * 32f));
+        }
+        AddMobil(builder, mobil, Quaternion.Identity, Vector3.Zero);
+        builder.ClipBox = null;
 
         // The game fills exposed faces with per-unit CLIPS: bottom clips are
         // the concrete undersides, side clips the end caps. Merge them in so
@@ -999,6 +1149,64 @@ sealed class Dumper(string root, string outDir, string? filter)
         return path;
     }
 
+    /// <summary>A mobil's own placement: the game rotates/translates the
+    /// referenced geometry before attaching it (HasGeomTransformation). The
+    /// wall checkpoints reuse the flat ground checkpoint prefab stood up
+    /// against the wall this way; most FCB caps carry a plain +8 lift.
+    /// Rotation is (x, y, z) degrees applied in that order.</summary>
+    private static (Quaternion Q, Vector3 T) MobilTransform(CGameCtnBlockInfoMobil mob)
+    {
+        if (!mob.HasGeomTransformation) return (Quaternion.Identity, Vector3.Zero);
+        var r = mob.GeomRotation;
+        var t = mob.GeomTranslation;
+        return MobilGeom.Compose(new Vector3(r.X, r.Y, r.Z), new Vector3(t.X, t.Y, t.Z));
+    }
+
+    /// <summary>Emit a mobil's solid/prefab with its geometry transform folded
+    /// into the placement (q, t).</summary>
+    private void AddMobil(ObjBuilder b, CGameCtnBlockInfoMobil mob, Quaternion q, Vector3 t)
+    {
+        var (gq, gt) = MobilTransform(mob);
+        var cq = Quaternion.Concatenate(gq, q);
+        var ct = Vector3.Transform(gt, q) + t;
+        if (mob.SolidFid is CPlugSolid solid) AddSolid(b, solid, cq, ct);
+        if (mob.PrefabFid is CPlugPrefab prefab) AddPrefab(b, prefab, cq, ct);
+    }
+
+    private static bool HasGeometry(CGameCtnBlockInfoMobil? m) =>
+        m?.SolidFid is CPlugSolid || m?.PrefabFid is CPlugPrefab;
+
+    /// <summary>Which row of a vertical clip's mobil table to show. Rows are
+    /// [Middle, Top, Bottom, TopBottom, -, Middle x2, x3, x4, x8, x16, x32] in
+    /// air and [Bottom, TopBottom] on the ground (prefab names confirm the
+    /// order for every family checked); the segment shown on a unit depends
+    /// on whether the same wall continues on the unit above/below.</summary>
+    private static CGameCtnBlockInfoMobil? WallRowMobil(CGameCtnBlockInfo clip, bool preferGround, bool above, bool below)
+    {
+        var want = MobilGeom.WallSegment(above, below);
+        var variants = preferGround
+            ? new CGameCtnBlockInfoVariant?[] { clip.VariantBaseGround, clip.VariantBaseAir }
+            : [clip.VariantBaseAir, clip.VariantBaseGround];
+        foreach (var v in variants)
+        {
+            var rows = v?.Mobils;
+            if (rows is null || rows.Length == 0) continue;
+            // By name first: "...TopBottom..." must not match "Top"/"Bottom".
+            static string Kind(CGameCtnBlockInfoMobil? m) =>
+                MobilGeom.SegmentKind(m?.PrefabFidFile?.FilePath ?? m?.SolidFidFile?.FilePath ?? "");
+            var byName = rows.Select(r => r.Length > 0 ? r[0] : null)
+                .FirstOrDefault(m => HasGeometry(m) && Kind(m) == want);
+            if (byName is not null) return byName;
+            // Positional fallback (ground tables have no Middle/Top rows).
+            int[] order = rows.Length >= 4
+                ? want switch { "Middle" => [0], "Top" => [1], "Bottom" => [2], _ => [3] }
+                : want switch { "Middle" or "Bottom" => [0], _ => [1, 0] };
+            foreach (var i in order)
+                if (i < rows.Length && rows[i].Length > 0 && HasGeometry(rows[i][0])) return rows[i][0];
+        }
+        return DensestWallRow(clip, preferGround);
+    }
+
     private static CGameCtnBlockInfoMobil? FirstMobilWithGeometry(CGameCtnBlockInfoVariant? v)
     {
         var cm = v?.Mobils is { Length: > 0 } m && m[0].Length > 0 ? m[0][0] : null;
@@ -1008,6 +1216,22 @@ sealed class Dumper(string root, string outDir, string? filter)
     /** The mobil row with the most prefab ents = the standalone wall look. */
     /// <summary>Debug: print each variant's raw geometry bounds for a clip, the
     /// way AddUnitClips would probe it (wall prefab rows vs mobil solids).</summary>
+    public int ClipObj(string clipId, string tag, int row, string outPath)
+    {
+        var clipDir = Path.Combine(root, "GameCtnBlockInfo", "GameCtnBlockInfoClip");
+        var file = Directory.EnumerateFiles(clipDir, clipId + ".ED*Clip.Gbx", SearchOption.AllDirectories).FirstOrDefault();
+        if (file is null || Gbx.ParseNode(file) is not CGameCtnBlockInfo clip) { Console.WriteLine("clip not found"); return 1; }
+        var v = tag == "ground" ? (CGameCtnBlockInfoVariant?)clip.VariantBaseGround : clip.VariantBaseAir;
+        var mob = v?.Mobils is { } m && row < m.Length && m[row].Length > 0 ? m[row][0] : null;
+        if (mob is null) { Console.WriteLine("no such row"); return 1; }
+        var b = new ObjBuilder();
+        AddMobil(b, mob, Quaternion.Identity, Vector3.Zero);
+        File.WriteAllText(outPath, b.ToObj());
+        File.WriteAllText(outPath + ".src.json", "[{\"src\":\"clip\",\"start\":1,\"count\":999999}]");
+        Console.WriteLine($"{clipId} {tag} row {row}: x {b.Min.X:0.#}..{b.Max.X:0.#} y {b.Min.Y:0.#}..{b.Max.Y:0.#} z {b.Min.Z:0.#}..{b.Max.Z:0.#} -> {outPath}");
+        return 0;
+    }
+
     public int ClipInfo(string clipId)
     {
         var clipDir = Path.Combine(root, "GameCtnBlockInfo", "GameCtnBlockInfoClip");
@@ -1039,7 +1263,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                         Console.WriteLine($"      ent {ent.Model?.GetType().Name} pos={ent.Position} rot={ent.Rotation}");
                 rowIndex++;
             }
-            var wall = DensestWallRow(clip, tag == "ground");
+            var wall = DensestWallRow(clip, tag == "ground")?.PrefabFid as CPlugPrefab;
             if (wall is not null)
             {
                 var wb = new ObjBuilder();
@@ -1050,9 +1274,9 @@ sealed class Dumper(string root, string outDir, string? filter)
         return 0;
     }
 
-    private static CPlugPrefab? DensestWallRow(CGameCtnBlockInfo clip, bool preferGround)
+    private static CGameCtnBlockInfoMobil? DensestWallRow(CGameCtnBlockInfo clip, bool preferGround)
     {
-        CPlugPrefab? best = null;
+        CGameCtnBlockInfoMobil? best = null;
         var bestEnts = 0;
         var variants = preferGround
             ? new CGameCtnBlockInfoVariant?[] { clip.VariantBaseGround, clip.VariantBaseAir }
@@ -1065,7 +1289,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                 if (mob?.PrefabFid is CPlugPrefab p && (p.Ents?.Length ?? 0) > bestEnts)
                 {
                     bestEnts = p.Ents!.Length;
-                    best = p;
+                    best = mob;
                 }
             }
             if (best is not null) break; // prefer the host-matching variant
@@ -1089,11 +1313,11 @@ sealed class Dumper(string root, string outDir, string? filter)
     /** Measured max-Z of a wall prefab (canonical north frame), cached. */
     private readonly Dictionary<string, float> wallDepths = [];
 
-    private float WallDepth(string clipId, CPlugPrefab wall)
+    private float WallDepth(string clipId, CGameCtnBlockInfoMobil wall)
     {
         if (wallDepths.TryGetValue(clipId, out var d)) return d;
         var scratch = new ObjBuilder();
-        AddPrefab(scratch, wall, Quaternion.Identity, Vector3.Zero);
+        AddMobil(scratch, wall, Quaternion.Identity, Vector3.Zero);
         d = scratch.MaxZ;
         wallDepths[clipId] = d;
         return d;
@@ -1152,9 +1376,43 @@ sealed class Dumper(string root, string outDir, string? filter)
         var cells = UnitsSize(variant) ?? [1, 1, 1];
         var footprint = (new Vector3(0f, float.MinValue, 0f),
                          new Vector3(cells[0] * 32f, float.MaxValue, cells[2] * 32f));
-        foreach (var unit in variant.BlockUnitModels ?? [])
+        // The block body (mobil) as it was before any clip: the seat test
+        // below measures against THIS, not against clips merged earlier —
+        // on mesh-less blocks (deco cliffs, stage supports) the first wall
+        // otherwise rejects every wall on the far faces.
+        var hasBody = !builder.IsEmpty;
+        var bodyMin = builder.Min;
+        var bodyMax = builder.Max;
+        var blockBox = (new Vector3(0f, 0f, 0f),
+                        new Vector3(cells[0] * 32f, cells[1] * 8f, cells[2] * 32f));
+        var units = (variant.BlockUnitModels ?? []).Where(u => u is not null).ToList();
+        // Cells (4u) already covered by committed top/bottom caps: a cap
+        // shared by several units (chicanes, diagonals) is one plate split
+        // into point-symmetric halves — each copy must land on its own half.
+        var capCover = new Dictionary<string, bool[,]>();
+        // Does the same vertical wall continue on the unit above/below this
+        // one (same face, same clip group)? Picks the wall segment row.
+        bool Continues(CGameCtnBlockUnitInfo u, string face, CGameCtnBlockInfo clip, int dy)
         {
-            if (unit is null) continue;
+            var o = u.RelativeOffset;
+            var n = units.FirstOrDefault(x => x.RelativeOffset.X == o.X && x.RelativeOffset.Y == o.Y + dy && x.RelativeOffset.Z == o.Z);
+            if (n is null) return false;
+            var list = face switch
+            {
+                "north" => n.ClipsNorth, "south" => n.ClipsSouth,
+                "east" => n.ClipsEast, "west" => n.ClipsWest, _ => null,
+            };
+            var group = (clip as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId;
+            foreach (var ext in list ?? [])
+            {
+                if (ext.Node is not CGameCtnBlockInfo other) continue;
+                if (other.Ident.Id == clip.Ident.Id) return true;
+                if (!string.IsNullOrEmpty(group) && (other as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId == group) return true;
+            }
+            return false;
+        }
+        foreach (var unit in units)
+        {
             var off = new Vector3(
                 unit.RelativeOffset.X * 32f,
                 unit.RelativeOffset.Y * 8f,
@@ -1182,24 +1440,25 @@ sealed class Dumper(string root, string outDir, string? filter)
                     // for air variants, false for several ground ones).
                     Action<ObjBuilder>? emitRaw = null;
                     var isWall = clip is CGameCtnBlockInfoClipVertical && cm?.SolidFid is not CPlugSolid;
-                    CPlugPrefab? wall = null;
+                    CGameCtnBlockInfoMobil? wall = null;
+                    var above = false; var below = false;
                     if (isWall)
                     {
-                        wall = DensestWallRow(clip, preferGround);
+                        above = Continues(unit, face, clip, +1);
+                        below = Continues(unit, face, clip, -1);
+                        // Ground rows only exist for the segment that touches
+                        // the ground; stacked units above it use the air table.
+                        wall = WallRowMobil(clip, preferGround && unit.RelativeOffset.Y == 0, above, below);
                         if (wall is not null)
-                            emitRaw = b => AddPrefab(b, wall, Quaternion.Identity, Vector3.Zero);
+                            emitRaw = b => AddMobil(b, wall, Quaternion.Identity, Vector3.Zero);
                     }
                     else if (cm is not null)
                     {
-                        emitRaw = b =>
-                        {
-                            if (cm.SolidFid is CPlugSolid cs) AddSolid(b, cs, Quaternion.Identity, Vector3.Zero);
-                            if (cm.PrefabFid is CPlugPrefab cp) AddPrefab(b, cp, Quaternion.Identity, Vector3.Zero);
-                        };
+                        emitRaw = b => AddMobil(b, cm, Quaternion.Identity, Vector3.Zero);
                     }
                     if (emitRaw is null) continue;
                     var (rawMin, rawMax) = ProbeBounds(
-                        $"{clip.Ident.Id}|{preferGround}|{(isWall ? "w" : "m")}", emitRaw);
+                        $"{clip.Ident.Id}|{preferGround}|{(isWall ? $"w{(above ? 1 : 0)}{(below ? 1 : 0)}{(unit.RelativeOffset.Y == 0 ? "g" : "a")}" : "m")}", emitRaw);
                     if (rawMin.X > rawMax.X) continue; // empty
 
                     // Vertical caps: shift only when the clip follows the
@@ -1227,12 +1486,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                         {
                             var ct = off + extraEff + center - Vector3.Transform(center, cq);
                             var sc = new ObjBuilder { ClipBox = footprint };
-                            void em(ObjBuilder b2)
-                            {
-                                if (cm.SolidFid is CPlugSolid s2) AddSolid(b2, s2, cq, ct);
-                                if (cm.PrefabFid is CPlugPrefab p2) AddPrefab(b2, p2, cq, ct);
-                            }
-                            em(sc);
+                            AddMobil(sc, cm, cq, ct);
                             // First of all a cap must sit OVER the body: a thin
                             // wall's coping strip turned 90Â° runs along the
                             // empty edge of the cell, matching every height
@@ -1245,6 +1499,17 @@ sealed class Dumper(string root, string outDir, string? filter)
                             // beneath them (a twisted tilt-transition
                             // underside only fits one way).
                             var err = sc.CapMismatch(builder, face == "top");
+                            // Plates belong inside the block (what the clip
+                            // box trims away is lost) and must not stack on
+                            // a copy already placed on this face.
+                            var su = new ObjBuilder();
+                            AddMobil(su, cm, cq, ct);
+                            if (su.FootprintCells > 0)
+                            {
+                                var lost = (su.FootprintCells - sc.FootprintCells) / (float)su.FootprintCells;
+                                var overlap = capCover.TryGetValue(face, out var cov) ? sc.OverlapCells(cov) / (float)Math.Max(1, sc.FootprintCells) : 0f;
+                                err += 16f * MathF.Max(0f, lost) + 16f * overlap;
+                            }
                             if (tall)
                             {
                                 // Tall shells must also RISE where the body
@@ -1291,7 +1556,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                             // Ground rows of these compositions add terrain
                             // skirts that reach into the neighbouring cells.
                             if (preferGround) b.ClipBox = footprint;
-                            AddPrefab(b, w, qc, tc);
+                            AddMobil(b, w, qc, tc);
                             b.ClipBox = null;
                         };
                     }
@@ -1311,7 +1576,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                         emit = b =>
                         {
                             if (preferGround) b.ClipBox = footprint;
-                            AddPrefab(b, w, wq, wt);
+                            AddMobil(b, w, wq, wt);
                             b.ClipBox = null;
                         };
                     }
@@ -1334,8 +1599,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                         emit = b =>
                         {
                             if (trim) b.ClipBox = footprint;
-                            if (c.SolidFid is CPlugSolid cs) AddSolid(b, cs, cq, ct);
-                            if (c.PrefabFid is CPlugPrefab cp) AddPrefab(b, cp, cq, ct);
+                            AddMobil(b, c, cq, ct);
                             b.ClipBox = null;
                         };
                     }
@@ -1349,12 +1613,19 @@ sealed class Dumper(string root, string outDir, string? filter)
                     var scratch = new ObjBuilder();
                     emit(scratch);
                     if (scratch.IsEmpty) continue;
-                    // (blocks with no body geometry keep all their clips)
-                    if (!builder.IsEmpty && scratch.GapTo(builder.Min, builder.Max) > 1.5f) continue;
+                    // Bodied blocks: the clip must touch the body. Mesh-less
+                    // blocks: it must at least reach the block's own cells.
+                    if (hasBody ? scratch.GapTo(bodyMin, bodyMax) > 1.5f
+                                : scratch.GapTo(blockBox.Item1, blockBox.Item2) > 8f) continue;
 
                     builder.SetSource(
                         $"clip:{clip.Ident.Id}:{face}:{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}");
                     emit(builder);
+                    if (face is "top" or "bottom")
+                    {
+                        if (!capCover.TryGetValue(face, out var cov)) capCover[face] = cov = new bool[64, 64];
+                        scratch.MarkCells(cov);
+                    }
                 }
             }
 
@@ -1806,6 +2077,14 @@ sealed class Dumper(string root, string outDir, string? filter)
                 if (shader.Contains("Decal", StringComparison.OrdinalIgnoreCase)) entry["decal"] = true;
                 if (shader.Contains("TAdd", StringComparison.OrdinalIgnoreCase)) entry["blend"] = "add";
             }
+            // Water surfaces ship a normal map as their only image (no
+            // diffuse) and glass walls an alpha texture: flag them so the
+            // editor draws them translucent instead of as opaque grey.
+            var srcName = Path.GetFileNameWithoutExtension(source ?? "");
+            if (srcName.Contains("Water", StringComparison.OrdinalIgnoreCase) && srcName.EndsWith("SxSySz", StringComparison.OrdinalIgnoreCase))
+                entry["water"] = true;
+            else if (srcName.EndsWith("_T", StringComparison.OrdinalIgnoreCase))
+                entry["translucent"] = true;
             // A HueMask sibling means the game can repaint this material
             // (block color painting). The mask is per-pixel: only masked
             // texels change color in-game â€” export it so the editor can
@@ -2247,6 +2526,24 @@ sealed class ObjBuilder
     public readonly float[,] CellMaxY = NewGrid(float.MinValue);
     public readonly float[,] CellMinY = NewGrid(float.MaxValue);
     private int footprintCells;
+    public int FootprintCells => footprintCells;
+
+    /** Cells this builder occupies that are already set in <paramref name="cov"/>. */
+    public int OverlapCells(bool[,] cov)
+    {
+        var n = 0;
+        for (var xi = 0; xi < 64; xi++)
+            for (var zi = 0; zi < 64; zi++)
+                if (CellMaxY[xi, zi] != float.MinValue && cov[xi, zi]) n++;
+        return n;
+    }
+
+    public void MarkCells(bool[,] cov)
+    {
+        for (var xi = 0; xi < 64; xi++)
+            for (var zi = 0; zi < 64; zi++)
+                if (CellMaxY[xi, zi] != float.MinValue) cov[xi, zi] = true;
+    }
 
     private static float[,] NewGrid(float fill)
     {
