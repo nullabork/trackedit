@@ -5,6 +5,7 @@ import { openMapBrowser } from "./MapBrowserDialog";
 import { openTmxDialog } from "./TmxDialog";
 import { openLiveDialog } from "./LiveDialog";
 import { getLiveSession } from "@plugins/liveSession";
+import { openControlSettings } from "./ControlSettingsDialog";
 
 interface MenuEntry {
   label: string;
@@ -88,6 +89,7 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
   host.append(
     el("span", { class: "menu-brand" }, "trackedit"),
     menuButton("File", fileEntries),
+    el("button", { class: "menu-btn", onclick: () => openControlSettings(ctx) }, "Controls"),
     liveButton,
     syncStatus,
     el("span", { class: "menu-spacer" }),

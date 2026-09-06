@@ -1,4 +1,5 @@
 import type { EditorContext } from "@plugins/api";
+import { blocksEditorInput } from "@input/ControlScheme";
 import { MOODS } from "@core/mapbase";
 import type { Shell } from "./Shell";
 import { clear, el } from "./dom";
@@ -182,6 +183,7 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
   );
 
   window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || blocksEditorInput(e.target) || ctx.view.rig.suspended) return;
     if (!e.ctrlKey && !e.metaKey) return;
     const key = e.key.toLowerCase();
     if (key === "z" && !e.shiftKey) {
