@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createMapConverter } from "./tools/mapConverter";
+import { liveBridge } from "./tools/liveBridge";
 
 /** Machine-local settings (gitignored): Openplanet folder and optional
  *  external gbxdump override. TMX import otherwise uses meshdump's map command. */
@@ -626,7 +627,7 @@ function debugBridge(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tmxBridge(), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge()],
+  plugins: [tmxBridge(), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
   resolve: {
     alias: {
       "@core": fileURLToPath(new URL("./src/core", import.meta.url)),

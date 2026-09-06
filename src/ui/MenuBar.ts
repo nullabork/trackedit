@@ -3,6 +3,8 @@ import { clear, el } from "./dom";
 import { cloneFlow, exportJsonFlow, importJsonFlow, newMapGuarded } from "./mapActions";
 import { openMapBrowser } from "./MapBrowserDialog";
 import { openTmxDialog } from "./TmxDialog";
+import { openLiveDialog } from "./LiveDialog";
+import { getLiveSession } from "@plugins/liveSession";
 import { openControlSettings } from "./ControlSettingsDialog";
 
 interface MenuEntry {
@@ -76,10 +78,20 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
   ctx.document.events.on("mapChanged", refreshTitle);
   refreshTitle();
 
+  const live = getLiveSession(ctx);
+  const liveButton = el("button", { class: "menu-btn", onclick: () => openLiveDialog(ctx) }, "Live editor · disconnected");
+  const syncStatus = el("span", { class: "live-sync-status", role: "status" });
+  live.events.on("status", message => {
+    liveButton.textContent = live.connected ? "Live editor · syncing" : live.working ? "Live editor · connecting" : "Live editor · disconnected";
+    syncStatus.textContent = message;
+    syncStatus.title = message;
+  });
   host.append(
     el("span", { class: "menu-brand" }, "trackedit"),
     menuButton("File", fileEntries),
     el("button", { class: "menu-btn", onclick: () => openControlSettings(ctx) }, "Controls"),
+    liveButton,
+    syncStatus,
     el("span", { class: "menu-spacer" }),
     title,
   );

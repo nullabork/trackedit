@@ -2,6 +2,7 @@ import { blocksEditorInput, dragAction, flyShortcut, wheelAction } from "@input/
 import { Emitter } from "@core/events";
 import type { MapDocument } from "@core/document";
 import { clampCoord } from "@core/math";
+import { initialBuildLevel } from "@core/mapbase";
 import type { GridCoord } from "@core/math";
 import type { SceneView } from "@render/SceneView";
 import type { DocumentRenderer } from "@render/DocumentRenderer";
@@ -37,7 +38,7 @@ export class ToolManager {
   private lastPointer: PointerEvent | null = null;
   private rightDownAt: { t: number; moved: number } | null = null;
   /** Current build Y level in cells. */
-  buildLevel = 0;
+  buildLevel: number;
 
   setInterceptor(i: InputInterceptor): void {
     this.interceptor = i;
@@ -48,6 +49,7 @@ export class ToolManager {
     private view: SceneView,
     private renderer: DocumentRenderer,
   ) {
+    this.buildLevel = initialBuildLevel(doc.baseType);
     const canvas = view.canvas;
     canvas.addEventListener("pointerdown", (e) => {
       if (view.rig.isFlying) return; // clicks land the fly, never place blocks

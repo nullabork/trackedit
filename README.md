@@ -41,6 +41,49 @@ commit or redistribute them.
 
 ## Map pipeline
 
+### Automatically sync blocks with the running game
+
+With the dev server and Trackmania running on the same machine:
+
+1. Open **Live editor** and click **Install / pair game plugin**. This uses the
+   Openplanet folder configured in asset setup.
+2. Load/reload **Trackedit Live** in Openplanet with Developer signature mode.
+   It requires **Editor++**; Map Together is not required.
+3. Open a map in the game's editor, outside testing/driving, and close in-game dialogs.
+4. Click **Connect and load game map** in trackedit. The current browser map is
+   saved first, and the game map opens as a separate browser document.
+5. Close the dialog and edit in either editor. Block placements, deletions,
+   moves/rotations, ground/ghost/free modes, variants, colors and waypoint fields
+   sync automatically. **Disconnect auto sync** stops syncing and keeps the
+   browser document.
+
+The bridge polls snapshots approximately twice per second while connected and
+sends batches of block changes with game revision checks and placement readback.
+It preserves identical duplicate blocks, includes hidden layers in sync, and bakes
+layer transforms into free blocks. Edits to different blocks merge; conflicting
+edits to the same block pause sync and preserve the browser edits. Connecting
+again saves that browser document and loads the game's current state.
+
+Game items are loaded on a locked, read-only layer and update from the game.
+Editing items in the browser pauses block sync. Skinned blocks are visible but
+protected from edits through this bridge. Terrain, generated clips, embedded asset
+transfer, and map settings are outside this block-sync protocol. Unknown meshes
+use placeholders. This is not a complete archival map import.
+
+Browser undo/redo generates inverse block changes. Incoming game changes that
+alter the browser document clear its undo stack to avoid undoing stale remote
+placements. Each outgoing batch creates a game undo point. A rejected/partial
+batch stops sync; reconnect to inspect actual game state instead of blindly
+retrying. Large edits are limited to 2000 additions/removals per batch. Game map
+switches, browser map switches and dropped connections require reconnecting.
+Only one browser tab may sync with the game at a time.
+
+Reinstall/pair and reload Trackedit Live after restarting the dev server (its
+pairing token changes). The local bridge is available through `npm run dev`, not
+in the static production build. Plugin source: [`tools/TrackeditLive`](tools/TrackeditLive).
+
+### File conversion
+
 ```
 .Map.Gbx --(meshdump map)--> map.json --Import--> edit --Export--> placements.json --(tracko gbxbuild)--> .Map.Gbx
 ```

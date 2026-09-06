@@ -70,23 +70,25 @@ describe("control presets", () => {
     const { rig, canvas, manager } = fixture();
     rig.controls.set(id);
     const distance = rig.focusDistance;
+    const level = manager.buildLevel;
     fire(canvas, "wheel", { deltaY: -100 });
     expect(rig.focusDistance).toBeLessThan(distance);
-    expect(manager.buildLevel).toBe(0);
+    expect(manager.buildLevel).toBe(level);
     const zoomed = rig.getState();
     fire(canvas, "wheel", { deltaY: -100, altKey: true });
-    expect(manager.buildLevel).toBe(1);
+    expect(manager.buildLevel).toBe(level + 1);
     expect(rig.getState()).toEqual(zoomed);
   });
 
   it("keeps Trackedit wheel height and camera dolly separate", () => {
     const { rig, canvas, manager } = fixture();
     const initial = rig.getState();
+    const level = manager.buildLevel;
     fire(canvas, "wheel", { deltaY: -100 });
-    expect(manager.buildLevel).toBe(1);
+    expect(manager.buildLevel).toBe(level + 1);
     expect(rig.getState()).toEqual(initial);
     fire(canvas, "wheel", { deltaY: -100, altKey: true });
-    expect(manager.buildLevel).toBe(1);
+    expect(manager.buildLevel).toBe(level + 1);
     expect(rig.getState().pos).not.toEqual(initial.pos);
   });
 

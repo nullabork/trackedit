@@ -1,4 +1,5 @@
 import type { GridCoord } from "./math";
+import { DEFAULT_Y_OFFSET } from "./math";
 
 /**
  * Map bases the document can sit on. Official decorations are
@@ -11,6 +12,11 @@ export type Mood = "Sunrise" | "Day" | "Sunset" | "Night";
 export const MOODS: Mood[] = ["Sunrise", "Day", "Sunset", "Night"];
 
 export type BaseType = "stadium" | "void";
+
+/** Raw grid level of the starting surface; void maps have no Stadium floor. */
+export function initialBuildLevel(type: BaseType): number {
+  return type === "stadium" ? DEFAULT_Y_OFFSET : 0;
+}
 
 export interface MapBase {
   readonly id: string;
