@@ -183,6 +183,18 @@ Getting started above) automates the whole flow through the dev server's
   `MESHDUMP_TRACE_MATERIAL=<name>` to print which block and reference first
   registered a material — the tool for "why does X have the wrong texture".
 
+A few game prefabs (the RoadTech finish, the `*v2` ramps, the podium) use
+a collision-surface chunk newer than the latest GBX.NET understands, so the
+whole prefab fails to load and the block used to export as clips only. The
+exporter then *salvages* the prefab (`tools/meshdump/Salvage.cs`): it reads
+the reference table by hand, re-wraps every inline mesh as its own Gbx so
+the same material references resolve, and finds entities that use external
+sub-prefabs (index + rotation + position) to place them exactly. Inline
+meshes are assumed at the prefab origin. `meshdump prefabfail <root>` lists
+every block whose body prefab GBX.NET refused; items rebuilt this way are
+marked `salvaged` in `index.json`, and version-suffixed items with nothing
+to salvage fall back to the previous version's mesh (`aliasOf`).
+
 This writes one OBJ per block variant and item, diffuse textures
 (DDS → PNG ≤512px) in `public/meshes/textures/`, `index.json` (footprints
 included) and `materials.json`. The editor picks everything up on reload.
@@ -254,6 +266,24 @@ The mood skyboxes in `public/sky/` are CC0 sky photographs from
 [Poly Haven](https://polyhaven.com/), baked to 2k equirects by
 `tools/fetch_skies.py`.
 
+## Ghost paths
+
+Opening a map from TMX draws the driving line of a ghost under the map's
+layer: green at the start, red at the finish, following the layer transform
+like every placement. The map's own validation ghost is used when the
+author left one in (`ChallengeParameters.RaceValidateGhost`); otherwise the
+dev server lists the map's TMX replays and downloads the one whose time is
+closest to the author medal (`/recordgbx/<ReplayId>`), the most
+representative clean line. **File ▸ Ghost path from TMX** fetches one for
+the active layer of an already-open TMX map. The path is stored on the
+layer (`ghost` in the map record) so it survives reloads. The tube's
+thickness is a render setting (Render settings ▸ Ghost line thickness).
+
+Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from
+tracko's ghostdump: TM2020 ghosts keep their samples in `CPlugEntRecordData`
+(107-byte vehicle states, position at byte 47); positions are game world
+metres and get the same vertical-origin lift as items on import.
+
 ## Controls
 
 Open **Controls** in the top menu to choose **Trackedit** (the existing
@@ -274,7 +304,8 @@ active shortcuts.
 | Cancel transform | Esc / right click | Esc / right click | Esc |
 
 Blender and Plasticity use WASD + Space/C only in fly mode. Esc, the fly
-shortcut, or a click exits toggled flight. P (place/grid ↔ free), E (select),
+shortcut, or a click exits toggled flight. P (grid constrained ↔
+unconstrained placement), E (select),
 Delete, and Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z remain editor shortcuts. X also
 deletes in the select tool with either modeling preset. Presets cover
 navigation and supported transforms; scaling and mesh-editing commands
@@ -284,9 +315,17 @@ and [Plasticity keymap](https://github.com/nkallen/plasticity/blob/master/src/st
 
 The following describes the default **Trackedit** scheme:
 
-- **Left click** — active tool, **P** — place mode (press again to toggle
-  **grid ↔ free** placement; free places anywhere on the layer plane at the
-  build height), **E** — select mode
+- **Left click** — active tool, **P** — toggle **grid constrained ↔
+  unconstrained** placement (a setting, it never changes the active tool;
+  it also governs the T/R transforms in select mode: grid constrained snaps
+  moves to the layer grid and rotations to the layer's **rotation step**
+  (a layer setting, 90° by default, shared by the layer itself and everything
+  in it), unconstrained moves freely and rotates in whole degrees), **E** —
+  select mode; picking a block in the palette is what starts placing
+- **Selection box handles** — drag an axis tag (X, Y, Z) to move the
+  selection along that axis; drag the ring beside it to rotate: the X ring
+  turns in the XY plane (about Z), the Y ring in XZ (about Y), the Z ring in
+  ZY (about X). Same snapping rules as the key sequences
 - **Click-drag in grid place** — paints blocks across cells (one undo step)
 - **X/Y/Z while placing** — constrain placement to that axis from where the
   ghost was (Y slides vertically); click places & releases, right-click/Esc
@@ -347,6 +386,8 @@ With the editor tab open, the development server also provides:
   counts, and material texture URLs, sidedness, and vertical-flip settings.
 - `/api/debug/command?action=reload`: reload the editor tab (after a mesh
   re-import; edits autosave, so nothing is lost).
+- `/api/debug/command?action=tmx&uid=<MapId>`: open a TMX map through the
+  same flow as the dialog (download, import, ghost line).
 - `/api/debug/command?action=focus&uid=p_n_etm1&yaw=112&pitch=-5&distance=42`:
   frame that placement. Angles are degrees; negative pitch looks down. Omit
   distance to fit the block to the viewport, including narrow viewports.

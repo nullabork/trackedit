@@ -157,6 +157,12 @@ export class TransformOperator implements Operator {
     this.applyPreview();
   }
 
+  /** Preset the axis constraint (the selection box's axis tags start a drag this way). */
+  setAxes(axes: AxisName[]): void {
+    this.axes = [...axes];
+    this.applyPreview();
+  }
+
   onKey(e: KeyboardEvent): boolean {
     const k = e.key.toLowerCase();
     if (k === "x" || k === "y" || k === "z") {
@@ -289,8 +295,15 @@ export class TransformOperator implements Operator {
     return free;
   }
 
+  /** The placement constraint mode (P): a setting shared with the place tool. */
+  private unconstrained(): boolean {
+    const place = this.ctx.tools.all.find((t) => t.id === "place") as { mode?: string } | undefined;
+    return place?.mode === "free";
+  }
+
   private snapToStep(v: Vector3, layer: Layer): Vector3 {
     if (this.typedValue() !== null) return v; // typed values are exact
+    if (this.unconstrained()) return v;       // unconstrained: move freely
     const step = layer.settings.gridStep;
     v.x = Math.round(v.x / step[0]) * step[0];
     v.y = Math.round(v.y / step[1]) * step[1];
@@ -306,7 +319,7 @@ export class TransformOperator implements Operator {
 
   /** Rotated layer state for preview/commit: quaternion + pivot-compensated position. */
   private layerRotation(t: LayerTarget): { quat: Quaternion; position: Vector3 } {
-    const theta = -degToRad(this.rotationDeg(false)); // positive = clockwise from above
+    const theta = -degToRad(this.rotationDeg(t.layer)); // positive = clockwise from above
     const qd = new Quaternion().setFromAxisAngle(axisVector(this.rotationAxis()), theta);
     // Rotate about the pivot: T' = P + qΔ·(T − P), R' = qΔ·R.
     const position = t.origTranslate.clone().sub(t.pivot).applyQuaternion(qd).add(t.pivot);
@@ -316,14 +329,18 @@ export class TransformOperator implements Operator {
   // --- rotate ---
 
   /**
-   * Typed angles are exact; mouse-driven rotation snaps — quarter turns for a
-   * grid block yawing (so it stays on the grid), 15° otherwise.
+   * Typed angles are exact. Mouse-driven rotation follows the placement
+   * constraint mode: grid constrained snaps to the target layer's rotation
+   * step (90 by default, so grid blocks stay on the grid); unconstrained
+   * turns in whole degrees.
    */
-  private rotationDeg(snapQuarters: boolean): number {
+  private rotationDeg(layer: Layer | undefined): number {
     const typed = this.typedValue();
     if (typed !== null) return typed;
     const raw = this.accX * 0.4;
-    return snapQuarters ? Math.round(raw / 90) * 90 : Math.round(raw / 15) * 15;
+    if (this.unconstrained()) return Math.round(raw);
+    const step = Math.max(1, layer?.settings.rotationStep ?? 90);
+    return Math.round(raw / step) * step;
   }
 
   private rotationAxis(): AxisName {
@@ -353,8 +370,7 @@ export class TransformOperator implements Operator {
         continue;
       }
       const axis = this.rotationAxis();
-      const isBlock = t.placement.kind === "block";
-      const theta = -degToRad(this.rotationDeg(isBlock && axis === "y")); // positive = clockwise from above
+      const theta = -degToRad(this.rotationDeg(t.layer)); // positive = clockwise from above
       const q = new Quaternion().setFromAxisAngle(axisVector(axis), theta);
       // Personal frame: rotate about the object's own axis (a road piece
       // pitches along its own direction).
@@ -380,7 +396,7 @@ export class TransformOperator implements Operator {
         this.label(),
       );
     }
-    if (this.rotationDeg(false) === 0) return null;
+    if (this.rotationDeg(t.layer) === 0) return null;
     const { quat, position } = this.layerRotation(t);
     const e = new Euler().setFromQuaternion(quat, "YXZ");
     return new UpdateLayerCmd(
@@ -402,6 +418,17 @@ export class TransformOperator implements Operator {
       if (delta.lengthSq() < 1e-9) return null;
       if (p.kind === "block") {
         const step = t.layer.settings.gridStep;
+        const onGrid = [delta.x / step[0], delta.y / step[1], delta.z / step[2]]
+          .every((c) => Math.abs(c - Math.round(c)) < 1e-4);
+        if (!onGrid) {
+          // Off-grid move (unconstrained mode, or a typed decimal): the game
+          // grid can't hold it — convert to a free block at the previewed
+          // spot (absPos is the footprint's min corner, see renderer).
+          const off = (t.obj.userData.originOffset as [number, number, number]) ?? [0, 0, 0];
+          const origin = new Vector3(...off).applyQuaternion(t.obj.quaternion).add(t.obj.position);
+          const e = new Euler().setFromQuaternion(t.obj.quaternion, "YXZ");
+          return { id: p.id, kind: "free", block: p.block, pos: [origin.x, origin.y, origin.z], rot: [e.y, e.x, e.z], isItem: false, meta: p.meta };
+        }
         const cells: GridCoord = [
           p.coord[0] + Math.round(delta.x / step[0]),
           p.coord[1] + Math.round(delta.y / step[1]),
@@ -415,7 +442,7 @@ export class TransformOperator implements Operator {
     }
 
     const axis = this.rotationAxis();
-    const deg = this.rotationDeg(p.kind === "block" && axis === "y");
+    const deg = this.rotationDeg(t.layer);
     if (deg === 0) return null;
     if (p.kind === "block") {
       // Pure quarter-turn yaw stays on the grid via `dir`...

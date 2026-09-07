@@ -43,9 +43,17 @@ export interface LayerSettings {
   gridStep: Vec3;
   /** LOD: real meshes load within this range of the camera (metres). */
   lodDistance: number;
+  /**
+   * Rotation snap in degrees while grid constrained, for the layer itself and
+   * everything in it (R sequences and the selection box's rotate rings).
+   * Unconstrained rotation ignores it. Grid blocks yawed by a non-quarter
+   * step convert to free blocks.
+   */
+  rotationStep: number;
 }
 
 export const DEFAULT_LOD_DISTANCE = 700;
+export const DEFAULT_ROTATION_STEP = 90;
 
 /**
  * Rigid transform applied to the whole layer (rotation about the layer
@@ -58,6 +66,21 @@ export interface LayerTransform {
   rotDeg: Vec3;
 }
 
+/**
+ * A driving line attached to a layer: the map's validation ghost or a TMX
+ * replay. Points are layer-local editor metres (same frame as
+ * FreePlacement.pos), so the layer transform moves the line with the track.
+ */
+export interface GhostPath {
+  source: "map" | "tmx";
+  /** Who drove it, and for TMX which replay — status/UI text only. */
+  label: string;
+  timeMs?: number;
+  path: Vec3[];
+  /** Sample times in ms, parallel to `path`, when the source had them. */
+  times?: number[];
+}
+
 export interface Layer {
   readonly id: string;
   name: string;
@@ -68,6 +91,7 @@ export interface Layer {
   settings: LayerSettings;
   transform: LayerTransform;
   readonly placements: Map<string, Placement>;
+  ghost?: GhostPath;
 }
 
 export function createLayer(name: string): Layer {
@@ -77,7 +101,7 @@ export function createLayer(name: string): Layer {
     visible: true,
     locked: false,
     clampToBase: false,
-    settings: { gridStep: CELL, lodDistance: DEFAULT_LOD_DISTANCE },
+    settings: { gridStep: CELL, lodDistance: DEFAULT_LOD_DISTANCE, rotationStep: DEFAULT_ROTATION_STEP },
     transform: { translate: [0, 0, 0], rotDeg: [0, 0, 0] },
     placements: new Map(),
   };

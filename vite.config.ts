@@ -29,12 +29,71 @@ const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
  *
  *   GET /api/tmx/search?q=name   -> TMX map search JSON
  *   GET /api/tmx/load/:id        -> downloads the map, runs gbxdump, returns dump JSON
+ *                                   (+ `ghost` when the map carries a validation ghost)
+ *   GET /api/tmx/ghost/:id       -> the driving path of the TMX replay closest to the
+ *                                   map's author time (404 when the map has no replay file)
  */
 function tmxBridge(): Plugin {
   const convertMap = createMapConverter(process.cwd());
+  const TMX_HEADERS = { "User-Agent": "trackedit-dev" };
+  /** `meshdump ghost`: the path JSON, or null when the file holds no ghost. */
+  const extractGhost = (gbx: string, out: string) =>
+    new Promise<Record<string, unknown> | null>((resolve) => {
+      execFile(MESHDUMP, ["ghost", gbx, out], { timeout: 120_000 }, async (err) => {
+        if (err) return resolve(null);
+        try { resolve(JSON.parse(await readFile(out, "utf-8"))); } catch { resolve(null); }
+      });
+    });
   return {
     name: "tmx-bridge",
     configureServer(server) {
+      server.middlewares.use("/api/tmx/ghost", async (req, res) => {
+        let dir: string | null = null;
+        const fail = (code: number, msg: string) => {
+          res.statusCode = code;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: msg }));
+        };
+        try {
+          const id = (req.url ?? "").split("/").filter(Boolean).pop();
+          if (!id || !/^\d+$/.test(id)) return fail(400, "bad map id");
+          const mapRes = await fetch(
+            `https://trackmania.exchange/api/maps?id=${id}&fields=${encodeURIComponent("MapId,Medals.Author")}`,
+            { headers: TMX_HEADERS });
+          const mapJson = (await mapRes.json()) as { Results?: { Medals?: { Author?: number } }[] };
+          const authorTime = mapJson.Results?.[0]?.Medals?.Author ?? 0;
+          const listRes = await fetch(
+            `https://trackmania.exchange/api/replays?mapid=${id}&count=50&fields=${encodeURIComponent("ReplayId,ReplayTime,HasFile,User.Name")}`,
+            { headers: TMX_HEADERS });
+          if (!listRes.ok) return fail(502, `TMX replays ${listRes.status}`);
+          const list = (await listRes.json()) as { Results?: { ReplayId: number; ReplayTime: number; HasFile?: boolean; User?: { Name?: string } }[] };
+          const usable = (list.Results ?? []).filter((r) => r.HasFile !== false && r.ReplayTime > 0);
+          if (!usable.length) return fail(404, "no replay with a file on TMX");
+          // Closest to the author time: a representative clean line, not a
+          // cut or a crawl. Without an author time, the fastest.
+          usable.sort((a, b) => authorTime
+            ? Math.abs(a.ReplayTime - authorTime) - Math.abs(b.ReplayTime - authorTime)
+            : a.ReplayTime - b.ReplayTime);
+          const pick = usable[0];
+          const file = await fetch(`https://trackmania.exchange/recordgbx/${pick.ReplayId}`, { headers: TMX_HEADERS });
+          if (!file.ok) return fail(502, `TMX replay download ${file.status}`);
+          dir = await mkdtemp(join(tmpdir(), "trackedit-ghost-"));
+          const gbx = join(dir, "replay.Replay.Gbx");
+          await writeFile(gbx, Buffer.from(await file.arrayBuffer()));
+          const ghost = await extractGhost(gbx, join(dir, "ghost.json"));
+          if (!ghost) return fail(404, `replay #${pick.ReplayId} holds no readable ghost`);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            source: "tmx", replayId: pick.ReplayId, replayTime: pick.ReplayTime, authorTime,
+            nickname: pick.User?.Name ?? ghost.nickname ?? null, ...ghost,
+          }));
+        } catch (err) {
+          fail(500, String(err));
+        } finally {
+          if (dir) void rm(dir, { recursive: true, force: true });
+        }
+      });
+
       server.middlewares.use("/api/tmx/search", async (req, res) => {
         try {
           const q = new URL(req.url ?? "", "http://x").searchParams.get("q") ?? "";
@@ -92,6 +151,9 @@ function tmxBridge(): Plugin {
           });
           const dump = JSON.parse(await readFile(out, "utf-8"));
           if (mod?.url) dump.mod = mod;
+          // The map's own validation ghost, when the author left one in.
+          const ghost = await extractGhost(gbx, join(dir, "ghost.json"));
+          if (ghost) dump.ghost = { source: "map", ...ghost };
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify(dump));
         } catch (err) {

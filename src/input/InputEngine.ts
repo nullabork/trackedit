@@ -68,11 +68,11 @@ export class InputEngine {
         return true;
       }
       if (k === "p") {
-        // P enters place mode; pressed again it toggles grid <-> free place.
-        const active = this.ctx.tools.activeTool;
-        if (active?.id === "place" && "toggleMode" in active)
-          (active as { toggleMode(): void }).toggleMode();
-        else this.ctx.tools.setActive("place");
+        // P toggles grid constrained <-> unconstrained placement. It is a
+        // setting, not a tool: the active tool stays (arming a block from
+        // the palette is what enters placing).
+        const place = this.ctx.tools.all.find((t) => t.id === "place");
+        if (place && "toggleMode" in place) (place as { toggleMode(): void }).toggleMode();
         return true;
       }
       return false;

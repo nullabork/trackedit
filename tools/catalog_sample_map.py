@@ -5,6 +5,7 @@ opened in the editor.
     python tools/catalog_sample_map.py                 # 8 per category
     python tools/catalog_sample_map.py --per 5 --id map_catalog_sample --open
     python tools/catalog_sample_map.py --only "Road Tech" --per 20
+    python tools/catalog_sample_map.py --list names.txt --id map_check   # exact names, blocks or items
 
 Then `python tools/block_sheets.py --map <id>` captures every placement.
 Only blocks with an exported mesh (public/meshes/index.json) are used; each
@@ -28,6 +29,8 @@ def main():
     ap.add_argument("--id", default="map_catalog_sample")
     ap.add_argument("--name", default="Catalog sample")
     ap.add_argument("--only", help="substring filter on category")
+    ap.add_argument("--list", help="file with one exact block or item name per line (one row per 12); "
+                                   "names without a mesh are placed anyway, to see the placeholder")
     ap.add_argument("--random", action="store_true", help="random picks instead of most-used")
     ap.add_argument("--spread", action="store_true",
                     help="evenly spaced picks through the category (sorted by name) instead of most-used")
@@ -49,6 +52,40 @@ def main():
     z = 1
     max_x = 0
     gap = 2
+    if args.list:
+        # Hand-picked set: blocks on the grid, items as free placements at
+        # the cell centre (items are metres, not cells). Twelve per row.
+        items_index = json.loads((ROOT / "public/meshes/index.json").read_text()).get("items", {})
+        names = [l.strip() for l in Path(args.list).read_text().splitlines() if l.strip() and not l.startswith("#")]
+        by_cat = {}
+        x = 1
+        row_depth = 1
+        for i, name in enumerate(names):
+            if i and i % 12 == 0:
+                max_x = max(max_x, x)
+                z += row_depth + gap + 1
+                x = 1
+                row_depth = 1
+            n += 1
+            if name in items_index or name not in index:
+                is_item = name in items_index or name not in index and not any(b["name"] == name for b in catalog)
+                if is_item:
+                    placements.append({
+                        "id": f"p_cs_{n:04d}", "kind": "free", "block": name,
+                        "pos": [x * 32 + 16, 0, z * 32 + 16], "rot": [0, 0, 0], "isItem": True,
+                        "meta": {"category": "list"},
+                    })
+                    x += 1 + gap
+                    continue
+            size = (index.get(name) or {}).get("size") or [1, 1, 1]
+            placements.append({
+                "id": f"p_cs_{n:04d}", "kind": "block", "block": name,
+                "coord": [x, 0, z], "dir": 0, "meta": {"category": "list"},
+            })
+            x += size[0] + gap
+            row_depth = max(row_depth, size[2])
+        max_x = max(max_x, x)
+        z += row_depth + gap + 1
     for cat in sorted(by_cat):
         if args.only and args.only.lower() not in cat.lower():
             continue

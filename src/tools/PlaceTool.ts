@@ -65,7 +65,11 @@ export class PlaceTool implements Tool {
     // The ghost lives inside the active layer's group so it sits on that
     // layer's (possibly tilted) plane — re-home it when the layer changes.
     ctx.document.events.on("activeLayerChanged", () => this.refreshGhost());
-    ctx.document.events.on("reset", () => this.refreshGhost());
+    ctx.document.events.on("reset", () => {
+      this.refreshGhost();
+      // A freshly loaded map with nothing armed to place is for selecting.
+      if (!this.armed && ctx.tools.activeTool === this) ctx.tools.setActive("select");
+    });
     // The drop line's length depends on the build height.
     ctx.tools.events.on("buildLevelChanged", () => this.refreshGhost());
   }
@@ -78,8 +82,8 @@ export class PlaceTool implements Tool {
     const height = this.ctx.view.rig.controls.scheme.height.toLowerCase();
     const rotate = this.ctx.view.rig.controls.id === "plasticity" ? "R rotate" : "R/right-click rotate";
     return this.modeState === "grid"
-      ? `Grid place · click/drag paints · X/Y/Z constrain · ${rotate} · ${height} height · P free mode`
-      : `Free place · click places on the plane · X/Y/Z constrain · ${rotate} · ${height} height · P grid mode`;
+      ? `Grid constrained · click/drag paints · X/Y/Z constrain · ${rotate} · ${height} height · P unconstrained`
+      : `Unconstrained · click places on the plane · X/Y/Z constrain · ${rotate} · ${height} height · P grid constrained`;
   }
 
   setMode(mode: PlaceMode): void {
@@ -88,7 +92,10 @@ export class PlaceTool implements Tool {
     this.releaseConstraint();
     this.refreshGhost();
     this.ctx.events.emit("placeModeChanged", { mode });
-    this.ctx.ui.setStatus(this.hint);
+    // Toggled from another tool: just say what changed, keep that tool's hint.
+    this.ctx.ui.setStatus(this.ctx.tools.activeTool === this
+      ? this.hint
+      : `Placement: ${mode === "grid" ? "grid constrained" : "unconstrained"}`);
   }
 
   toggleMode(): void {

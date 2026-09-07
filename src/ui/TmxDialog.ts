@@ -1,9 +1,7 @@
 import type { EditorContext } from "@plugins/api";
-import { importDump } from "@io/trackoJson";
-import type { MapDump } from "@io/trackoJson";
 import { clear, el } from "./dom";
 import { openDialog } from "./dialog";
-import { persistNow, session } from "./session";
+import { openTmxMap } from "./tmxOpen";
 
 interface TmxResult {
   MapId: number;
@@ -68,26 +66,7 @@ export function openTmxDialog(ctx: EditorContext): void {
         el("span", {}, ` Downloading "${r.Name}" and parsing… big maps take a few seconds`),
       );
       try {
-        const res = await fetch(`/api/tmx/load/${r.MapId}`);
-        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
-        const dump = (await res.json()) as MapDump;
-        // The bridge may have extracted the map's embedded custom assets
-        // into the mesh library — pick up the fresh index before rendering.
-        await (ctx.geometry as { init?: () => Promise<boolean> }).init?.();
-        const imported = importDump(dump);
-        // TMX tracks carry their TMX identity into the local database.
-        ctx.document.id = `tmx-${r.MapId}`;
-        ctx.document.reset(imported.layers, {
-          name: dump.mapName ?? r.Name,
-          decoration: dump.decoration,
-          modUrl: imported.modUrl,
-        });
-        session.ready = true;
-        void persistNow(ctx);
-        ctx.ui.setStatus(
-          `Opened ${dump.mapName ?? r.Name}: ${imported.stats.gridBlocks + imported.stats.freeBlocks} blocks, ` +
-          `${imported.stats.items} items (TMX #${r.MapId})`,
-        );
+        await openTmxMap(ctx, r.MapId, r.Name);
         dialog.close();
       } catch (err) {
         status.textContent = `Load failed: ${err instanceof Error ? err.message : err}`;

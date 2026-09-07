@@ -30,12 +30,14 @@ using GBX.NET.Engines.Game;
 using GBX.NET.Engines.GameData;
 using GBX.NET.Engines.Plug;
 using GBX.NET.LZO;
+using GBX.NET.ZLib;
 using GBX.NET.PAK;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
 Gbx.LZO = new Lzo();
+Gbx.ZLib = new ZLib();
 
 if (args.Length < 2)
 {
@@ -61,6 +63,18 @@ switch (args[0])
         catch (Exception ex)
         {
             Console.Error.WriteLine($"map conversion failed: {ex.Message}");
+            return 1;
+        }
+    case "ghost":
+        // meshdump ghost <Map.Gbx|Replay.Gbx> [out.json] ï¿½ the driving path of the
+        // map's validation ghost or the replay's first ghost (exit 2 if none).
+        try
+        {
+            return Trackedit.GhostDump.Run(args[1], args.Length > 2 ? args[2] : null);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ghost extraction failed: {ex.Message}");
             return 1;
         }
     case "probe":
@@ -255,7 +269,7 @@ switch (args[0])
     case "geomxf":
         {
             // Survey: which block/clip mobils carry a geometry transform
-            // (HasGeomTransformation) — the game rotates/translates the
+            // (HasGeomTransformation) ï¿½ the game rotates/translates the
             // referenced prefab before placing it.
             var n = 0; var total = 0;
             foreach (var f in Directory.EnumerateFiles(Path.Combine(args[1], "GameCtnBlockInfo"), "*.Gbx", SearchOption.AllDirectories))
@@ -284,10 +298,42 @@ switch (args[0])
             var d = new Dumper(args[1], Path.GetTempPath(), null);
             return d.ClipObj(args[2], args[3], int.Parse(args[4]), args[5]);
         }
+    case "prefabfail":
+        {
+            // Survey: blocks whose body prefab reference did not load (GBX.NET
+            // could not parse the prefab) ï¿½ those export as clips only.
+            var byError = new Dictionary<string, List<string>>();
+            var n = 0;
+            foreach (var f in Directory.EnumerateFiles(Path.Combine(args[1], "GameCtnBlockInfo"), "*.EDClassic.Gbx", SearchOption.AllDirectories))
+            {
+                Gbx? gbx; CGameCtnBlockInfo? bi;
+                try { gbx = Gbx.Parse(f); bi = gbx.Node as CGameCtnBlockInfo; } catch { continue; }
+                if (bi is null) continue;
+                foreach (var v in new[] { bi.VariantBaseAir, (CGameCtnBlockInfoVariant?)bi.VariantBaseGround })
+                    foreach (var row in v?.Mobils ?? [])
+                        foreach (var mob in row)
+                        {
+                            if (mob?.PrefabFidFile is null || mob.PrefabFid is not null || mob.SolidFid is not null) continue;
+                            var full = ResolveRef(f, gbx.RefTable?.AncestorLevel ?? 0, mob.PrefabFidFile.FilePath);
+                            string err;
+                            if (!File.Exists(full)) err = "file missing";
+                            else { try { Gbx.ParseNode(full); err = "loads standalone"; } catch (Exception ex) { err = ex.Message; } }
+                            var key = $"{err} :: {mob.PrefabFidFile.FilePath}";
+                            if (!byError.TryGetValue(key, out var list)) byError[key] = list = [];
+                            if (!list.Contains(bi.Name)) { list.Add(bi.Name); n++; }
+                            goto next;
+                        }
+                next:;
+            }
+            foreach (var (key, list) in byError.OrderByDescending(kv => kv.Value.Count))
+                Console.WriteLine($"{list.Count,4}  {key}\n        {string.Join(", ", list.Take(12))}{(list.Count > 12 ? " ..." : "")}");
+            Console.WriteLine($"prefabfail: {n} block/variant bodies not loaded");
+            return 0;
+        }
     case "icons":
         {
             // Dump every block's editor icon (the game's own render of the
-            // block) as <outDir>/<Name>.webp — ground truth for what a block
+            // block) as <outDir>/<Name>.webp ï¿½ ground truth for what a block
             // should look like when reviewing our exports.
             var outDir = args[2];
             Directory.CreateDirectory(outDir);
@@ -680,7 +726,7 @@ sealed class EmbeddedDumper(string outDir)
 
 /// <summary>Pure helpers for the terrain-modifier files (kept free of game
 /// data so the contract tests can cover them).</summary>
-/// <summary>Mobil geometry transforms and vertical-clip row selection —
+/// <summary>Mobil geometry transforms and vertical-clip row selection ï¿½
 /// pure functions, pinned by tools/meshdump.tests.</summary>
 public static class MobilGeom
 {
@@ -998,9 +1044,14 @@ sealed class Dumper(string root, string outDir, string? filter)
         var usedVegetProxy = false;
 
         var processed = 0;
+        // Items GBX.NET can't read (newer chunk versions) ï¿½ resolved below.
+        var unreadable = new List<string>();
         foreach (var file in files)
         {
             Progress(++processed, files.Count);
+            var stem = Path.GetFileName(file);
+            stem = stem[..^".Item.Gbx".Length];
+            if (!MatchesFilter(stem)) { skipped++; continue; }
             try
             {
                 var gbx = Gbx.Parse(file);
@@ -1052,9 +1103,47 @@ sealed class Dumper(string root, string outDir, string? filter)
             }
             catch (Exception ex)
             {
+                // The item file itself is unreadable: its prefab (from the
+                // reference table, which still parses) may still yield meshes.
+                var builder = new ObjBuilder();
+                try
+                {
+                    var rt = Gbx.ParseHeader(file).RefTable;
+                    foreach (var rf in rt?.Files ?? [])
+                        if (rf.FilePath.EndsWith(".Prefab.Gbx", StringComparison.OrdinalIgnoreCase))
+                            SalvagePrefab(builder, rf.FilePath, Quaternion.Identity, Vector3.Zero);
+                }
+                catch { /* fall through to the version alias below */ }
+                if (!builder.IsEmpty)
+                {
+                    File.WriteAllText(Path.Combine(outDir, "items", stem + ".obj"), builder.ToObj());
+                    items[stem] = new JsonObject { ["obj"] = $"items/{stem}.obj", ["salvaged"] = true };
+                    ok++;
+                    Console.Error.WriteLine($"  {Path.GetFileName(file)}: {ex.Message} â€” meshes salvaged from its prefab");
+                    continue;
+                }
                 failed++;
+                unreadable.Add(stem);
                 Console.Error.WriteLine($"  FAIL {Path.GetFileName(file)}: {ex.Message}");
             }
+        }
+
+        // Versioned re-releases (RampHighv2 ï¿½) whose files use chunk versions
+        // this GBX.NET can't parse: show the previous version's mesh rather
+        // than a placeholder box ï¿½ same footprint, near-identical look. The
+        // index records the alias so a future parser upgrade can replace it.
+        foreach (var name in unreadable)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)v(\d+)$");
+            if (!m.Success) continue;
+            var baseName = m.Groups[1].Value;
+            var ver = int.Parse(m.Groups[2].Value);
+            var candidates = Enumerable.Range(1, ver - 1).Reverse()
+                .Select(v => v == 1 ? baseName : $"{baseName}v{v}").Concat([baseName]);
+            var source = candidates.FirstOrDefault(c => items[c] is JsonObject o && o["obj"] is not null);
+            if (source is null) continue;
+            items[name] = new JsonObject { ["obj"] = items[source]!["obj"]!.GetValue<string>(), ["aliasOf"] = source };
+            Console.WriteLine($"  alias {name} -> {source} (unreadable item file)");
         }
 
         if (usedVegetProxy)
@@ -1171,6 +1260,60 @@ sealed class Dumper(string root, string outDir, string? filter)
         var ct = Vector3.Transform(gt, q) + t;
         if (mob.SolidFid is CPlugSolid solid) AddSolid(b, solid, cq, ct);
         if (mob.PrefabFid is CPlugPrefab prefab) AddPrefab(b, prefab, cq, ct);
+        else if (mob.SolidFid is null && mob.PrefabFidFile?.FilePath is { } rel)
+            SalvagePrefab(b, rel, cq, ct);
+    }
+
+    /** Full paths of every Gbx under the root by file name â€” for references
+     *  GBX.NET could not load (we then only have the relative path). */
+    private Dictionary<string, List<string>>? gbxByName;
+
+    private string? FindGameFile(string relativePath)
+    {
+        gbxByName ??= Directory.EnumerateFiles(root, "*.Gbx", Fs.Recurse)
+            .GroupBy(f => Path.GetFileName(f).ToLowerInvariant())
+            .ToDictionary(g => g.Key, g => g.ToList());
+        var name = Path.GetFileName(relativePath).ToLowerInvariant();
+        if (!gbxByName.TryGetValue(name, out var paths)) return null;
+        var suffix = relativePath.Replace('\\', '/').ToLowerInvariant();
+        return paths.FirstOrDefault(p => p.Replace('\\', '/').ToLowerInvariant().EndsWith(suffix)) ?? paths[0];
+    }
+
+    private readonly Dictionary<string, Trackedit.SalvageResult> salvaged = new(StringComparer.OrdinalIgnoreCase);
+
+    /** A prefab GBX.NET refused: recover what Salvage can â€” inline meshes at
+     *  the prefab origin, external sub-prefabs at their recorded placement
+     *  (parsed normally, or salvaged in turn). Logged once per file. */
+    private void SalvagePrefab(ObjBuilder b, string relativePath, Quaternion q, Vector3 t, int depth = 0)
+    {
+        if (depth > 4) return;
+        var path = FindGameFile(relativePath);
+        if (path is null) return;
+        if (!salvaged.TryGetValue(path, out var res))
+        {
+            try { res = Trackedit.Salvage.Read(path); }
+            catch (Exception ex) { Console.Error.WriteLine($"  salvage failed {Path.GetFileName(path)}: {ex.Message}"); res = new Trackedit.SalvageResult(); }
+            salvaged[path] = res;
+            Console.Error.WriteLine($"  salvaged {res.Inline.Count} mesh(es) + {res.External.Count} sub-model(s) from unreadable {Path.GetFileName(path)}");
+        }
+        foreach (var m in res.Inline) AddSolid2(b, m, q, t);
+        foreach (var (rel, rot, pos) in res.External)
+        {
+            var cq = Quaternion.Concatenate(rot, q);
+            var ct = Vector3.Transform(pos, q) + t;
+            var full = FindGameFile(rel);
+            if (full is null) continue;
+            object? node = null;
+            try { node = Gbx.ParseNode(full); } catch { /* salvage below */ }
+            switch (node)
+            {
+                case CPlugPrefab sub: AddPrefab(b, sub, cq, ct); break;
+                case CPlugStaticObjectModel { Mesh: not null } so: AddSolid2(b, so.Mesh, cq, ct); break;
+                case CPlugSolid2Model s2: AddSolid2(b, s2, cq, ct); break;
+                case CPlugSolid solid: AddSolid(b, solid, cq, ct); break;
+                case null: SalvagePrefab(b, rel, cq, ct, depth + 1); break;
+            }
+        }
     }
 
     private static bool HasGeometry(CGameCtnBlockInfoMobil? m) =>
@@ -1377,7 +1520,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         var footprint = (new Vector3(0f, float.MinValue, 0f),
                          new Vector3(cells[0] * 32f, float.MaxValue, cells[2] * 32f));
         // The block body (mobil) as it was before any clip: the seat test
-        // below measures against THIS, not against clips merged earlier —
+        // below measures against THIS, not against clips merged earlier ï¿½
         // on mesh-less blocks (deco cliffs, stage supports) the first wall
         // otherwise rejects every wall on the far faces.
         var hasBody = !builder.IsEmpty;
@@ -1388,7 +1531,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         var units = (variant.BlockUnitModels ?? []).Where(u => u is not null).ToList();
         // Cells (4u) already covered by committed top/bottom caps: a cap
         // shared by several units (chicanes, diagonals) is one plate split
-        // into point-symmetric halves — each copy must land on its own half.
+        // into point-symmetric halves ï¿½ each copy must land on its own half.
         var capCover = new Dictionary<string, bool[,]>();
         // Does the same vertical wall continue on the unit above/below this
         // one (same face, same clip group)? Picks the wall segment row.
@@ -1704,6 +1847,9 @@ sealed class Dumper(string root, string outDir, string? filter)
                     break;
                 case CPlugPrefab sub:
                     AddPrefab(b, sub, cq, ct);
+                    break;
+                case null when ent.ModelFile?.FilePath is { } rel:
+                    SalvagePrefab(b, rel, cq, ct);
                     break;
             }
         }

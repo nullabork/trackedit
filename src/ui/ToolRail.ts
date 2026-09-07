@@ -68,21 +68,20 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
     ctx.tools.all.find((t) => t.id === "place") as
       | { mode: "grid" | "free"; toggleMode(): void }
       | undefined;
-  const modeBtn = railButton("gridmode", "Grid place", "P", () => {
-    if (ctx.tools.activeTool?.id !== "place") ctx.tools.setActive("place");
-    else placeTool()?.toggleMode();
-  });
+  // The constraint mode is a setting, not a tool: toggling it never
+  // changes which tool is active (arming a block from the palette does).
+  const modeBtn = railButton("gridmode", "Grid constrained", "P", () => placeTool()?.toggleMode());
   const refreshModeBtn = () => {
     const mode = placeTool()?.mode ?? "grid";
     clear(modeBtn);
     modeBtn.append(
       icon(mode === "grid" ? "gridmode" : "freemode"),
       el("span", { class: "tip" },
-        mode === "grid" ? "Grid place — switch to free" : "Free place — switch to grid",
+        mode === "grid" ? "Grid constrained — switch to unconstrained" : "Unconstrained — switch to grid constrained",
         el("b", {}, " P"),
       ),
     );
-    modeBtn.classList.toggle("active", ctx.tools.activeTool?.id === "place");
+    modeBtn.classList.toggle("active", mode === "free");
   };
   ctx.events.on("placeModeChanged", refreshModeBtn);
   ctx.tools.events.on("activeChanged", refreshModeBtn);

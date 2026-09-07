@@ -35,6 +35,16 @@ export interface RenderPrefs {
    *  reach before dissolving (DocumentRenderer.updateGridFade). */
   gridFade: number;
   gridColor: string;
+  /** Ghost driving-line tube radius in metres (plugins/ghostPath). */
+  ghostRadius: number;
+  /** Selection outline (non-axis edges). */
+  selectionColor: string;
+  /** The three axis edges of the selection box and their tags. */
+  axisX: string;
+  axisY: string;
+  axisZ: string;
+  /** The active layer's ground-plane outline square. */
+  planeColor: string;
 }
 
 export const DEFAULT_RENDER_PREFS: RenderPrefs = {
@@ -43,6 +53,12 @@ export const DEFAULT_RENDER_PREFS: RenderPrefs = {
   lighting: "flat",
   gridFade: 30,
   gridColor: "#8fb5dc",
+  ghostRadius: 1.2,
+  selectionColor: "#ffc83c",
+  axisX: "#ff4d4d",
+  axisY: "#3ddc97",
+  axisZ: "#4a90e2",
+  planeColor: "#ff8c1a",
 };
 
 /** Lighting presets per mood; the matching skybox is painted in sky.ts
@@ -179,6 +195,15 @@ export class SceneView {
   setRenderPrefs(prefs: RenderPrefs): void {
     this.prefs = { ...prefs };
     this.setAmbience(this.lastMood, this.lastBase);
+    for (const cb of this.prefListeners) cb(this.prefs);
+  }
+
+  private readonly prefListeners = new Set<(prefs: RenderPrefs) => void>();
+
+  /** Subscribe to render-pref changes (returns an unsubscribe). */
+  onRenderPrefsChanged(cb: (prefs: RenderPrefs) => void): () => void {
+    this.prefListeners.add(cb);
+    return () => this.prefListeners.delete(cb);
   }
 
   /** Mood lighting + the skybox (dimmed for void/no-stadium bases),
