@@ -4,6 +4,7 @@ import type { EditorContext, EditorPlugin } from "./api";
 import type { Layer, Placement } from "@core/layer";
 import { getCurrentId, loadMap } from "@io/mapStore";
 import { applyStored } from "@ui/session";
+import { openTmxMap } from "@ui/tmxOpen";
 import { el, clear } from "@ui/dom";
 
 /**
@@ -187,6 +188,13 @@ export const instrumentationPlugin: EditorPlugin = {
         const renderer = ctx.renderer as { setWireframe?: (on: boolean) => void };
         renderer.setWireframe?.(uid !== "off");
         return { ok: true, wireframe: uid !== "off" };
+      }
+      if (action === "tmx") {
+        // ?action=tmx&uid=<MapId>: open a TMX map through the same flow as
+        // the dialog (download, import, ghost line). Loads async.
+        if (!uid || !/^\d+$/.test(uid)) return { ok: false, error: "TMX map id required" };
+        void openTmxMap(ctx, Number(uid)).catch((err) => ctx.ui.setStatus(`TMX open failed: ${err}`));
+        return { ok: true, opening: `tmx-${uid}` };
       }
       if (action === "open") {
         // ?action=open&uid=<mapId>: open a stored map (e.g. one a script just

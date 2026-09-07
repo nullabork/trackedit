@@ -100,6 +100,22 @@ export function openRenderSettings(ctx: EditorContext): void {
     gridColorInput,
   );
 
+  // Ghost driving line: tube radius in metres (a car is ~2 m wide).
+  const ghostSlider = el("input", { type: "range", min: "0.3", max: "5", step: "0.1" }) as HTMLInputElement;
+  ghostSlider.value = String(prefs.ghostRadius);
+  const ghostValue = el("span", { class: "grid-fade-value" }, `${prefs.ghostRadius.toFixed(1)} m`);
+  ghostSlider.addEventListener("input", () => {
+    prefs.ghostRadius = Number(ghostSlider.value);
+    ghostValue.textContent = `${prefs.ghostRadius.toFixed(1)} m`;
+    apply();
+  });
+  const ghostRow = el("div", { class: "field" },
+    el("label", {}, "Ghost line thickness"),
+    el("div", { class: "grid-fade-row" }, ghostSlider, ghostValue),
+    el("div", { class: "hint" },
+      "Radius of the ghost driving tube drawn under a TMX map's layer."),
+  );
+
   const content = el("div", { class: "render-settings" },
     el("p", { class: "hint" },
       "Editor viewport only — none of this changes the map or what it looks like in game."),
@@ -114,6 +130,7 @@ export function openRenderSettings(ctx: EditorContext): void {
     colorRow,
     gridRow,
     gridColorRow,
+    ghostRow,
     el("div", { class: "field" },
       el("label", {}, "Lighting"),
       seg(

@@ -16,7 +16,7 @@ import {
   quatMul,
   quatRotate,
 } from "@core/math";
-import type { Layer, Placement } from "@core/layer";
+import type { GhostPath, Layer, Placement } from "@core/layer";
 import { createLayer, isIdentityTransform } from "@core/layer";
 import type { MapDocument } from "@core/document";
 
@@ -41,11 +41,24 @@ export interface DumpItem {
   [extra: string]: unknown;
 }
 
+/** `meshdump ghost` output: world metres, same frame as absPos. */
+export interface DumpGhost {
+  source?: "map" | "tmx";
+  nickname?: string | null;
+  raceTimeMs?: number | null;
+  /** TMX replay id, when the bridge fetched one. */
+  replayId?: number;
+  path: [number, number, number][];
+  times?: number[];
+}
+
 export interface MapDump {
   mapName?: string;
   decoration?: string;
   /** Custom texture pack reference (attached by the TMX bridge). */
   mod?: { url?: string };
+  /** The map's own validation ghost (attached by the TMX bridge). */
+  ghost?: DumpGhost;
   blocks?: DumpBlock[];
   items?: DumpItem[];
 }
@@ -68,6 +81,19 @@ function freePosToEditor(p: [number, number, number], yOffsetCells: number): Vec
 
 function editorPosToFree(p: Vec3, yOffsetCells: number): [number, number, number] {
   return [p[0], p[1] - yOffsetCells * CELL[1], p[2]];
+}
+
+/** A dumped ghost as a layer ghost: lifted like every free position. */
+export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): GhostPath {
+  const source = g.source ?? "map";
+  const who = g.nickname ? ` by ${g.nickname}` : "";
+  return {
+    source,
+    label: (source === "tmx" ? `TMX replay${g.replayId ? ` #${g.replayId}` : ""}` : "Validation ghost") + who,
+    timeMs: g.raceTimeMs ?? undefined,
+    path: g.path.map((p) => freePosToEditor(p, yOffsetCells)),
+    ...(g.times?.length === g.path.length ? { times: [...g.times] } : {}),
+  };
 }
 
 /** Fields importDump consumes; everything else rides along in placement.meta. */
@@ -134,6 +160,8 @@ export function importDump(dump: MapDump, yOffsetCells = DEFAULT_Y_OFFSET): {
     }));
     stats.items += 1;
   }
+
+  if (dump.ghost?.path?.length) layer.ghost = ghostToLayer(dump.ghost, yOffsetCells);
 
   return {
     layers: [layer],

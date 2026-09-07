@@ -183,6 +183,11 @@ Getting started above) automates the whole flow through the dev server's
   `MESHDUMP_TRACE_MATERIAL=<name>` to print which block and reference first
   registered a material — the tool for "why does X have the wrong texture".
 
+Items GBX.NET cannot read (the `*v2` ramps use a newer collision-surface
+chunk than the latest GBX.NET understands) fall back to the previous
+version's mesh; `index.json` records such entries with `aliasOf`, so a
+parser upgrade can replace them.
+
 This writes one OBJ per block variant and item, diffuse textures
 (DDS → PNG ≤512px) in `public/meshes/textures/`, `index.json` (footprints
 included) and `materials.json`. The editor picks everything up on reload.
@@ -253,6 +258,24 @@ never commit or redistribute them (`public/meshes/` is gitignored).
 The mood skyboxes in `public/sky/` are CC0 sky photographs from
 [Poly Haven](https://polyhaven.com/), baked to 2k equirects by
 `tools/fetch_skies.py`.
+
+## Ghost paths
+
+Opening a map from TMX draws the driving line of a ghost under the map's
+layer: green at the start, red at the finish, following the layer transform
+like every placement. The map's own validation ghost is used when the
+author left one in (`ChallengeParameters.RaceValidateGhost`); otherwise the
+dev server lists the map's TMX replays and downloads the one whose time is
+closest to the author medal (`/recordgbx/<ReplayId>`), the most
+representative clean line. **File ▸ Ghost path from TMX** fetches one for
+the active layer of an already-open TMX map. The path is stored on the
+layer (`ghost` in the map record) so it survives reloads. The tube's
+thickness is a render setting (Render settings ▸ Ghost line thickness).
+
+Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from
+tracko's ghostdump: TM2020 ghosts keep their samples in `CPlugEntRecordData`
+(107-byte vehicle states, position at byte 47); positions are game world
+metres and get the same vertical-origin lift as items on import.
 
 ## Controls
 
@@ -347,6 +370,8 @@ With the editor tab open, the development server also provides:
   counts, and material texture URLs, sidedness, and vertical-flip settings.
 - `/api/debug/command?action=reload`: reload the editor tab (after a mesh
   re-import; edits autosave, so nothing is lost).
+- `/api/debug/command?action=tmx&uid=<MapId>`: open a TMX map through the
+  same flow as the dialog (download, import, ghost line).
 - `/api/debug/command?action=focus&uid=p_n_etm1&yaw=112&pitch=-5&distance=42`:
   frame that placement. Angles are degrees; negative pitch looks down. Omit
   distance to fit the block to the viewport, including narrow viewports.

@@ -1,4 +1,4 @@
-import type { Layer, Placement } from "@core/layer";
+import type { GhostPath, Layer, Placement } from "@core/layer";
 import { DEFAULT_LOD_DISTANCE, createLayer } from "@core/layer";
 import type { MapDocument } from "@core/document";
 import type { GridCoord, Vec3 } from "@core/math";
@@ -29,6 +29,8 @@ export interface StoredLayer {
   settings: { gridStep: Vec3; lodDistance?: number };
   transform: { translate: Vec3; rotDeg: Vec3 };
   placements: Placement[];
+  /** Ghost driving line (validation ghost / TMX replay), layer-local metres. */
+  ghost?: GhostPath;
 }
 
 export interface StoredMapMeta {
@@ -82,6 +84,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
         rotDeg: [...l.transform.rotDeg] as Vec3,
       },
       placements: [...l.placements.values()],
+      ...(l.ghost ? { ghost: l.ghost } : {}),
     };
   });
   return {
@@ -115,6 +118,7 @@ export function toLayers(rec: StoredMap): Layer[] {
       rotDeg: [...sl.transform.rotDeg] as Vec3,
     };
     for (const p of sl.placements) layer.placements.set(p.id, p);
+    if (sl.ghost?.path?.length) layer.ghost = sl.ghost;
     return layer;
   });
 }

@@ -30,12 +30,14 @@ using GBX.NET.Engines.Game;
 using GBX.NET.Engines.GameData;
 using GBX.NET.Engines.Plug;
 using GBX.NET.LZO;
+using GBX.NET.ZLib;
 using GBX.NET.PAK;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
 Gbx.LZO = new Lzo();
+Gbx.ZLib = new ZLib();
 
 if (args.Length < 2)
 {
@@ -61,6 +63,18 @@ switch (args[0])
         catch (Exception ex)
         {
             Console.Error.WriteLine($"map conversion failed: {ex.Message}");
+            return 1;
+        }
+    case "ghost":
+        // meshdump ghost <Map.Gbx|Replay.Gbx> [out.json] — the driving path of the
+        // map's validation ghost or the replay's first ghost (exit 2 if none).
+        try
+        {
+            return Trackedit.GhostDump.Run(args[1], args.Length > 2 ? args[2] : null);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ghost extraction failed: {ex.Message}");
             return 1;
         }
     case "probe":
@@ -998,9 +1012,14 @@ sealed class Dumper(string root, string outDir, string? filter)
         var usedVegetProxy = false;
 
         var processed = 0;
+        // Items GBX.NET can't read (newer chunk versions) — resolved below.
+        var unreadable = new List<string>();
         foreach (var file in files)
         {
             Progress(++processed, files.Count);
+            var stem = Path.GetFileName(file);
+            stem = stem[..^".Item.Gbx".Length];
+            if (!MatchesFilter(stem)) { skipped++; continue; }
             try
             {
                 var gbx = Gbx.Parse(file);
@@ -1053,8 +1072,27 @@ sealed class Dumper(string root, string outDir, string? filter)
             catch (Exception ex)
             {
                 failed++;
+                unreadable.Add(stem);
                 Console.Error.WriteLine($"  FAIL {Path.GetFileName(file)}: {ex.Message}");
             }
+        }
+
+        // Versioned re-releases (RampHighv2 …) whose files use chunk versions
+        // this GBX.NET can't parse: show the previous version's mesh rather
+        // than a placeholder box — same footprint, near-identical look. The
+        // index records the alias so a future parser upgrade can replace it.
+        foreach (var name in unreadable)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)v(\d+)$");
+            if (!m.Success) continue;
+            var baseName = m.Groups[1].Value;
+            var ver = int.Parse(m.Groups[2].Value);
+            var candidates = Enumerable.Range(1, ver - 1).Reverse()
+                .Select(v => v == 1 ? baseName : $"{baseName}v{v}").Concat([baseName]);
+            var source = candidates.FirstOrDefault(c => items[c] is JsonObject o && o["obj"] is not null);
+            if (source is null) continue;
+            items[name] = new JsonObject { ["obj"] = items[source]!["obj"]!.GetValue<string>(), ["aliasOf"] = source };
+            Console.WriteLine($"  alias {name} -> {source} (unreadable item file)");
         }
 
         if (usedVegetProxy)

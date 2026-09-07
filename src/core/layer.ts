@@ -58,6 +58,21 @@ export interface LayerTransform {
   rotDeg: Vec3;
 }
 
+/**
+ * A driving line attached to a layer: the map's validation ghost or a TMX
+ * replay. Points are layer-local editor metres (same frame as
+ * FreePlacement.pos), so the layer transform moves the line with the track.
+ */
+export interface GhostPath {
+  source: "map" | "tmx";
+  /** Who drove it, and for TMX which replay — status/UI text only. */
+  label: string;
+  timeMs?: number;
+  path: Vec3[];
+  /** Sample times in ms, parallel to `path`, when the source had them. */
+  times?: number[];
+}
+
 export interface Layer {
   readonly id: string;
   name: string;
@@ -68,6 +83,7 @@ export interface Layer {
   settings: LayerSettings;
   transform: LayerTransform;
   readonly placements: Map<string, Placement>;
+  ghost?: GhostPath;
 }
 
 export function createLayer(name: string): Layer {

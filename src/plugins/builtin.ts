@@ -64,6 +64,7 @@ export const statusPlugin: EditorPlugin = {
 
 import { heightGuidePlugin } from "./heightGuide";
 import { instrumentationPlugin } from "./instrumentation";
+import { ghostPathPlugin } from "./ghostPath";
 
 export const builtinPlugins = [
   toolsPlugin,
@@ -71,5 +72,6 @@ export const builtinPlugins = [
   layersPlugin,
   statusPlugin,
   heightGuidePlugin,
+  ghostPathPlugin,
   instrumentationPlugin,
 ];
