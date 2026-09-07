@@ -1,5 +1,5 @@
 import type { GhostPath, Layer, Placement } from "@core/layer";
-import { DEFAULT_LOD_DISTANCE, createLayer } from "@core/layer";
+import { DEFAULT_LOD_DISTANCE, DEFAULT_ROTATION_STEP, createLayer } from "@core/layer";
 import type { MapDocument } from "@core/document";
 import type { GridCoord, Vec3 } from "@core/math";
 import type { Mood } from "@core/mapbase";
@@ -26,7 +26,7 @@ export interface StoredLayer {
   visible: boolean;
   locked: boolean;
   clampToBase?: boolean;
-  settings: { gridStep: Vec3; lodDistance?: number };
+  settings: { gridStep: Vec3; lodDistance?: number; rotationStep?: number };
   transform: { translate: Vec3; rotDeg: Vec3 };
   placements: Placement[];
   /** Ghost driving line (validation ghost / TMX replay), layer-local metres. */
@@ -78,7 +78,11 @@ export function serializeDoc(doc: MapDocument): StoredMap {
       visible: l.visible,
       locked: l.locked,
       clampToBase: l.clampToBase,
-      settings: { gridStep: [...l.settings.gridStep] as Vec3, lodDistance: l.settings.lodDistance },
+      settings: {
+        gridStep: [...l.settings.gridStep] as Vec3,
+        lodDistance: l.settings.lodDistance,
+        rotationStep: l.settings.rotationStep,
+      },
       transform: {
         translate: [...l.transform.translate] as Vec3,
         rotDeg: [...l.transform.rotDeg] as Vec3,
@@ -112,6 +116,7 @@ export function toLayers(rec: StoredMap): Layer[] {
     layer.settings = {
       gridStep: [...sl.settings.gridStep] as Vec3,
       lodDistance: sl.settings.lodDistance ?? DEFAULT_LOD_DISTANCE,
+      rotationStep: sl.settings.rotationStep ?? DEFAULT_ROTATION_STEP,
     };
     layer.transform = {
       translate: [...sl.transform.translate] as Vec3,

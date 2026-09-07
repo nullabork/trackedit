@@ -37,6 +37,14 @@ export interface RenderPrefs {
   gridColor: string;
   /** Ghost driving-line tube radius in metres (plugins/ghostPath). */
   ghostRadius: number;
+  /** Selection outline (non-axis edges). */
+  selectionColor: string;
+  /** The three axis edges of the selection box and their tags. */
+  axisX: string;
+  axisY: string;
+  axisZ: string;
+  /** The active layer's ground-plane outline square. */
+  planeColor: string;
 }
 
 export const DEFAULT_RENDER_PREFS: RenderPrefs = {
@@ -46,6 +54,11 @@ export const DEFAULT_RENDER_PREFS: RenderPrefs = {
   gridFade: 30,
   gridColor: "#8fb5dc",
   ghostRadius: 1.2,
+  selectionColor: "#ffc83c",
+  axisX: "#ff4d4d",
+  axisY: "#3ddc97",
+  axisZ: "#4a90e2",
+  planeColor: "#ff8c1a",
 };
 
 /** Lighting presets per mood; the matching skybox is painted in sky.ts

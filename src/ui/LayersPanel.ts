@@ -215,6 +215,19 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
         ),
       ),
       el("div", { class: "field" },
+        el("label", {}, "Rotation step (deg)"),
+        num(layer.settings.rotationStep, (v) =>
+          ctx.history.run(
+            new UpdateLayerCmd(
+              layer.id,
+              { settings: { ...layer.settings, rotationStep: Math.min(Math.max(v, 1), 180) } },
+              "Rotation step",
+            ),
+          ), 15),
+        el("div", { class: "hint" },
+          "Snap for grid-constrained rotation of this layer and everything in it; unconstrained ignores it."),
+      ),
+      el("div", { class: "field" },
         el("label", {}, "LOD load distance (m)"),
         num(layer.settings.lodDistance, (v) =>
           ctx.history.run(

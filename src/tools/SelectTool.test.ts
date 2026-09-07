@@ -18,7 +18,11 @@ function fixture() {
   const tool = new SelectTool({
     document, selection,
     renderer: { getObject: () => undefined },
-    view: { rig: { controls }, onFrame: vi.fn() },
+    view: {
+      rig: { controls }, onFrame: vi.fn(), onRenderPrefsChanged: vi.fn(),
+      getRenderPrefs: () => ({ selectionColor: "#ffc83c", axisX: "#f00", axisY: "#0f0", axisZ: "#00f" }),
+      camera: { position: { x: 0, y: 0, z: 0 } },
+    },
     ui: { setStatus },
   } as unknown as EditorContext);
   const click = (id: string | null, shiftKey = false) => tool.onPointerDown({

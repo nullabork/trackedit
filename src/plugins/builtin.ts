@@ -19,7 +19,10 @@ export const toolsPlugin: EditorPlugin = {
     ctx.tools.register(new SelectTool(ctx));
     ctx.tools.register(new EraseTool(ctx));
     ctx.tools.register(new PaintTool(ctx));
-    ctx.tools.setActive("place");
+    // Placing and selecting are one or the other: nothing is armed to place
+    // until a palette row is clicked (which switches to place), so start in
+    // select.
+    ctx.tools.setActive("select");
   },
 };
 

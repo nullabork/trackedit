@@ -43,9 +43,17 @@ export interface LayerSettings {
   gridStep: Vec3;
   /** LOD: real meshes load within this range of the camera (metres). */
   lodDistance: number;
+  /**
+   * Rotation snap in degrees while grid constrained, for the layer itself and
+   * everything in it (R sequences and the selection box's rotate rings).
+   * Unconstrained rotation ignores it. Grid blocks yawed by a non-quarter
+   * step convert to free blocks.
+   */
+  rotationStep: number;
 }
 
 export const DEFAULT_LOD_DISTANCE = 700;
+export const DEFAULT_ROTATION_STEP = 90;
 
 /**
  * Rigid transform applied to the whole layer (rotation about the layer
@@ -93,7 +101,7 @@ export function createLayer(name: string): Layer {
     visible: true,
     locked: false,
     clampToBase: false,
-    settings: { gridStep: CELL, lodDistance: DEFAULT_LOD_DISTANCE },
+    settings: { gridStep: CELL, lodDistance: DEFAULT_LOD_DISTANCE, rotationStep: DEFAULT_ROTATION_STEP },
     transform: { translate: [0, 0, 0], rotDeg: [0, 0, 0] },
     placements: new Map(),
   };

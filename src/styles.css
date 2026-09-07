@@ -795,3 +795,14 @@ input[type="number"] { font-family: Consolas, monospace; }
 .control-reference th, .control-reference td { padding: 4px; border-bottom: 1px solid var(--stroke); text-align: left; }
 .control-reference th { color: var(--ink-1); font-weight: 400; }
 .control-reference td { color: var(--ink-0); }
+.controls-columns { display: flex; gap: 18px; align-items: flex-start; }
+.controls-col { flex: 1 1 0; min-width: 0; }
+.control-sequences kbd { font-family: inherit; font-size: 12px; color: var(--accent, #3ddc97); white-space: nowrap; }
+.control-sequences .control-reference th { width: 32%; }
+.render-body { margin-top: 8px; }
+.color-row { display: flex; gap: 6px; align-items: center; }
+.color-row input[type="color"] { flex: 0 0 48px; width: 48px; height: 24px; padding: 0; }
+.color-row .btn { padding: 0 6px; height: 24px; line-height: 22px; }
+.axis-colors { display: flex; gap: 10px; }
+.axis-swatch { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-0); text-transform: none; letter-spacing: 0; }
+.axis-swatch input[type="color"] { width: 40px; height: 24px; padding: 0; }

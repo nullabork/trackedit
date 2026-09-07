@@ -302,6 +302,10 @@ export class DocumentRenderer {
       (mat.uniforms.uColor.value as Color).set(prefs.gridColor);
       grid.userData.gridColor = prefs.gridColor;
     }
+    if (this.planeColor !== prefs.planeColor) {
+      this.planeColor = prefs.planeColor;
+      this.refreshPlaneOutlines();
+    }
     const normal = this.gfNormal.set(0, 1, 0).applyQuaternion(group.getWorldQuaternion(this.gfQuat));
     const planePt = group.getWorldPosition(this.gfPlanePt);
     const cam = this.view.camera;
@@ -338,14 +342,17 @@ export class DocumentRenderer {
     this.refreshPlaneOutlines();
   }
 
+  private planeColor = "";
+
   private refreshPlaneOutlines(): void {
     const activeId = this.doc.activeLayer.id;
+    const activeColor = this.view.getRenderPrefs().planeColor || "#ff8c1a";
     for (const [layerId, group] of this.layerGroups) {
       const active = layerId === activeId;
       const line = group.getObjectByName("layerPlane") as LineLoop | undefined;
       if (line) {
         const mat = line.material as LineBasicMaterial;
-        mat.color.set(active ? 0xff8c1a : 0x4a5563);
+        mat.color.set(active ? activeColor : 0x4a5563);
         mat.transparent = !active;
         mat.opacity = active ? 1 : 0.5;
       }

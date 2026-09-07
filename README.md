@@ -183,10 +183,17 @@ Getting started above) automates the whole flow through the dev server's
   `MESHDUMP_TRACE_MATERIAL=<name>` to print which block and reference first
   registered a material — the tool for "why does X have the wrong texture".
 
-Items GBX.NET cannot read (the `*v2` ramps use a newer collision-surface
-chunk than the latest GBX.NET understands) fall back to the previous
-version's mesh; `index.json` records such entries with `aliasOf`, so a
-parser upgrade can replace them.
+A few game prefabs (the RoadTech finish, the `*v2` ramps, the podium) use
+a collision-surface chunk newer than the latest GBX.NET understands, so the
+whole prefab fails to load and the block used to export as clips only. The
+exporter then *salvages* the prefab (`tools/meshdump/Salvage.cs`): it reads
+the reference table by hand, re-wraps every inline mesh as its own Gbx so
+the same material references resolve, and finds entities that use external
+sub-prefabs (index + rotation + position) to place them exactly. Inline
+meshes are assumed at the prefab origin. `meshdump prefabfail <root>` lists
+every block whose body prefab GBX.NET refused; items rebuilt this way are
+marked `salvaged` in `index.json`, and version-suffixed items with nothing
+to salvage fall back to the previous version's mesh (`aliasOf`).
 
 This writes one OBJ per block variant and item, diffuse textures
 (DDS → PNG ≤512px) in `public/meshes/textures/`, `index.json` (footprints
@@ -297,7 +304,8 @@ active shortcuts.
 | Cancel transform | Esc / right click | Esc / right click | Esc |
 
 Blender and Plasticity use WASD + Space/C only in fly mode. Esc, the fly
-shortcut, or a click exits toggled flight. P (place/grid ↔ free), E (select),
+shortcut, or a click exits toggled flight. P (grid constrained ↔
+unconstrained placement), E (select),
 Delete, and Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z remain editor shortcuts. X also
 deletes in the select tool with either modeling preset. Presets cover
 navigation and supported transforms; scaling and mesh-editing commands
@@ -307,9 +315,17 @@ and [Plasticity keymap](https://github.com/nkallen/plasticity/blob/master/src/st
 
 The following describes the default **Trackedit** scheme:
 
-- **Left click** — active tool, **P** — place mode (press again to toggle
-  **grid ↔ free** placement; free places anywhere on the layer plane at the
-  build height), **E** — select mode
+- **Left click** — active tool, **P** — toggle **grid constrained ↔
+  unconstrained** placement (a setting, it never changes the active tool;
+  it also governs the T/R transforms in select mode: grid constrained snaps
+  moves to the layer grid and rotations to the layer's **rotation step**
+  (a layer setting, 90° by default, shared by the layer itself and everything
+  in it), unconstrained moves freely and rotates in whole degrees), **E** —
+  select mode; picking a block in the palette is what starts placing
+- **Selection box handles** — drag an axis tag (X, Y, Z) to move the
+  selection along that axis; drag the ring beside it to rotate: the X ring
+  turns in the XY plane (about Z), the Y ring in XZ (about Y), the Z ring in
+  ZY (about X). Same snapping rules as the key sequences
 - **Click-drag in grid place** — paints blocks across cells (one undo step)
 - **X/Y/Z while placing** — constrain placement to that axis from where the
   ghost was (Y slides vertically); click places & releases, right-click/Esc
