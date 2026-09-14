@@ -18,6 +18,7 @@ import { MeshProvider } from "@render/MeshProvider";
 import { ToolManager } from "@tools/ToolManager";
 import { Shell } from "@ui/Shell";
 import { buildToolRail } from "@ui/ToolRail";
+import { buildTmxPanel } from "@ui/TmxPanel";
 import { buildMenuBar } from "@ui/MenuBar";
 import { openMapBrowser } from "@ui/MapBrowserDialog";
 import { fetchSetupStatus, openSetupDialog, setupIncomplete } from "@ui/SetupDialog";
@@ -82,6 +83,7 @@ async function boot(): Promise<void> {
   const plugins = new PluginHost(ctx);
   for (const plugin of builtinPlugins) plugins.use(plugin);
   buildToolRail(ctx, shell);
+  buildTmxPanel(ctx, shell);
   buildMenuBar(ctx, shell.menubar);
 
   // Autosave: any edit persists the current track (debounced; only once a

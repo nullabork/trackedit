@@ -276,12 +276,20 @@ like every placement. The map's own validation ghost is used when the
 author left one in (`ChallengeParameters.RaceValidateGhost`); otherwise the
 dev server lists the map's TMX replays and downloads the one whose time is
 closest to the author medal (`/recordgbx/<ReplayId>`), the most
-representative clean line. **File ▸ Replays from TMX…** lists the map's
-replays (driver, time, date) and its own validation ghost; click one to
-draw it on the active layer — a layer shows one line at a time, so loading
-a replay replaces the previous line, and **Hide line** removes it. The path
-is stored on the layer (`ghost` in the map record) so it survives reloads. The tube's
-thickness is a render setting (Render settings ▸ Ghost line thickness).
+representative clean line. The **TM Exchange** drawer tab (beside Track
+bits; greyed out unless the map came from TMX) shows the map's TMX card —
+name, TMX link, a *Play in game* link (`trackmania://openplanet/play/mx/<id>`,
+handled by Openplanet's Play plugin), uploader/authors with profile links,
+author/gold/silver/bronze times, finishes on Nadeo's leaderboard, awards,
+replays, downloads, upload date, ghost blocks, tags — and every driving
+line available: the map's own validation ghost, the TMX replays (driver,
+time, date) and the Nadeo world top 10. Click a row to show its line on the
+active layer and again to hide it; any number can show at once, each in
+its own hue (bright at the start, darker toward the finish), and **Hide all
+lines** clears them. Lines are stored on the layer (`ghosts` in the map
+record) so they survive reloads. The tube's thickness is a render setting
+(Render settings ▸ Ghost line thickness). There is no URL to open a map in
+the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from
 tracko's ghostdump: TM2020 ghosts keep their samples in `CPlugEntRecordData`
@@ -427,9 +435,10 @@ names the map uses. What makes them look and sit right:
 
 ### Records from Nadeo (the in-game leaderboard)
 
-**File ▸ Replays from TMX…** also lists the map's world records from
-Nadeo's services — the list the game shows in single player — and loads a
-record's ghost as a line the same way. Nadeo requires an account: create a
+The TM Exchange panel lists the map's world top 10 from Nadeo's services —
+the list the game shows in single player — and its finish count (how many
+accounts hold a record, found by binary-searching the leaderboard offset),
+and loads a record's ghost as a line the same way. Nadeo requires an account: create a
 free dedicated server account at
 <https://www.trackmania.com/player/dedicated-servers> and put its login in
 the gitignored `.trackedit.local.json`:

@@ -31,6 +31,7 @@ export function applyStored(ctx: EditorContext, rec: StoredMap): void {
     decoration: rec.decorationBase + rec.mood,
     size: rec.size,
     mapUid: rec.mapUid,
+    validationGhost: rec.validationGhost ?? null,
     modUrl: rec.modUrl,
     activeMod: rec.activeMod,
     colorPalette: rec.colorPalette,

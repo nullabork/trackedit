@@ -59,7 +59,7 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
     refresh();
     // Arming for placement makes sure the drawer is up; other tools leave
     // it as the user set it (its own tab toggles it open/closed).
-    if (tool?.id === "place") shell.setDrawerOpen(true);
+    if (tool?.id === "place") shell.openDrawerPage("bits");
     if (tool?.hint) ctx.ui.setStatus(tool.hint);
   });
 
@@ -195,7 +195,8 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
   });
 
   refresh();
-  shell.setDrawerOpen(ctx.tools.activeTool?.id === "place");
+  if (ctx.tools.activeTool?.id === "place") shell.openDrawerPage("bits");
+  else shell.setDrawerOpen(false);
 }
 
 /** Map settings: name, base (decoration + size + type), mood. Applies live. */

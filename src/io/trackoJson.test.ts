@@ -23,8 +23,8 @@ describe("ghost paths", () => {
 
   it("attaches a map's validation ghost to the imported layer", () => {
     const { layers } = importDump({ blocks: [], items: [], ghost }, 8);
-    expect(layers[0].ghost?.path).toHaveLength(3);
-    expect(layers[0].ghost?.path[1]).toEqual([48, 72, 16]);
+    expect(layers[0].ghosts[0]?.path).toHaveLength(3);
+    expect(layers[0].ghosts[0]?.path[1]).toEqual([48, 72, 16]);
   });
 
   it("survives a save/load round trip on the layer", () => {
@@ -32,10 +32,10 @@ describe("ghost paths", () => {
     const { layers } = importDump({ blocks: [], items: [], ghost }, 0);
     doc.reset(layers, { name: "t" });
     const rec = serializeDoc(doc);
-    expect(rec.layers[0].ghost?.path).toEqual(ghost.path);
+    expect(rec.layers[0].ghosts?.[0]?.path).toEqual(ghost.path);
     const back = toLayers(rec);
-    expect(back[0].ghost?.timeMs).toBe(61234);
-    expect(back[0].ghost?.path).toEqual(ghost.path);
+    expect(back[0].ghosts[0]?.timeMs).toBe(61234);
+    expect(back[0].ghosts[0]?.path).toEqual(ghost.path);
   });
 
   it("labels a Nadeo record ghost and keeps the account id", () => {
@@ -45,9 +45,20 @@ describe("ghost paths", () => {
     expect(g.label).toBe("Nadeo record by Racer");
   });
 
+  it("upgrades records saved with a single ghost to a keyed list", () => {
+    const doc = new MapDocument();
+    const { layers } = importDump({ blocks: [], items: [], ghost }, 0);
+    doc.reset(layers, { name: "t" });
+    const rec = serializeDoc(doc);
+    const legacy = { ...rec, layers: rec.layers.map((l) => ({ ...l, ghost: l.ghosts?.[0], ghosts: undefined })) };
+    const back = toLayers(legacy);
+    expect(back[0].ghosts).toHaveLength(1);
+    expect(back[0].ghosts[0].key).toBe("map");
+  });
+
   it("layers without a ghost stay ghost-free", () => {
     const { layers } = importDump({ blocks: [], items: [] });
-    expect(layers[0].ghost).toBeUndefined();
+    expect(layers[0].ghosts).toEqual([]);
   });
 });
 

@@ -36,6 +36,8 @@ export class MapDocument {
   size: GridCoord = MAP_SIZE;
   /** The game's map uid (from import) — the key Nadeo's record services use. */
   mapUid: string | null = null;
+  /** Whether the imported map file carried a validation ghost (null = unknown). */
+  validationGhost: boolean | null = null;
   /** The map's own custom texture pack (mod) URL, from import — if any. */
   modUrl: string | null = null;
   /** Slug of the mod currently APPLIED (any downloaded mod, not just the map's). */
@@ -194,6 +196,7 @@ export class MapDocument {
       decoration?: string;
       size?: GridCoord;
       mapUid?: string | null;
+      validationGhost?: boolean | null;
       modUrl?: string | null;
       activeMod?: string | null;
       colorPalette?: string;
@@ -209,6 +212,7 @@ export class MapDocument {
     }
     if (meta?.size) this.size = meta.size;
     this.mapUid = meta?.mapUid ?? null;
+    this.validationGhost = meta?.validationGhost ?? null;
     // Mods are per-map: opening a map replaces them (undefined = clear).
     this.modUrl = meta?.modUrl ?? null;
     this.activeMod = meta?.activeMod ?? null;

@@ -25,6 +25,7 @@ export async function openTmxMap(ctx: EditorContext, mapId: number, fallbackName
     name: dump.mapName ?? fallbackName,
     decoration: dump.decoration,
     mapUid: dump.mapUid ?? null,
+    validationGhost: !!dump.ghost?.path?.length,
     modUrl: imported.modUrl,
   });
   session.ready = true;
@@ -34,7 +35,7 @@ export async function openTmxMap(ctx: EditorContext, mapId: number, fallbackName
     `${imported.stats.items} items (TMX #${mapId})`;
   ctx.ui.setStatus(summary);
   const layer = imported.layers[0];
-  if (layer.ghost) ctx.ui.setStatus(`${summary} — ghost: ${layer.ghost.label}`);
+  if (layer.ghosts.length) ctx.ui.setStatus(`${summary} — ghost: ${layer.ghosts[0].label}`);
   else void fetchTmxGhost(ctx, mapId, layer.id).then((msg) => ctx.ui.setStatus(msg));
   return summary;
 }

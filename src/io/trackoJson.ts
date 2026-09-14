@@ -18,7 +18,7 @@ import {
   quatRotate,
 } from "@core/math";
 import type { GhostPath, Layer, Placement } from "@core/layer";
-import { createLayer, isIdentityTransform } from "@core/layer";
+import { createLayer, ghostKeyOf, isIdentityTransform } from "@core/layer";
 import type { MapDocument } from "@core/document";
 
 export interface DumpBlock {
@@ -98,6 +98,7 @@ export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): Gho
     : source === "nadeo" ? "Nadeo record"
     : "Validation ghost";
   return {
+    key: ghostKeyOf({ source, replayId: g.replayId, accountId: g.accountId }),
     source,
     ...(g.replayId ? { replayId: g.replayId } : {}),
     ...(g.accountId ? { accountId: g.accountId } : {}),
@@ -179,7 +180,7 @@ export function importDump(dump: MapDump, yOffsetCells = DEFAULT_Y_OFFSET): {
     stats.items += 1;
   }
 
-  if (dump.ghost?.path?.length) layer.ghost = ghostToLayer(dump.ghost, yOffsetCells);
+  if (dump.ghost?.path?.length) layer.ghosts = [ghostToLayer(dump.ghost, yOffsetCells)];
 
   return {
     layers: [layer],

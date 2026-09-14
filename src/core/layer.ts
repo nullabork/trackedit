@@ -79,6 +79,8 @@ export interface LayerTransform {
  * FreePlacement.pos), so the layer transform moves the line with the track.
  */
 export interface GhostPath {
+  /** Identity for toggling: "map", "tmx:<replayId>", "nadeo:<accountId>". */
+  key: string;
   source: "map" | "tmx" | "nadeo";
   /** TMX replay id, when that is where it came from. */
   replayId?: number;
@@ -92,6 +94,13 @@ export interface GhostPath {
   times?: number[];
 }
 
+/** The toggle identity of a line: where it came from. */
+export function ghostKeyOf(g: { source: "map" | "tmx" | "nadeo"; replayId?: number; accountId?: string }): string {
+  if (g.source === "tmx") return `tmx:${g.replayId ?? 0}`;
+  if (g.source === "nadeo") return `nadeo:${g.accountId ?? ""}`;
+  return "map";
+}
+
 export interface Layer {
   readonly id: string;
   name: string;
@@ -102,11 +111,13 @@ export interface Layer {
   settings: LayerSettings;
   transform: LayerTransform;
   readonly placements: Map<string, Placement>;
-  ghost?: GhostPath;
+  /** Driving lines shown on this layer (any number at once). */
+  ghosts: GhostPath[];
 }
 
 export function createLayer(name: string): Layer {
   return {
+    ghosts: [],
     id: newId("layer"),
     name,
     visible: true,

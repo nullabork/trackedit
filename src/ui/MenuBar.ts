@@ -6,7 +6,6 @@ import { openTmxDialog } from "./TmxDialog";
 import { openLiveDialog } from "./LiveDialog";
 import { getLiveSession } from "@plugins/liveSession";
 import { openControlSettings } from "./ControlSettingsDialog";
-import { openReplayDialog } from "./ReplayDialog";
 
 interface MenuEntry {
   label: string;
@@ -20,7 +19,6 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
     { label: "New…", action: () => void newMapGuarded(ctx) },
     { label: "Open…", action: () => openMapBrowser(ctx) },
     { label: "Open from TMX…", action: () => openTmxDialog(ctx) },
-    { label: "Replays from TMX…", action: () => openReplayDialog(ctx) },
     { label: "", divider: true },
     { label: "Import JSON…", action: () => importJsonFlow(ctx) },
     { label: "Export JSON", action: () => exportJsonFlow(ctx) },

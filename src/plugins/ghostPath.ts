@@ -14,6 +14,8 @@ import type { EditorContext, EditorPlugin } from "./api";
 
 const START = new Color(0x35d07f);
 const END = new Color(0xff4d4d);
+/** One hue per line so several replays stay tellable apart. */
+const LINE_COLORS = [0x2dd4bf, 0xf97316, 0xa78bfa, 0xfacc15, 0xf472b6, 0x38bdf8, 0xa3e635, 0xf87171].map((c) => new Color(c));
 /** Fallback tube radius in metres (render prefs override it). */
 const DEFAULT_RADIUS = 1.2;
 /** A jump longer than this between samples is a respawn: break the tube. */
@@ -46,26 +48,28 @@ export const ghostPathPlugin: EditorPlugin = {
       for (const id of [...built.keys()]) clearLayer(id);
       const radius = ctx.view.getRenderPrefs().ghostRadius || DEFAULT_RADIUS;
       for (const layer of ctx.document.layers) {
-        const ghost = layer.ghost;
-        if (!ghost || ghost.path.length < 2) continue;
         const group = ctx.renderer.getLayerGroup(layer.id);
         if (!group) continue;
         const objs: Object3D[] = [];
-        const total = ghost.path.length;
-        let index = 0;
-        for (const run of splitRespawns(ghost.path)) {
-          const t0 = index / total;
-          const t1 = (index + run.length) / total;
-          index += run.length;
-          const tube = buildTube(run, t0, t1, radius);
-          if (tube) objs.push(tube);
-        }
-        objs.push(marker(ghost.path[0], START, radius), marker(ghost.path[total - 1], END, radius));
+        layer.ghosts.forEach((ghost, gi) => {
+          if (ghost.path.length < 2) return;
+          const total = ghost.path.length;
+          const color = LINE_COLORS[gi % LINE_COLORS.length];
+          let index = 0;
+          for (const run of splitRespawns(ghost.path)) {
+            const t0 = index / total;
+            const t1 = (index + run.length) / total;
+            index += run.length;
+            const tube = buildTube(run, t0, t1, radius, color);
+            if (tube) objs.push(tube);
+          }
+          objs.push(marker(ghost.path[0], START, radius), marker(ghost.path[total - 1], END, radius));
+        });
         for (const o of objs) {
           o.raycast = () => {};
           group.add(o);
         }
-        built.set(layer.id, objs);
+        if (objs.length) built.set(layer.id, objs);
       }
     };
 
@@ -91,8 +95,8 @@ function splitRespawns(path: readonly Vec3[]): Vec3[][] {
   return runs.filter((r) => r.length >= 2);
 }
 
-/** One run as a smooth tube, coloured from START (t0) toward END (t1). */
-function buildTube(run: Vec3[], t0: number, t1: number, radius: number): Mesh | null {
+/** One run as a smooth tube in the line's hue, bright at the start and darkening toward the finish. */
+function buildTube(run: Vec3[], t0: number, t1: number, radius: number, base: Color): Mesh | null {
   const pts = run.map(([x, y, z]) => new Vector3(x, y, z));
   const curve = new CatmullRomCurve3(pts, false, "centripetal");
   const length = curve.getLength();
@@ -103,10 +107,11 @@ function buildTube(run: Vec3[], t0: number, t1: number, radius: number): Mesh | 
   const count = geom.attributes.position.count;
   const ring = 9;
   const colors = new Float32Array(count * 3);
+  const dark = base.clone().multiplyScalar(0.35);
   const c = new Color();
   for (let i = 0; i < count; i++) {
     const t = t0 + (t1 - t0) * (Math.floor(i / ring) / segments);
-    c.copy(START).lerp(END, t);
+    c.copy(base).lerp(dark, t);
     colors.set([c.r, c.g, c.b], i * 3);
   }
   geom.setAttribute("color", new Float32BufferAttribute(colors, 3));

@@ -200,11 +200,16 @@ input[type="number"] { font-family: Consolas, monospace; }
   --drawer-w: 260px;
 }
 .drawer.dragging { transition: none; }
-.drawer-tab {
+.drawer-tabs {
   position: absolute;
   left: 0;
   top: 96px;
   z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drawer-tab {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -222,6 +227,23 @@ input[type="number"] { font-family: Consolas, monospace; }
   text-transform: uppercase;
 }
 .drawer-tab:hover { color: var(--teal); border-color: var(--teal); }
+.drawer-tab.active { color: var(--teal); border-color: var(--teal); background: var(--bg-3); }
+.drawer-tab.disabled { opacity: 0.4; cursor: default; }
+.drawer-tab.disabled:hover { color: var(--ink-0); border-color: var(--stroke); }
+.drawer-page { display: flex; flex-direction: column; min-height: 0; flex: 1; width: var(--drawer-w); }
+.drawer-page[hidden] { display: none; }
+.tmx-panel { padding: 10px 12px; overflow: auto; gap: 10px; display: flex; flex-direction: column; font-size: 12px; }
+.tmx-panel h2 { font-size: 14px; margin: 0; }
+.tmx-panel a { color: var(--teal); }
+.tmx-panel .tmx-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.tmx-panel .tmx-stats { border-collapse: collapse; width: 100%; }
+.tmx-panel .tmx-stats td { padding: 2px 4px; border-bottom: 1px solid var(--stroke); vertical-align: top; }
+.tmx-panel .tmx-stats td:first-child { color: var(--ink-2); width: 45%; }
+.tmx-panel .tmx-section { margin: 6px 0 2px; }
+.tmx-panel .tmx-row { cursor: pointer; }
+.tmx-panel .tmx-row.active { border-left-color: var(--teal); background: var(--bg-3); }
+.tmx-panel .tmx-row .tmx-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; margin-right: 6px; background: var(--stroke); }
+.tmx-panel .tmx-note { color: var(--ink-2); font-size: 11px; }
 .drawer-tab-label { writing-mode: vertical-rl; }
 .drawer-tab-icon { font-size: 10px; }
 .drawer .panel { display: flex; flex-direction: column; min-height: 0; flex: 1; width: var(--drawer-w); }

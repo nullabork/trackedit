@@ -1,4 +1,5 @@
 import type { GhostPath, Layer, Placement } from "@core/layer";
+import { ghostKeyOf } from "@core/layer";
 import { DEFAULT_LOD_DISTANCE, DEFAULT_ROTATION_STEP, createLayer } from "@core/layer";
 import type { MapDocument } from "@core/document";
 import type { GridCoord, Vec3 } from "@core/math";
@@ -30,6 +31,8 @@ export interface StoredLayer {
   transform: { translate: Vec3; rotDeg: Vec3 };
   placements: Placement[];
   /** Ghost driving line (validation ghost / TMX replay), layer-local metres. */
+  ghosts?: GhostPath[];
+  /** Records saved before lines became a list. */
   ghost?: GhostPath;
 }
 
@@ -55,6 +58,8 @@ export interface StoredMap extends StoredMapMeta {
   globalClampToBase?: boolean;
   /** The game's map uid (from import), if known. */
   mapUid?: string | null;
+  /** Whether the map file carried a validation ghost (null/absent = unknown). */
+  validationGhost?: boolean | null;
   /** The map's own custom texture pack URL (from import), if any. */
   modUrl?: string | null;
   /** Slug of the applied mod from the downloaded-mods library. */
@@ -90,7 +95,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
         rotDeg: [...l.transform.rotDeg] as Vec3,
       },
       placements: [...l.placements.values()],
-      ...(l.ghost ? { ghost: l.ghost } : {}),
+      ...(l.ghosts.length ? { ghosts: l.ghosts } : {}),
     };
   });
   return {
@@ -100,6 +105,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
     placementCount: count,
     globalClampToBase: doc.globalClampToBase,
     mapUid: doc.mapUid,
+    validationGhost: doc.validationGhost,
     modUrl: doc.modUrl,
     activeMod: doc.activeMod,
     colorPalette: doc.colorPalette,
@@ -126,7 +132,9 @@ export function toLayers(rec: StoredMap): Layer[] {
       rotDeg: [...sl.transform.rotDeg] as Vec3,
     };
     for (const p of sl.placements) layer.placements.set(p.id, p);
-    if (sl.ghost?.path?.length) layer.ghost = sl.ghost;
+    layer.ghosts = (sl.ghosts ?? (sl.ghost?.path?.length ? [sl.ghost] : []))
+      .filter((g) => g.path?.length)
+      .map((g) => ({ ...g, key: g.key ?? ghostKeyOf(g) }));
     return layer;
   });
 }

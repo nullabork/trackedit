@@ -12,6 +12,7 @@ import { join } from "node:path";
  *   GET /api/nadeo/status                       -> { configured }
  *   GET /api/nadeo/records/:mapUid?length=50    -> { records: [{ accountId, name, position, time, zone }] }
  *   GET /api/nadeo/ghost/:mapUid?account=<id>   -> the record's driving path (meshdump ghost JSON)
+ *   GET /api/nadeo/finishes/:mapUid             -> { finishes } — how many players hold a world record (max 10000)
  *
  * Nadeo requires authentication. A dedicated server account (free, created
  * at https://www.trackmania.com/player/dedicated-servers) goes in the
@@ -140,6 +141,33 @@ export class NadeoClient {
       if (n) out.set(id, n);
     }
     return out;
+  }
+
+  private finishes = new Map<string, { n: number; at: number }>();
+
+  /**
+   * How many accounts have a personal best on the map. The leaderboard has
+   * no count endpoint, so binary-search the last non-empty offset (the API
+   * serves offsets up to 10000).
+   */
+  async finishCount(mapUid: string): Promise<number> {
+    const cached = this.finishes.get(mapUid);
+    if (cached && Date.now() - cached.at < 10 * 60_000) return cached.n;
+    type Top = { tops?: { top?: unknown[] }[] };
+    const has = async (offset: number) => {
+      const json = await this.get<Top>("NadeoLiveServices",
+        `${LIVE}/api/token/leaderboard/group/Personal_Best/map/${encodeURIComponent(mapUid)}/top?onlyWorld=true&length=1&offset=${offset}`);
+      return (json.tops?.[0]?.top?.length ?? 0) > 0;
+    };
+    let lo = 0, hi = 10000; // invariant: has(lo) unknown-but-assumed, !has(hi) or hi is the cap
+    if (!(await has(0))) { this.finishes.set(mapUid, { n: 0, at: Date.now() }); return 0; }
+    if (await has(hi)) { this.finishes.set(mapUid, { n: hi + 1, at: Date.now() }); return hi + 1; }
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (await has(mid)) lo = mid; else hi = mid;
+    }
+    this.finishes.set(mapUid, { n: lo + 1, at: Date.now() });
+    return lo + 1;
   }
 
   private async mapId(mapUid: string): Promise<string> {
@@ -280,6 +308,18 @@ export function nadeoBridge(meshdump: string): Plugin {
           if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
           const length = Math.min(Math.max(Number(url.searchParams.get("length")) || 50, 1), 100);
           send(res, 200, { records: await c.records(mapUid, length) });
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      server.middlewares.use("/api/nadeo/finishes", async (req, res) => {
+        try {
+          const mapUid = (req.url ?? "").split("?")[0].split("/").filter(Boolean).pop();
+          if (!mapUid) return send(res, 400, { error: "map uid required" });
+          const c = getClient();
+          if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
+          send(res, 200, { finishes: await c.finishCount(mapUid) });
         } catch (err) {
           send(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }
