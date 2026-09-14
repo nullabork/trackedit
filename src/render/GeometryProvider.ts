@@ -1,5 +1,6 @@
 import type { Object3D } from "three";
 import type { BlockDef } from "@core/catalog";
+import type { BlockClipInfo } from "./clipAdjacency";
 
 /**
  * Source of renderable geometry for catalog entries.
@@ -23,4 +24,12 @@ export interface GeometryProvider {
     load?: boolean,
     variant?: "air" | "ground",
   ): Object3D;
+
+  /**
+   * A block's unit layout and the clips on each unit face, for the chosen
+   * variant — what the renderer needs to hide caps joined to a neighbour
+   * (see render/clipAdjacency). Undefined when the provider has no such
+   * knowledge (placeholders, unknown blocks).
+   */
+  blockClips?(name: string, variant: "air" | "ground"): BlockClipInfo | undefined;
 }

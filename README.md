@@ -93,8 +93,10 @@ in the static production build. Plugin source: [`tools/TrackeditLive`](tools/Tra
   on first import using the .NET 8 SDK (or a newer SDK with the .NET 8 runtime)
   and runs its managed DLL on Linux, Windows, or macOS. First build needs
   NuGet access unless packages are already cached. No local configuration
-  is needed. Existing `TRACKEDIT_GBXDUMP` / `.trackedit.local.json` `gbxdump`
-  settings override the bundled converter with an external executable.
+  is needed. `TRACKEDIT_GBXDUMP` / `.trackedit.local.json` `gbxdump` name an
+  external converter used only when the bundled one cannot build or run: the
+  bundled `map` command defines the JSON dialect (item pivots, scale, …), and
+  an older external dump would silently drop those fields.
 - To convert a local map manually:
   `dotnet run --project tools/meshdump -c Release -- map input.Map.Gbx output.json`.
   Run converter contract checks with
@@ -274,9 +276,11 @@ like every placement. The map's own validation ghost is used when the
 author left one in (`ChallengeParameters.RaceValidateGhost`); otherwise the
 dev server lists the map's TMX replays and downloads the one whose time is
 closest to the author medal (`/recordgbx/<ReplayId>`), the most
-representative clean line. **File ▸ Ghost path from TMX** fetches one for
-the active layer of an already-open TMX map. The path is stored on the
-layer (`ghost` in the map record) so it survives reloads. The tube's
+representative clean line. **File ▸ Replays from TMX…** lists the map's
+replays (driver, time, date) and its own validation ghost; click one to
+draw it on the active layer — a layer shows one line at a time, so loading
+a replay replaces the previous line, and **Hide line** removes it. The path
+is stored on the layer (`ghost` in the map record) so it survives reloads. The tube's
 thickness is a render setting (Render settings ▸ Ghost line thickness).
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from
@@ -370,8 +374,80 @@ Regenerate with `python tools/build_catalog.py <parsed-maps-dir>`.
   (DDS → PNG/KTX2), materials
 - Vertex/edge snap modes, align-to-plane across selections
 - Multi-select, grouping, gizmo translate/rotate
-- Custom item/block support (embedded assets)
 - Instanced rendering for very large maps
+
+### Clips: caps that only show on open sides
+
+Every unit face of a block can carry *clips*: the platform edge trims, the
+"turbines" on the ends of special platforms (boost, cruise control, reset…),
+deco walls, base undersides. The game shows a clip only while that side is
+open; when the neighbouring block's facing side carries a clip of the same
+clip group, both vanish and the surfaces tile. Maps store nothing about
+this, so the editor derives it from neighbours:
+
+- meshdump writes each clip's geometry as its own OBJ group
+  (`clip:<id>:<face>:<x,y,z>`) and lists every unit's clips per variant in
+  `index.json` (`units`, `clips` with `group` / `sym` from the game's
+  ClipGroupId / SymmetricalClipGroupId).
+- `render/clipAdjacency.ts` turns a placed block's faces by its `dir`, finds
+  the block in the adjacent cell (per unit, so multi-cell blocks work),
+  and hides the parts whose clips join. The renderer re-evaluates a block
+  and its neighbours whenever a grid placement is added or removed.
+- Free blocks and items keep all their caps, as in the game.
+
+Extract with `meshdump blocks` after pulling this change: older libraries
+have no clip parts and simply keep showing every cap.
+
+### Custom items and blocks embedded in a map
+
+Maps can embed the custom blocks/items they use (a zip inside the
+`.Map.Gbx`). On TMX import the bridge runs `meshdump embedded`, which exports
+each item's mesh into `public/meshes/embedded/` and keys `index.json` by the
+names the map uses. What makes them look and sit right:
+
+- **Materials.** Embedded meshes reference game materials by path (Mesh
+  Modeler crystals: `Stadium\Media\Modifier\PlatformIce\PlatformTech`;
+  fbx-style items: a user-material instance whose `Link` holds the path).
+  Both are rewritten to the library's short names (`TrackBorders`,
+  `PlatformIce.PlatformTech`), the same keys the official blocks use, so
+  custom pieces pick up the same textures.
+- **Rotation order.** Yaw/pitch/roll is applied yaw, then roll, then pitch
+  (`GAME_EULER_ORDER` in `core/math.ts`), verified against record ghosts
+  driving over tilted free blocks. Everything that turns a placement goes
+  through that one constant.
+- **Pivots.** Items rotate about the game's anchor point, which for custom
+  items is usually their centre, not the model origin. The dump carries the
+  anchored object's `PivotPosition` as `pivotPos`; the importer keeps it on
+  the placement (`pivot`) and the renderer draws the model at
+  `pos + R * pivot`. Without it, every flipped or turned custom item lands a
+  cell away and below where it belongs. Export writes `pivotPos` back.
+- The bundled converter is always used first for TMX import; an external
+  `gbxdump` override only steps in when the bundled one cannot run, because
+  an older dump silently drops `pivotPos`.
+
+### Records from Nadeo (the in-game leaderboard)
+
+**File ▸ Replays from TMX…** also lists the map's world records from
+Nadeo's services — the list the game shows in single player — and loads a
+record's ghost as a line the same way. Nadeo requires an account: create a
+free dedicated server account at
+<https://www.trackmania.com/player/dedicated-servers> and put its login in
+the gitignored `.trackedit.local.json`:
+
+```json
+{ "nadeo": { "login": "<server login>", "password": "<server password>" } }
+```
+
+Player names come from the record files themselves (the bridge reads just
+the header of each, `meshdump ghostname`). An OAuth app from
+<https://api.trackmania.com/manager> (`"oauth": { "clientId": "…",
+"clientSecret": "…" }` under `nadeo`) is an optional faster source. Records are looked up by
+the game's map uid, which TMX import stores on the document (older stored
+maps resolve it through TMX when the dialog opens).
+
+`meshdump embedzip <map.Gbx> <dir>` unpacks a map's embedded assets for
+inspection; `meshdump iteminfo <file.Item.Gbx>` prints an item's model,
+mesh and material bindings.
 
 ### Inspecting rendering problems
 

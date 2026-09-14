@@ -9,10 +9,11 @@ import {
   CELL,
   DEFAULT_Y_OFFSET,
   degToRad,
-  eulerYXZFromQuat,
+  gameRotFromQuat,
   newId,
   quatFromAxisAngle,
   quatFromEulerYXZ,
+  quatFromGameRot,
   quatMul,
   quatRotate,
 } from "@core/math";
@@ -38,22 +39,28 @@ export interface DumpItem {
   itemAuthor?: string;
   absPos: [number, number, number];
   yawPitchRoll?: [number, number, number] | null;
+  /** Model origin relative to the anchor (game PivotPosition); zero for most items. */
+  pivotPos?: [number, number, number] | null;
   [extra: string]: unknown;
 }
 
 /** `meshdump ghost` output: world metres, same frame as absPos. */
 export interface DumpGhost {
-  source?: "map" | "tmx";
+  source?: "map" | "tmx" | "nadeo";
   nickname?: string | null;
   raceTimeMs?: number | null;
   /** TMX replay id, when the bridge fetched one. */
   replayId?: number;
+  /** Nadeo account id, for a leaderboard record's ghost. */
+  accountId?: string;
   path: [number, number, number][];
   times?: number[];
 }
 
 export interface MapDump {
   mapName?: string;
+  /** The game's map identity (used for Nadeo records). */
+  mapUid?: string;
   decoration?: string;
   /** Custom texture pack reference (attached by the TMX bridge). */
   mod?: { url?: string };
@@ -87,9 +94,14 @@ function editorPosToFree(p: Vec3, yOffsetCells: number): [number, number, number
 export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): GhostPath {
   const source = g.source ?? "map";
   const who = g.nickname ? ` by ${g.nickname}` : "";
+  const what = source === "tmx" ? `TMX replay${g.replayId ? ` #${g.replayId}` : ""}`
+    : source === "nadeo" ? "Nadeo record"
+    : "Validation ghost";
   return {
     source,
-    label: (source === "tmx" ? `TMX replay${g.replayId ? ` #${g.replayId}` : ""}` : "Validation ghost") + who,
+    ...(g.replayId ? { replayId: g.replayId } : {}),
+    ...(g.accountId ? { accountId: g.accountId } : {}),
+    label: what + who,
     timeMs: g.raceTimeMs ?? undefined,
     path: g.path.map((p) => freePosToEditor(p, yOffsetCells)),
     ...(g.times?.length === g.path.length ? { times: [...g.times] } : {}),
@@ -98,7 +110,12 @@ export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): Gho
 
 /** Fields importDump consumes; everything else rides along in placement.meta. */
 const CONSUMED_BLOCK_FIELDS = new Set(["name", "coord", "dir", "absPos", "yawPitchRoll", "isFree", "isClip"]);
-const CONSUMED_ITEM_FIELDS = new Set(["name", "absPos", "yawPitchRoll"]);
+const CONSUMED_ITEM_FIELDS = new Set(["name", "absPos", "yawPitchRoll", "pivotPos"]);
+
+/** A dumped pivot as a placement pivot: only when it moves the origin. */
+function pivotOf(p: [number, number, number] | null | undefined): Vec3 | undefined {
+  return p && (p[0] || p[1] || p[2]) ? [p[0], p[1], p[2]] : undefined;
+}
 
 function passthrough(src: object, consumed: Set<string>): Record<string, unknown> | undefined {
   let meta: Record<string, unknown> | undefined;
@@ -155,6 +172,7 @@ export function importDump(dump: MapDump, yOffsetCells = DEFAULT_Y_OFFSET): {
       block: it.name,
       pos: freePosToEditor(it.absPos, yOffsetCells),
       rot: (it.yawPitchRoll as Vec3) ?? [0, 0, 0],
+      ...(pivotOf(it.pivotPos) ? { pivot: pivotOf(it.pivotPos) } : {}),
       isItem: true,
       meta: passthrough(it, CONSUMED_ITEM_FIELDS),
     }));
@@ -204,11 +222,7 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): M
       return [r[0] + tx, r[1] + ty, r[2] + tz];
     };
     /** Compose the layer rotation with a placement's own, back to game yaw/pitch/roll. */
-    const composeRot = (rot: Vec3): Vec3 => {
-      const local = quatFromEulerYXZ([rot[1], rot[0], rot[2]]);
-      const e = eulerYXZFromQuat(quatMul(q, local));
-      return [e[1], e[0], e[2]];
-    };
+    const composeRot = (rot: Vec3): Vec3 => gameRotFromQuat(quatMul(q, quatFromGameRot(rot)));
 
     for (const p of layer.placements.values()) {
       if (p.kind === "block") {
@@ -243,7 +257,9 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): M
           absPos: editorPosToFree(pos, yOffsetCells),
           yawPitchRoll: [rot[0], rot[1], rot[2]] satisfies number[] as [number, number, number],
         };
-        if (p.isItem) items.push(rec);
+        // The anchor (absPos) and the layer transform leave the pivot alone:
+        // it is model-local, so it rides along unchanged.
+        if (p.isItem) items.push({ ...rec, pivotPos: p.pivot ? [...p.pivot] as [number, number, number] : [0, 0, 0] });
         else blocks.push({ ...rec, isFree: true });
       }
     }

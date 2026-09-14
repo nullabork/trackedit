@@ -53,6 +53,8 @@ export interface CameraPose {
 
 export interface StoredMap extends StoredMapMeta {
   globalClampToBase?: boolean;
+  /** The game's map uid (from import), if known. */
+  mapUid?: string | null;
   /** The map's own custom texture pack URL (from import), if any. */
   modUrl?: string | null;
   /** Slug of the applied mod from the downloaded-mods library. */
@@ -97,6 +99,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
     updatedAt: Date.now(),
     placementCount: count,
     globalClampToBase: doc.globalClampToBase,
+    mapUid: doc.mapUid,
     modUrl: doc.modUrl,
     activeMod: doc.activeMod,
     colorPalette: doc.colorPalette,

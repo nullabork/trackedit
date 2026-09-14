@@ -24,6 +24,9 @@ import type { Layer, Placement } from "@core/layer";
 import type { BlockCatalog, BlockDef } from "@core/catalog";
 import { CELL, DEFAULT_Y_OFFSET, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
+import { GAME_EULER_ORDER } from "@core/math";
+import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
+import type { ClipSubject } from "./clipAdjacency";
 import { paintHex } from "@core/palettes";
 import type { GeometryProvider } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -369,7 +372,9 @@ export class DocumentRenderer {
       this.lodInfo.delete(id);
       this.farSet.delete(id);
       this.placementObjects.delete(id);
+      this.cellsOf.delete(id);
     }
+    this.cellIndex.delete(layerId);
     this.pools.get(layerId)?.dispose();
     this.pools.delete(layerId);
     this.dirtyPools.delete(layerId);
@@ -420,11 +425,95 @@ export class DocumentRenderer {
     return out;
   }
 
+  // --- clip caps: shown only on open sides (see render/clipAdjacency) ---
+
+  /** Layer id -> cell key -> ids of the grid placements occupying it. */
+  private readonly cellIndex = new Map<string, Map<string, Set<string>>>();
+  /** Placement id -> the cells it was registered under. */
+  private readonly cellsOf = new Map<string, { layerId: string; keys: string[] }>();
+
+  private clipSubject(layer: Layer, p: Placement): ClipSubject | null {
+    if (p.kind !== "block") return null;
+    const info = this.geometry.blockClips?.(p.block, this.variantOf(p, layer));
+    if (!info) return null;
+    return { pose: { coord: p.coord, dir: p.dir }, info };
+  }
+
+  private registerCells(layer: Layer, p: Placement): void {
+    const s = this.clipSubject(layer, p);
+    if (!s) return;
+    let cells = this.cellIndex.get(layer.id);
+    if (!cells) this.cellIndex.set(layer.id, (cells = new Map()));
+    const keys = occupiedCells(s).map(cellKey);
+    for (const k of keys) {
+      let set = cells.get(k);
+      if (!set) cells.set(k, (set = new Set()));
+      set.add(p.id);
+    }
+    this.cellsOf.set(p.id, { layerId: layer.id, keys });
+  }
+
+  private unregisterCells(placementId: string): { layerId: string; keys: string[] } | undefined {
+    const reg = this.cellsOf.get(placementId);
+    if (!reg) return undefined;
+    this.cellsOf.delete(placementId);
+    const cells = this.cellIndex.get(reg.layerId);
+    for (const k of reg.keys) {
+      const set = cells?.get(k);
+      set?.delete(placementId);
+      if (set && set.size === 0) cells?.delete(k);
+    }
+    return reg;
+  }
+
+  /** Toggle a placed block's clip parts by what its neighbours join. */
+  private applyClips(layer: Layer, p: Placement, obj: Object3D): void {
+    const s = this.clipSubject(layer, p);
+    if (!s || !s.info.clips.length) return;
+    const cells = this.cellIndex.get(layer.id);
+    const hidden = hiddenClipParts(s, (cell) => {
+      const out: ClipSubject[] = [];
+      for (const id of cells?.get(cellKey(cell)) ?? []) {
+        if (id === p.id) continue;
+        const q = layer.placements.get(id);
+        const qs = q && this.clipSubject(layer, q);
+        if (qs) out.push(qs);
+      }
+      return out;
+    });
+    obj.traverse((o) => {
+      if (o.name.startsWith("clip:")) o.visible = !hidden.has(o.name);
+    });
+  }
+
+  /** Re-evaluate the clips of every built block touching these cells. */
+  private refreshClipsAround(layerId: string, keys: string[]): void {
+    const layer = this.doc.getLayer(layerId);
+    const cells = this.cellIndex.get(layerId);
+    if (!layer || !cells) return;
+    const seen = new Set<string>();
+    for (const k of keys) {
+      const [x, y, z] = k.split(",").map(Number);
+      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        for (const id of cells.get(cellKey([x + dx, y + dy, z + dz])) ?? []) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const q = layer.placements.get(id);
+          const obj = this.placementObjects.get(id);
+          if (q && obj) this.applyClips(layer, q, obj);
+        }
+      }
+    }
+  }
+
   private addPlacement(layer: Layer, p: Placement): void {
     this.ensureLayerGroup(layer);
     let ids = this.byBlock.get(p.block);
     if (!ids) this.byBlock.set(p.block, (ids = new Set()));
     ids.add(p.id);
+    this.registerCells(layer, p);
+    const reg = this.cellsOf.get(p.id);
+    if (reg) this.refreshClipsAround(layer.id, reg.keys);
 
     const [lx, ly, lz] = this.localPosition(p);
     const info: LodInfo = { layerId: layer.id, block: p.block, lx, ly, lz };
@@ -462,6 +551,7 @@ export class DocumentRenderer {
     }
     group.add(obj);
     this.placementObjects.set(p.id, obj);
+    this.applyClips(layer, p, obj);
   }
 
   private removePlacement(placementId: string): void {
@@ -470,6 +560,8 @@ export class DocumentRenderer {
       obj.removeFromParent();
       this.placementObjects.delete(placementId);
     }
+    const reg = this.unregisterCells(placementId);
+    if (reg) this.refreshClipsAround(reg.layerId, reg.keys);
     if (this.isolatedIds?.delete(placementId) && this.isolatedIds.size === 0) this.setIsolation(null);
     const info = this.lodInfo.get(placementId);
     if (info) {
@@ -546,8 +638,19 @@ export class DocumentRenderer {
       return obj;
     }
 
+    if (p.pivot) {
+      // The anchor is where the game rotates the item; the model's origin
+      // sits `pivot` away from it (e.g. custom items pivot at their centre).
+      const obj = new Group();
+      clone.position.set(...p.pivot);
+      obj.add(clone);
+      obj.position.set(...p.pos);
+      obj.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
+      obj.userData.originOffset = [...p.pivot];
+      return obj;
+    }
     clone.position.set(...p.pos);
-    clone.rotation.set(p.rot[1], p.rot[0], p.rot[2], "YXZ");
+    clone.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
     return clone;
   }
 
@@ -755,7 +858,7 @@ export class DocumentRenderer {
       if (p.kind === "block") {
         q.setFromEuler(e.set(0, -p.dir * (Math.PI / 2), 0));
       } else {
-        q.setFromEuler(e.set(p.rot[1], p.rot[0], p.rot[2], "YXZ"));
+        q.setFromEuler(e.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER));
       }
       scl.set(
         Math.max(size[0] * CELL[0], 4),

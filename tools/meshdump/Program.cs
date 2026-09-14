@@ -108,6 +108,55 @@ switch (args[0])
             }
             return new EmbeddedDumper(args[2]).Dump(args[1]);
         }
+    case "ghostname":
+        {
+            // Player nicknames of ghost/replay files: {"<path>": "<nickname>"}.
+            // Nadeo record files are small Ghost.Gbx files whose nickname
+            // sits in the compressed body, so this is a full parse.
+            Gbx.LZO = new Lzo();
+            var names = new JsonObject();
+            foreach (var file in args.Skip(1))
+            {
+                try
+                {
+                    names[file] = Gbx.ParseNode(file) switch
+                    {
+                        CGameCtnGhost gh => gh.GhostNickname,
+                        CGameCtnReplayRecord rr => rr.PlayerNickname ?? rr.GetGhosts().FirstOrDefault()?.GhostNickname,
+                        _ => null,
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  {file}: {ex.Message}");
+                    names[file] = null;
+                }
+            }
+            Console.WriteLine(names.ToJsonString());
+            return 0;
+        }
+    case "embedzip":
+        {
+            // Unpack a map's embedded custom blocks/items (the zip inside
+            // Map.Gbx) to a folder, for inspecting them one by one.
+            if (args.Length < 3)
+            {
+                Console.Error.WriteLine("usage: meshdump embedzip <map.Gbx> <outDir>");
+                return 1;
+            }
+            Gbx.LZO = new Lzo();
+            if (Gbx.ParseNode(args[1]) is not CGameCtnChallenge ezMap || ezMap.EmbeddedZipData is not { Length: > 0 } ezData)
+            {
+                Console.WriteLine("no embedded data");
+                return 2;
+            }
+            using (var ezArchive = new ZipArchive(new MemoryStream(ezData), ZipArchiveMode.Read))
+            {
+                ezArchive.ExtractToDirectory(args[2], overwriteFiles: true);
+                foreach (var e in ezArchive.Entries) Console.WriteLine($"{e.Length,9} {e.FullName}");
+            }
+            return 0;
+        }
     case "modinfo":
         {
             // Print a map's mod (custom texture pack) reference as JSON.
@@ -526,6 +575,29 @@ switch (args[0])
         {
             Console.WriteLine($"  StaticObject: {cim.StaticObject?.GetType().FullName ?? "null"}");
             Console.WriteLine($"  StaticObject.Mesh: {cim.StaticObject?.Mesh?.GetType().FullName ?? "null"}");
+            if (cim.StaticObject?.Mesh is CPlugSolid2Model s2)
+            {
+                Console.WriteLine($"  MaterialIds: {(s2.MaterialIds is null ? "null" : string.Join(", ", s2.MaterialIds))}");
+                Console.WriteLine($"  Materials: {(s2.Materials is null ? "null" : s2.Materials.Length.ToString())}");
+                foreach (var m in s2.Materials ?? [])
+                    Console.WriteLine($"    file={m.File?.FilePath ?? "-"} node={m.Node?.GetType().Name ?? "-"}");
+                foreach (var prop in s2.GetType().GetProperties())
+                {
+                    if (!prop.Name.Contains("Material", StringComparison.OrdinalIgnoreCase) || prop.Name is "MaterialIds" or "Materials") continue;
+                    object? v = null;
+                    try { v = prop.GetValue(s2); } catch { }
+                    var desc = v switch
+                    {
+                        null => "null",
+                        string str => str,
+                        System.Collections.IEnumerable list => string.Join(" | ", list.Cast<object?>().Select(DescribeMaterialish)),
+                        _ => v.ToString() ?? "?",
+                    };
+                    Console.WriteLine($"  .{prop.Name}: {desc}");
+                }
+                foreach (var geom in s2.ShadedGeoms ?? [])
+                    Console.WriteLine($"  geom visual={geom.VisualIndex} matIndex={geom.MaterialIndex} lod={geom.LodMask}");
+            }
         }
         if (it.EntityModel is GBX.NET.Engines.Meta.NPlugItem_SVariantList vl)
         {
@@ -546,6 +618,29 @@ switch (args[0])
     default:
         Console.Error.WriteLine($"unknown command {args[0]}");
         return 1;
+}
+
+static string DescribeMaterialish(object? o)
+{
+    if (o is null) return "null";
+    var t = o.GetType();
+    var parts = new List<string> { t.Name };
+    foreach (var prop in t.GetProperties())
+    {
+        if (prop.GetIndexParameters().Length > 0) continue;
+        object? v = null;
+        try { v = prop.GetValue(o); } catch { continue; }
+        if (v is null) continue;
+        if (v is System.Collections.IEnumerable list && v is not string)
+        {
+            var items = list.Cast<object?>().Take(6).Select(x => x is string or ValueType ? x!.ToString() : x is null ? "null" : DescribeMaterialish(x));
+            parts.Add($"{prop.Name}=[{string.Join("; ", items)}]");
+            continue;
+        }
+        if (v is GBX.NET.Engines.MwFoundations.CMwNod n) parts.Add($"{prop.Name}=[{DescribeMaterialish(n)}]");
+        else if (v is string or ValueType) parts.Add($"{prop.Name}={v}");
+    }
+    return string.Join(" ", parts);
 }
 
 static string ResolveRef(string gbxPath, int ancestorLevel, string relativePath) =>
@@ -604,18 +699,51 @@ sealed class EmbeddedDumper(string outDir)
                 using var ms = new MemoryStream();
                 using (var es = entry.Open()) es.CopyTo(ms);
                 ms.Position = 0;
-                if (Gbx.ParseNode(ms) is not CGameItemModel item)
+                var zipPath = entry.FullName.Replace('/', '\\');
+                var safe = Sanitize(zipPath);
+                CGameItemModel? item;
+                try
+                {
+                    item = Gbx.ParseNode(ms) as CGameItemModel;
+                }
+                catch (Exception ex)
+                {
+                    // Newer item files GBX.NET cannot read (current
+                    // CPlugSurface / crystal chunk versions): rescue the
+                    // meshes from the raw bytes like unreadable official prefabs.
+                    var tempDir = Path.Combine(Path.GetTempPath(), "trackedit-embedded");
+                    Directory.CreateDirectory(tempDir);
+                    var temp = Path.Combine(tempDir, safe);
+                    File.WriteAllBytes(temp, ms.ToArray());
+                    var rescued = new ObjBuilder();
+                    try { helper.SalvageFile(rescued, temp, Quaternion.Identity, Vector3.Zero); }
+                    finally { try { File.Delete(temp); } catch { } }
+                    if (rescued.IsEmpty)
+                    {
+                        failed++;
+                        Console.Error.WriteLine($"  FAIL {entry.FullName}: {ex.Message} (nothing to salvage)");
+                        continue;
+                    }
+                    var rescuedPath = Path.Combine(outDir, "embedded", safe + ".obj");
+                    File.WriteAllText(rescuedPath, rescued.ToObj());
+                    assets.Add((zipPath, new JsonObject { ["obj"] = $"embedded/{safe}.obj", ["salvaged"] = true }, false));
+                    ok++;
+                    Console.Error.WriteLine($"  {entry.FullName}: {ex.Message} — meshes salvaged from the raw file");
+                    continue;
+                }
+                if (item is null)
                 {
                     skipped++;
                     continue;
                 }
-                var zipPath = entry.FullName.Replace('/', '\\');
-                var safe = Sanitize(zipPath);
 
                 if (item.EntityModelEdition is CGameCommonItemEntityModelEdition { MeshCrystal: not null } edition)
                 {
                     var obj = Path.Combine(outDir, "embedded", safe + ".obj");
-                    edition.MeshCrystal.ExportToObj(obj, Path.Combine(outDir, "embedded", safe + ".mtl"));
+                    var mtl = Path.Combine(outDir, "embedded", safe + ".mtl");
+                    edition.MeshCrystal.ExportToObj(obj, mtl);
+                    CanonicalizeMaterialNames(obj);
+                    CanonicalizeMaterialNames(mtl);
                     assets.Add((zipPath, new JsonObject { ["obj"] = $"embedded/{safe}.obj" }, false));
                     ok++;
                     continue;
@@ -690,6 +818,42 @@ sealed class EmbeddedDumper(string outDir)
 
     private static bool LooksCustom(string? name) =>
         name is not null && (name.Contains('\\') || name.Contains(".gbx", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The crystal exporter names materials by their game path
+    /// ("Stadium\Media\Modifier\PlatformIce\PlatformTech"). The mesh
+    /// library keys textures by the short name the block extraction uses
+    /// ("PlatformIce.PlatformTech", see Dumper.RegisterMaterial) — rewrite
+    /// usemtl/newmtl lines so custom items pick up the same textures.
+    /// </summary>
+    private static void CanonicalizeMaterialNames(string path)
+    {
+        if (!File.Exists(path)) return;
+        var lines = File.ReadAllLines(path);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var space = line.IndexOf(' ');
+            if (space < 0) continue;
+            var key = line[..space];
+            if (key is not ("usemtl" or "newmtl")) continue;
+            lines[i] = $"{key} {CanonicalMaterialName(line[(space + 1)..].Trim())}";
+        }
+        File.WriteAllLines(path, lines);
+    }
+
+    /// <summary>"Stadium\Media\Material\TrackBorders" -> "TrackBorders";
+    /// "Stadium\Media\Modifier\PlatformIce\PlatformTech" -> "PlatformIce.PlatformTech".</summary>
+    public static string CanonicalMaterialName(string pathOrId)
+    {
+        var stem = TerrainModifiers.Stem(pathOrId);
+        var folder = TerrainModifiers.ModifierFolder(pathOrId);
+        var name = folder is null ? stem : $"{folder}.{stem}";
+        var sb = new StringBuilder(name.Length);
+        foreach (var c in name)
+            sb.Append(char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_');
+        return sb.ToString();
+    }
 
     /** "…\Ramp.Block.Gbx_CustomBlock" -> "ramp.block.gbx" */
     private static string BaseFileName(string name)
@@ -986,6 +1150,8 @@ sealed class Dumper(string root, string outDir, string? filter)
                     ["size"] = size is null ? null : new JsonArray(size[0], size[1], size[2]),
                     ["air"] = air is null ? null : $"{name}/air.obj",
                     ["ground"] = ground is null ? null : $"{name}/ground.obj",
+                    ["units"] = UnitTable(info),
+                    ["clips"] = ClipTable(info),
                 };
                 ok++;
             }
@@ -1017,6 +1183,11 @@ sealed class Dumper(string root, string outDir, string? filter)
                 if (clipId is null || blocks[clipId] is not JsonObject clipEntry) { skipped++; continue; }
                 var entry = (JsonObject)clipEntry.DeepClone();
                 entry["size"] = size is null ? null : new JsonArray(size[0], size[1], size[2]);
+                if (Gbx.ParseNode(file) is CGameCtnBlockInfo aliasInfo)
+                {
+                    entry["units"] = UnitTable(aliasInfo);
+                    entry["clips"] = ClipTable(aliasInfo);
+                }
                 blocks[name] = entry;
                 aliased++;
             }
@@ -1179,9 +1350,85 @@ sealed class Dumper(string root, string outDir, string? filter)
 
     private void Finish(JsonObject index)
     {
-        File.WriteAllText(Path.Combine(outDir, "index.json"), index.ToJsonString());
+        // A full block run takes long enough for other writers (TMX imports
+        // extracting a map's embedded items) to add entries meanwhile: merge
+        // our results into whatever is on disk NOW instead of overwriting it
+        // with the copy loaded at start.
+        var current = LoadIndex();
+        foreach (var section in new[] { "blocks", "items" })
+        {
+            var target = current[section]!.AsObject();
+            foreach (var (name, entry) in index[section]?.AsObject() ?? [])
+                target[name] = entry?.DeepClone();
+        }
+        File.WriteAllText(Path.Combine(outDir, "index.json"), current.ToJsonString());
         WriteMaterials();
         Console.WriteLine($"done: {ok} exported, {skipped} skipped, {failed} failed -> {outDir}");
+    }
+
+    /// <summary>Unit offsets (cells) per variant: {"air": [[x,y,z],…], "ground": […]}.</summary>
+    private static JsonObject UnitTable(CGameCtnBlockInfo info)
+    {
+        JsonArray? Units(CGameCtnBlockInfoVariant? variant)
+        {
+            if (variant?.BlockUnitModels is not { Length: > 0 } units) return null;
+            var arr = new JsonArray();
+            foreach (var u in units)
+                if (u is not null) arr.Add(new JsonArray(u.RelativeOffset.X, u.RelativeOffset.Y, u.RelativeOffset.Z));
+            return arr;
+        }
+        return new JsonObject { ["air"] = Units(info.VariantBaseAir), ["ground"] = Units(info.VariantBaseGround) };
+    }
+
+    /// <summary>
+    /// The clips each unit face carries, per variant. The game shows a clip
+    /// (a cap: platform edges, the "turbines" of special platforms, deco
+    /// walls…) only while that side is open; when the neighbouring block's
+    /// facing side carries a clip of the same group, both vanish and the
+    /// surfaces tile. Nothing in a map records this — the editor derives it
+    /// from neighbours using this table. Ids match the OBJ part names
+    /// ("clip:&lt;id&gt;:&lt;face&gt;:&lt;x,y,z&gt;").
+    /// </summary>
+    private static JsonObject ClipTable(CGameCtnBlockInfo info)
+    {
+        static string? Str(object node, string prop) =>
+            node.GetType().GetProperty(prop)?.GetValue(node) as string;
+        JsonArray? Clips(CGameCtnBlockInfoVariant? variant)
+        {
+            if (variant?.BlockUnitModels is not { Length: > 0 } units) return null;
+            var arr = new JsonArray();
+            foreach (var u in units)
+            {
+                if (u is null) continue;
+                var faces = new (string Face, GBX.NET.External<CGameCtnBlockInfoClip>[]? List)[]
+                {
+                    ("north", u.ClipsNorth), ("south", u.ClipsSouth), ("east", u.ClipsEast), ("west", u.ClipsWest),
+                    ("top", u.ClipsTop), ("bottom", u.ClipsBottom),
+                };
+                foreach (var (face, list) in faces)
+                {
+                    foreach (var ext in list ?? [])
+                    {
+                        if (ext.Node is not CGameCtnBlockInfo clip) continue;
+                        var vertical = clip is CGameCtnBlockInfoClipVertical;
+                        var group = vertical ? Str(clip, "VerticalClipGroupId") : Str(clip, "ClipGroupId");
+                        var sym = vertical ? group : Str(clip, "SymmetricalClipGroupId");
+                        var entry = new JsonObject
+                        {
+                            ["u"] = new JsonArray(u.RelativeOffset.X, u.RelativeOffset.Y, u.RelativeOffset.Z),
+                            ["face"] = face,
+                            ["id"] = clip.Ident.Id,
+                        };
+                        if (!string.IsNullOrEmpty(group)) entry["group"] = group;
+                        if (!string.IsNullOrEmpty(sym) && sym != group) entry["sym"] = sym;
+                        if (vertical) entry["vertical"] = true;
+                        arr.Add(entry);
+                    }
+                }
+            }
+            return arr;
+        }
+        return new JsonObject { ["air"] = Clips(info.VariantBaseAir), ["ground"] = Clips(info.VariantBaseGround) };
     }
 
     private static int[]? UnitsSize(CGameCtnBlockInfoVariant? variant)
@@ -1289,6 +1536,15 @@ sealed class Dumper(string root, string outDir, string? filter)
         if (depth > 4) return;
         var path = FindGameFile(relativePath);
         if (path is null) return;
+        SalvageFile(b, path, q, t, depth);
+    }
+
+    /// <summary>Meshes rescued from a Gbx file GBX.NET cannot parse (any
+    /// file holding inline CPlugSolid2Model bodies: prefabs, items embedded
+    /// in maps). Externals it references resolve against the game data.</summary>
+    public void SalvageFile(ObjBuilder b, string path, Quaternion q, Vector3 t, int depth = 0)
+    {
+        if (depth > 4) return;
         if (!salvaged.TryGetValue(path, out var res))
         {
             try { res = Trackedit.Salvage.Read(path); }
@@ -1905,6 +2161,12 @@ sealed class Dumper(string root, string outDir, string? filter)
                 mat = RegisterMaterial(matId, null);
             else if (s2m.Materials?.Length > geom.MaterialIndex)
                 mat = RegisterMaterial(s2m.Materials[geom.MaterialIndex].File?.FilePath, s2m.Materials[geom.MaterialIndex].Node);
+            else if (s2m.CustomMaterials?.ElementAtOrDefault(geom.MaterialIndex)?.MaterialUserInst?.Link is { Length: > 0 } link)
+                // Custom items (Mesh Modeler / fbx imports) reference game
+                // materials through user-material instances: Link is the
+                // material's game path ("Stadium\Media\Modifier\PlatformIce\PlatformTech")
+                // or bare name ("TrackBorders"), the same names the blocks use.
+                mat = RegisterMaterial(link, null);
 
             if (materialInvisible.Contains(mat)) continue;
             b.AddVisual(visual, q, t, mat, ProjectedScale(mat));
@@ -2502,7 +2764,19 @@ sealed class ObjBuilder
 {
     private readonly StringBuilder v = new();
     private readonly StringBuilder vt = new();
-    private readonly Dictionary<string, StringBuilder> facesByMaterial = [];
+    /// <summary>Faces keyed by (part, material), in first-seen order. The
+    /// part is the merge source: "body" for the block's own mobils, or
+    /// "clip:&lt;id&gt;:&lt;face&gt;:&lt;unit&gt;" for a clip cap — each part
+    /// is written as its own OBJ group so the editor can hide clips whose
+    /// side is joined to a neighbour.</summary>
+    private readonly Dictionary<(string Part, string Mat), StringBuilder> facesByPart = [];
+    private string Part => source.StartsWith("clip:", StringComparison.Ordinal) ? source : "body";
+    private StringBuilder FacesFor(string material)
+    {
+        if (!facesByPart.TryGetValue((Part, material), out var f))
+            facesByPart[(Part, material)] = f = new StringBuilder();
+        return f;
+    }
     private int vertCount;
     public bool IsEmpty => vertCount == 0;
 
@@ -2600,8 +2874,7 @@ sealed class ObjBuilder
             // face — mesh UVs would smear/rotate the pattern on curved
             // tops and cut faces. `s` = repeats per world unit (1/32 = one
             // tile per grid cell) from the bitmap's DefaultTexCoordScale.
-            if (!facesByMaterial.TryGetValue(material, out var pf))
-                facesByMaterial[material] = pf = new StringBuilder();
+            var pf = FacesFor(material);
             for (var i = 0; i + 2 < indices.Length; i += 3)
             {
                 var w0 = Vector3.Transform(positions[indices[i]], q) + t;
@@ -2631,8 +2904,7 @@ sealed class ObjBuilder
         RecordSource(vertCount + 1, positions.Length);
         vertCount += positions.Length;
 
-        if (!facesByMaterial.TryGetValue(material, out var f))
-            facesByMaterial[material] = f = new StringBuilder();
+        var f = FacesFor(material);
         for (var i = 0; i + 2 < indices.Length; i += 3)
         {
             int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
@@ -2817,8 +3089,7 @@ sealed class ObjBuilder
         }
         RecordSource(vertCount + 1, positions.Length);
         vertCount += positions.Length;
-        if (!facesByMaterial.TryGetValue(material, out var f))
-            facesByMaterial[material] = f = new StringBuilder();
+        var f = FacesFor(material);
         for (var i = 0; i + 2 < indices.Length; i += 3)
         {
             Cover(positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]);
@@ -2835,8 +3106,19 @@ sealed class ObjBuilder
     {
         var sb = new StringBuilder(v.Length + vt.Length + 64);
         sb.Append(v).Append(vt);
-        foreach (var (mat, faces) in facesByMaterial)
-            sb.Append("usemtl ").Append(mat).Append('\n').Append(faces);
+        // Body first, then each clip part; within a part, one usemtl run
+        // per material. OBJ loaders start a new object at every "g".
+        var parts = facesByPart.Keys.Select(k => k.Part).Distinct()
+            .OrderBy(p => p == "body" ? 0 : 1).ToList();
+        foreach (var part in parts)
+        {
+            sb.Append("g ").Append(part).Append('\n');
+            foreach (var ((p, mat), faces) in facesByPart)
+            {
+                if (p != part) continue;
+                sb.Append("usemtl ").Append(mat).Append('\n').Append(faces);
+            }
+        }
         return sb.ToString();
     }
 }

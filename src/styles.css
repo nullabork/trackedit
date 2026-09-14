@@ -685,6 +685,13 @@ input[type="number"] { font-family: Consolas, monospace; }
 .tmx-row { height: 26px; }
 .tmx-author { color: var(--ink-2); font-size: 11px; }
 .tmx-awards { color: var(--gold); font-size: 11px; font-family: Consolas, monospace; }
+.tmx-time { font-family: Consolas, monospace; font-size: 11px; color: var(--ink-0); min-width: 68px; text-align: right; }
+.tmx-date { color: var(--ink-2); font-size: 11px; min-width: 70px; text-align: right; }
+.tmx-row.current { border-left-color: var(--teal); background: var(--bg-3); }
+.tmx-name { font-weight: 600; }
+.tmx-section { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); margin: 8px 0 4px; }
+.tmx-zone { color: var(--ink-2); font-size: 11px; min-width: 70px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmx-actions { display: flex; gap: 6px; align-items: center; }
 .tmx-list.busy .row { opacity: 0.4; pointer-events: none; }
 .tmx-list.busy .row.loading { opacity: 1; border-left-color: var(--teal); background: var(--bg-3); }
 .tmx-status { display: flex; align-items: center; gap: 6px; }

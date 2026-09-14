@@ -111,6 +111,58 @@ turns for wall panels and skirt trimming of ground clips.
 - The pillar clips under elevated snow roads render as legs; the icons
   don't show them, and we haven't confirmed in-game behaviour.
 
+## 5b. Custom items embedded in maps (icecomp, TMX #84337)
+
+"Big empty spots where custom geometry is missing" turned out to be two
+rules we hadn't read, not missing data:
+
+- **Items rotate about a pivot.** The anchored object stores
+  `PivotPosition`; custom items made in the Mesh Modeler typically pivot at
+  their centre (`[-16, -6, -16]` for a 32 m half-banked slab). We rotated
+  about the model origin, so every flipped (pitch 180°) or turned piece
+  landed a cell away and 6–10 m low — the "missing" pieces were the dark
+  slabs stranded next to the track. Fix: carry `pivotPos` through the dump,
+  the placement and the renderer (`pos + R * pivot`). The ghost line was
+  the reference: it drives exactly over the pieces once they are placed
+  right.
+- **Custom meshes name materials by path.** Crystal exports say
+  `Stadium\Media\Modifier\PlatformIce\PlatformTech`; fbx-style items
+  bind a `CPlugMaterialUserInst` whose `Link` is that path. The library is
+  keyed by the short names the block extraction produces
+  (`PlatformIce.PlatformTech`), so nothing matched and every custom item
+  drew flat grey. One canonicalisation, applied at export (and as a
+  fallback on the client for older libraries), fixed all of them.
+- The user's `.trackedit.local.json` pointed TMX import at an older
+  external `gbxdump` that has no `pivotPos`. The bundled converter now runs
+  first; the override is a fallback.
+
+- **Rotation order.** The stored yaw/pitch/roll is applied yaw → roll →
+  pitch (three.js "YZX"), not yaw → pitch → roll. Measured on TMX #84440
+  ("you just got COLLEGED!"): scoring how many record-ghost samples lie
+  within 2.5 m of each tilted free block's mesh gave 569 for YZX against
+  319 for YXZ, and YZX won or tied on every block that has both pitch and
+  roll. Blocks with only one of the two never showed the bug, which is why
+  it survived so long. `core/math.ts` now owns the order
+  (`GAME_EULER_ORDER`, `quatFromGameRot`, `gameRotFromQuat`); the renderer,
+  the transform operator and the exporter all go through it.
+
+- **Clip caps are per side, not per block.** Three cruise-control
+  platforms in a row (TMX #84442) each showed their end "turbines" and the
+  record line drove straight through them. The block's unit carries a clip
+  on every face (`PlatformFCSmall` north/south, `PlatformSpecialFCRight` /
+  `...Left` east/west, `PlatformBaseFCB` below), all in clip group
+  `PlatformFCSmallClips`; the map lists no clip blocks at all. So the game
+  shows a clip only on an open side and hides it when the neighbour's facing
+  clip shares the group. We had baked every clip into the block mesh. Now
+  each clip is its own OBJ group and the renderer hides joined ones from
+  neighbour lookups (`render/clipAdjacency.ts`, pure, tested). This is the
+  same mechanism for every block family: platform trims, deco walls, base
+  undersides joining the top-cap group of the block below.
+
+Still open: tracko's `gbxbuild` writes `PivotPosition = 0` for every item,
+so an exported map would put custom items back in the wrong place in-game
+until it reads the `pivotPos` the editor now emits.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

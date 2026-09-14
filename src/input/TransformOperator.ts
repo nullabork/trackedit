@@ -4,7 +4,7 @@ import type { Layer, Placement } from "@core/layer";
 import type { Command } from "@core/commands";
 import { CompositeCmd, ReplacePlacementCmd, UpdateLayerCmd } from "@core/commands";
 import type { Dir, GridCoord } from "@core/math";
-import { CELL, clampCoord, degToRad, radToDeg, rotateDir } from "@core/math";
+import { CELL, clampCoord, degToRad, radToDeg, rotateDir, GAME_EULER_ORDER } from "@core/math";
 import type { Operator } from "./Operator";
 import type { AxisName } from "./frames";
 import {
@@ -426,7 +426,7 @@ export class TransformOperator implements Operator {
           // spot (absPos is the footprint's min corner, see renderer).
           const off = (t.obj.userData.originOffset as [number, number, number]) ?? [0, 0, 0];
           const origin = new Vector3(...off).applyQuaternion(t.obj.quaternion).add(t.obj.position);
-          const e = new Euler().setFromQuaternion(t.obj.quaternion, "YXZ");
+          const e = new Euler().setFromQuaternion(t.obj.quaternion, GAME_EULER_ORDER);
           return { id: p.id, kind: "free", block: p.block, pos: [origin.x, origin.y, origin.z], rot: [e.y, e.x, e.z], isItem: false, meta: p.meta };
         }
         const cells: GridCoord = [
@@ -452,7 +452,7 @@ export class TransformOperator implements Operator {
       // block (absPos points at the footprint's min corner, see renderer).
       const off = (t.obj.userData.originOffset as [number, number, number]) ?? [0, 0, 0];
       const origin = new Vector3(...off).applyQuaternion(t.obj.quaternion).add(t.obj.position);
-      const e = new Euler().setFromQuaternion(t.obj.quaternion, "YXZ");
+      const e = new Euler().setFromQuaternion(t.obj.quaternion, GAME_EULER_ORDER);
       return {
         id: p.id,
         kind: "free",
@@ -464,7 +464,7 @@ export class TransformOperator implements Operator {
       };
     }
     // Free placement: read the previewed quaternion back into yaw/pitch/roll.
-    const e = new Euler().setFromQuaternion(t.obj.quaternion, "YXZ");
+    const e = new Euler().setFromQuaternion(t.obj.quaternion, GAME_EULER_ORDER);
     return { ...p, rot: [e.y, e.x, e.z] };
   }
 }

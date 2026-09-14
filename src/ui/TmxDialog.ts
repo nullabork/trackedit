@@ -15,9 +15,9 @@ interface TmxResult {
  * through the dev-server bridge (TMX -> gbxdump -> dump JSON) and open it.
  */
 export function openTmxDialog(ctx: EditorContext): void {
-  const search = el("input", { class: "input", type: "search", placeholder: "Search TrackmaniaExchange…" });
+  const search = el("input", { class: "input", type: "search", placeholder: "Map name, TMX id or TMX link…" });
   const goBtn = el("button", { class: "btn primary" }, "Search");
-  const status = el("div", { class: "tmx-status" }, "Search for a map name — e.g. \"Majis Multiverse\".");
+  const status = el("div", { class: "tmx-status" }, "Search by name (\"Majis Multiverse\"), TMX id (84442) or a TMX map link.");
   const list = el("div", { class: "tmx-list rows" });
   let busy = false;
 

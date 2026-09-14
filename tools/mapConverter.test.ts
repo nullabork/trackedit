@@ -43,15 +43,30 @@ describe("bundled map conversion", () => {
     await retry;
   });
 
-  it("preserves the external converter override and surfaces failures", async () => {
+  it("prefers the bundled converter over an external override", async () => {
     const convert = createMapConverter(".");
     const result = convert("map.Gbx", "out.json", "/custom tools/gbxdump");
-    expect(execFile.mock.calls[0].slice(0, 2)).toEqual([
+    expect(execFile.mock.calls[0][0]).toBe("dotnet");
+    finish(0);
+    await vi.waitFor(() => expect(execFile).toHaveBeenCalledTimes(2));
+    expect(execFile.mock.calls[1][1]).toContain("map");
+    finish(1);
+    await result;
+    expect(execFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the external converter when the bundled one cannot run, surfacing its failures", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const convert = createMapConverter(".");
+    const result = convert("map.Gbx", "out.json", "/custom tools/gbxdump");
+    finish(0, Object.assign(new Error("spawn dotnet ENOENT"), { code: "ENOENT" }));
+    await vi.waitFor(() => expect(execFile).toHaveBeenCalledTimes(2));
+    expect(execFile.mock.calls[1].slice(0, 2)).toEqual([
       "/custom tools/gbxdump", ["map.Gbx", "out.json"],
     ]);
     const rejected = expect(result).rejects.toThrow("invalid GBX");
-    finish(0, new Error("exit 1"), "invalid GBX");
+    finish(1, new Error("exit 1"), "invalid GBX");
     await rejected;
-    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(2);
   });
 });

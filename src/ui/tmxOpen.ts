@@ -24,6 +24,7 @@ export async function openTmxMap(ctx: EditorContext, mapId: number, fallbackName
   ctx.document.reset(imported.layers, {
     name: dump.mapName ?? fallbackName,
     decoration: dump.decoration,
+    mapUid: dump.mapUid ?? null,
     modUrl: imported.modUrl,
   });
   session.ready = true;

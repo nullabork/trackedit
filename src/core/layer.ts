@@ -26,6 +26,13 @@ export interface FreePlacement {
   /** Yaw/pitch/roll in radians. */
   readonly rot: Vec3;
   /**
+   * Where the model's origin sits relative to the anchor point, in
+   * model-local metres (the game's PivotPosition). `pos` is the anchor and
+   * rotation happens around it; the mesh is drawn from `pos + R * pivot`.
+   * Absent when the origin is the anchor (official items).
+   */
+  readonly pivot?: Vec3;
+  /**
    * Whether this is an item (CGameCtnAnchoredObject) or a free block.
    * Recorded at creation so export doesn't have to guess from the catalog —
    * imported maps can contain custom items the catalog has never seen.
@@ -72,7 +79,11 @@ export interface LayerTransform {
  * FreePlacement.pos), so the layer transform moves the line with the track.
  */
 export interface GhostPath {
-  source: "map" | "tmx";
+  source: "map" | "tmx" | "nadeo";
+  /** TMX replay id, when that is where it came from. */
+  replayId?: number;
+  /** Nadeo account id of the record holder, for leaderboard ghosts. */
+  accountId?: string;
   /** Who drove it, and for TMX which replay — status/UI text only. */
   label: string;
   timeMs?: number;

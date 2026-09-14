@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ghostToLayer, importDump } from "./trackoJson";
+import { exportDump, ghostToLayer, importDump } from "./trackoJson";
 import { serializeDoc, toLayers } from "./mapStore";
 import { MapDocument } from "@core/document";
 
@@ -38,8 +38,51 @@ describe("ghost paths", () => {
     expect(back[0].ghost?.path).toEqual(ghost.path);
   });
 
+  it("labels a Nadeo record ghost and keeps the account id", () => {
+    const g = ghostToLayer({ ...ghost, source: "nadeo", nickname: "Racer", accountId: "acc-1" }, 0);
+    expect(g.source).toBe("nadeo");
+    expect(g.accountId).toBe("acc-1");
+    expect(g.label).toBe("Nadeo record by Racer");
+  });
+
   it("layers without a ghost stay ghost-free", () => {
     const { layers } = importDump({ blocks: [], items: [] });
     expect(layers[0].ghost).toBeUndefined();
+  });
+});
+
+describe("item pivots", () => {
+  const item = {
+    name: "Custom\\HalfBanked.Item.Gbx",
+    absPos: [656, 48, 944] as [number, number, number],
+    yawPitchRoll: [Math.PI / 2, Math.PI, 0] as [number, number, number],
+    pivotPos: [-16, -6, -16] as [number, number, number],
+  };
+
+  it("keeps a custom item's pivot so it rotates about the game's anchor", () => {
+    const { layers } = importDump({ blocks: [], items: [item] }, 8);
+    const p = [...layers[0].placements.values()][0];
+    expect(p.kind).toBe("free");
+    if (p.kind !== "free") return;
+    expect(p.pos).toEqual([656, 48 + 64, 944]);
+    expect(p.pivot).toEqual([-16, -6, -16]);
+    expect(p.meta?.pivotPos).toBeUndefined();
+  });
+
+  it("drops a zero pivot (the origin is the anchor)", () => {
+    const { layers } = importDump({ blocks: [], items: [{ ...item, pivotPos: [0, 0, 0] }] }, 8);
+    const p = [...layers[0].placements.values()][0];
+    expect(p.kind === "free" && p.pivot).toBeUndefined();
+  });
+
+  it("writes the pivot back unchanged, even under a layer transform", () => {
+    const doc = new MapDocument();
+    const { layers } = importDump({ blocks: [], items: [item] }, 8);
+    layers[0].transform = { translate: [32, 0, 0], rotDeg: [0, 90, 0] };
+    doc.reset(layers, { name: "t" });
+    const out = exportDump(doc, 8);
+    expect(out.items).toHaveLength(1);
+    expect(out.items?.[0].pivotPos).toEqual([-16, -6, -16]);
+    expect(out.items?.[0].absPos?.[1]).toBe(48);
   });
 });
