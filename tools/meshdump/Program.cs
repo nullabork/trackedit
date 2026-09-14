@@ -135,6 +135,16 @@ switch (args[0])
             Console.WriteLine(names.ToJsonString());
             return 0;
         }
+    case "decompress":
+        {
+            // Raw (decompressed) body bytes of a Gbx, for poking at chunks
+            // GBX.NET cannot read yet.
+            if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump decompress <in.Gbx> <out.bin>"); return 1; }
+            Gbx.LZO = new Lzo();
+            using (var outStream = File.Create(args[2])) Gbx.Decompress(args[1], outStream);
+            Console.WriteLine($"wrote {new FileInfo(args[2]).Length} bytes");
+            return 0;
+        }
     case "embedzip":
         {
             // Unpack a map's embedded custom blocks/items (the zip inside
@@ -708,13 +718,45 @@ sealed class EmbeddedDumper(string outDir)
                 }
                 catch (Exception ex)
                 {
-                    // Newer item files GBX.NET cannot read (current
-                    // CPlugSurface / crystal chunk versions): rescue the
-                    // meshes from the raw bytes like unreadable official prefabs.
                     var tempDir = Path.Combine(Path.GetTempPath(), "trackedit-embedded");
                     Directory.CreateDirectory(tempDir);
                     var temp = Path.Combine(tempDir, safe);
                     File.WriteAllBytes(temp, ms.ToArray());
+                    // Mesh Modeler items whose crystal carries modifier layers /
+                    // chunks GBX.NET cannot read: drop those (the export only
+                    // uses the geometry layer) until the file parses.
+                    CGameCommonItemEntityModelEdition? repaired = null;
+                    try
+                    {
+                        using var raw = new MemoryStream();
+                        Gbx.Decompress(temp, raw);
+                        foreach (var candidate in Trackedit.CrystalRepair.Candidates(raw.ToArray()))
+                        {
+                            try
+                            {
+                                if (Gbx.ParseNode(new MemoryStream(candidate)) is CGameItemModel fixedItem &&
+                                    fixedItem.EntityModelEdition is CGameCommonItemEntityModelEdition { MeshCrystal: not null } ed)
+                                {
+                                    repaired = ed;
+                                    break;
+                                }
+                            }
+                            catch { /* next candidate */ }
+                        }
+                    }
+                    catch { /* not a crystal item, or not repairable this way */ }
+                    if (repaired is not null)
+                    {
+                        try { File.Delete(temp); } catch { }
+                        ExportCrystal(repaired, safe);
+                        assets.Add((zipPath, new JsonObject { ["obj"] = $"embedded/{safe}.obj", ["salvaged"] = "crystal-repaired" }, false));
+                        ok++;
+                        Console.Error.WriteLine($"  {entry.FullName}: {ex.Message} — crystal repaired (modifier layers dropped)");
+                        continue;
+                    }
+                    // Otherwise (fbx-style items with newer CPlugSurface
+                    // versions): rescue the meshes from the raw bytes like
+                    // unreadable official prefabs.
                     var rescued = new ObjBuilder();
                     try { helper.SalvageFile(rescued, temp, Quaternion.Identity, Vector3.Zero); }
                     finally { try { File.Delete(temp); } catch { } }
@@ -739,11 +781,7 @@ sealed class EmbeddedDumper(string outDir)
 
                 if (item.EntityModelEdition is CGameCommonItemEntityModelEdition { MeshCrystal: not null } edition)
                 {
-                    var obj = Path.Combine(outDir, "embedded", safe + ".obj");
-                    var mtl = Path.Combine(outDir, "embedded", safe + ".mtl");
-                    edition.MeshCrystal.ExportToObj(obj, mtl);
-                    CanonicalizeMaterialNames(obj);
-                    CanonicalizeMaterialNames(mtl);
+                    ExportCrystal(edition, safe);
                     assets.Add((zipPath, new JsonObject { ["obj"] = $"embedded/{safe}.obj" }, false));
                     ok++;
                     continue;
@@ -814,6 +852,15 @@ sealed class EmbeddedDumper(string outDir)
         File.WriteAllText(indexPath, index.ToJsonString());
         Console.WriteLine($"embedded: {ok} exported, {mapped}/{mapNames.Count} map names mapped, {skipped} skipped, {failed} failed");
         return 0;
+    }
+
+    private void ExportCrystal(CGameCommonItemEntityModelEdition edition, string safe)
+    {
+        var obj = Path.Combine(outDir, "embedded", safe + ".obj");
+        var mtl = Path.Combine(outDir, "embedded", safe + ".mtl");
+        edition.MeshCrystal!.ExportToObj(obj, mtl);
+        CanonicalizeMaterialNames(obj);
+        CanonicalizeMaterialNames(mtl);
     }
 
     private static bool LooksCustom(string? name) =>

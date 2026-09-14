@@ -454,6 +454,14 @@ the header of each, `meshdump ghostname`). An OAuth app from
 the game's map uid, which TMX import stores on the document (older stored
 maps resolve it through TMX when the dialog opens).
 
+Embedded items GBX.NET cannot parse get two rescue attempts: Mesh Modeler
+items whose crystal carries chunks or modifier layers the reader stumbles on
+are repaired by dropping the lightmap chunk and, if needed, trailing
+modifier layers until the file parses (`tools/meshdump/CrystalRepair.cs`;
+the export only uses the geometry layer), and fbx-style items are scanned
+for inline Solid2 meshes like unreadable official prefabs. The index marks
+both with `salvaged`.
+
 `meshdump embedzip <map.Gbx> <dir>` unpacks a map's embedded assets for
 inspection; `meshdump iteminfo <file.Item.Gbx>` prints an item's model,
 mesh and material bindings.
