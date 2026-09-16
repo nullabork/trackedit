@@ -34,6 +34,7 @@ export interface StoredLayer {
   ghosts?: GhostPath[];
   /** Records saved before lines became a list. */
   ghost?: GhostPath;
+  hiddenBlocks?: string[];
 }
 
 export interface StoredMapMeta {
@@ -96,6 +97,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
       },
       placements: [...l.placements.values()],
       ...(l.ghosts.length ? { ghosts: l.ghosts } : {}),
+      ...(l.hiddenBlocks.length ? { hiddenBlocks: [...l.hiddenBlocks] } : {}),
     };
   });
   return {
@@ -131,6 +133,7 @@ export function toLayers(rec: StoredMap): Layer[] {
       translate: [...sl.transform.translate] as Vec3,
       rotDeg: [...sl.transform.rotDeg] as Vec3,
     };
+    layer.hiddenBlocks = [...(sl.hiddenBlocks ?? [])];
     for (const p of sl.placements) layer.placements.set(p.id, p);
     layer.ghosts = (sl.ghosts ?? (sl.ghost?.path?.length ? [sl.ghost] : []))
       .filter((g) => g.path?.length)

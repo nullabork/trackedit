@@ -1,7 +1,8 @@
 import type { EditorContext } from "@plugins/api";
-import { AddLayerCmd, RemoveLayerCmd, UpdateLayerCmd } from "@core/commands";
-import type { Layer } from "@core/layer";
-import { createLayer } from "@core/layer";
+import { AddLayerCmd, RemoveLayerCmd, ReplacePlacementCmd, UpdateLayerCmd } from "@core/commands";
+import type { Layer, Placement } from "@core/layer";
+import { createLayer, isPlacementVisible } from "@core/layer";
+import { frameDebugSubject } from "@render/debugView";
 import { clear, el } from "./dom";
 import { icon } from "./icons";
 import { confirmDialog } from "./dialog";
@@ -98,11 +99,97 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
     if (ok) ctx.history.run(new RemoveLayerCmd(layer.id));
   };
 
+  // --- block tree: layer > unique block > placement ---
+  const expandedLayers = new Set<string>();
+  const expandedGroups = new Set<string>(); // `${layerId}\n${block}`
+
+  const expander = (open: boolean, title: string, onclick: () => void) => {
+    const b = el("button", { class: "layer-btn layer-expander", title }, open ? "▾" : "▸");
+    b.addEventListener("click", (e) => { e.stopPropagation(); onclick(); });
+    return b;
+  };
+
+  /** Short label for a block name (custom items carry long paths). */
+  const shortName = (block: string) => {
+    const tail = block.split("\\").pop() ?? block;
+    return tail.replace(/\.(Item|Block)\.gbx(_CustomBlock)?$/i, "");
+  };
+
+  const whereLabel = (p: Placement) =>
+    p.kind === "block" ? `${p.coord[0]}, ${p.coord[1]}, ${p.coord[2]}` : `${p.pos.map((v) => Math.round(v)).join(", ")} m`;
+
+  /** Show or hide a whole block group; individual overrides in it reset. */
+  const setGroupVisible = (layer: Layer, block: string, visible: boolean) => {
+    const hiddenBlocks = visible ? layer.hiddenBlocks.filter((b) => b !== block) : [...new Set([...layer.hiddenBlocks, block])];
+    ctx.history.run(new UpdateLayerCmd(layer.id, { hiddenBlocks }, visible ? "Show block group" : "Hide block group"));
+    for (const p of layer.placements.values()) {
+      if (p.block !== block || p.visible === undefined) continue;
+      const { visible: _drop, ...rest } = p;
+      ctx.history.run(new ReplacePlacementCmd(layer.id, rest as Placement, "Reset placement visibility"));
+    }
+  };
+
+  const setPlacementVisible = (layer: Layer, p: Placement, visible: boolean) => {
+    const groupDefault = !layer.hiddenBlocks.includes(p.block);
+    const { visible: _drop, ...rest } = p;
+    const next = visible === groupDefault ? rest : { ...rest, visible };
+    ctx.history.run(new ReplacePlacementCmd(layer.id, next as Placement, visible ? "Show placement" : "Hide placement"));
+  };
+
+  const focusPlacement = (layer: Layer, p: Placement) => {
+    ctx.selection.set([{ layerId: layer.id, placementId: p.id }]);
+    try {
+      frameDebugSubject(ctx, { uid: p.id });
+    } catch (err) {
+      ctx.ui.setStatus(`Could not frame: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  const placementRow = (layer: Layer, p: Placement) => {
+    const on = isPlacementVisible(layer, p);
+    const selected = ctx.selection.has(p.id);
+    const row = el("div", { class: `layer-row tree-row tree-placement${on ? "" : " hidden-entry"}${selected ? " selected" : ""}`, title: "Double-click to frame in the viewport" },
+      iconBtn(on ? "eye" : "eye-off", on ? "Hide this one" : "Show this one", () => setPlacementVisible(layer, p, !on)),
+      el("span", { class: "layer-name" }, whereLabel(p),
+        el("span", { class: "layer-count" }, p.kind === "free" ? (p.isItem ? " item" : " free") : ` dir ${p.dir}`)),
+    );
+    row.addEventListener("click", (e) => { e.stopPropagation(); ctx.selection.set([{ layerId: layer.id, placementId: p.id }]); });
+    row.addEventListener("dblclick", (e) => { e.stopPropagation(); focusPlacement(layer, p); });
+    return row;
+  };
+
+  const groupRows = (layer: Layer) => {
+    const groups = new Map<string, Placement[]>();
+    for (const p of layer.placements.values()) (groups.get(p.block) ?? groups.set(p.block, []).get(p.block)!).push(p);
+    const rows: HTMLElement[] = [];
+    for (const [block, ps] of [...groups].sort((a, b) => shortName(a[0]).localeCompare(shortName(b[0])))) {
+      const key = `${layer.id}\n${block}`;
+      const open = expandedGroups.has(key);
+      const hidden = layer.hiddenBlocks.includes(block);
+      const shown = ps.filter((p) => isPlacementVisible(layer, p)).length;
+      const row = el("div", { class: `layer-row tree-row tree-group${hidden ? " hidden-entry" : ""}` },
+        expander(open, open ? "Collapse" : "List every placement", () => { open ? expandedGroups.delete(key) : expandedGroups.add(key); renderList(); }),
+        iconBtn(hidden ? "eye-off" : "eye", hidden ? "Show all of this block" : "Hide all of this block", () => setGroupVisible(layer, block, hidden)),
+        el("span", { class: "layer-name", title: block }, shortName(block),
+          el("span", { class: "layer-count" }, shown === ps.length ? ` ${ps.length}` : ` ${shown}/${ps.length}`)),
+      );
+      row.addEventListener("click", (e) => { e.stopPropagation(); ctx.selection.set(ps.map((p) => ({ layerId: layer.id, placementId: p.id }))); });
+      rows.push(row);
+      // Stable order (edits re-insert placements): by position.
+      const keyOf = (p: Placement) => p.kind === "block" ? [p.coord[0], p.coord[1], p.coord[2]] : p.pos;
+      const sorted = [...ps].sort((a, b) => { const ka = keyOf(a), kb = keyOf(b); return ka[0] - kb[0] || ka[2] - kb[2] || ka[1] - kb[1]; });
+      if (open) for (const p of sorted) rows.push(placementRow(layer, p));
+    }
+    return rows;
+  };
+
   const renderList = () => {
     clear(list);
     for (const layer of doc.layers) {
       const active = layer.id === doc.activeLayer.id;
+      const open = expandedLayers.has(layer.id);
       const row = el("div", { class: `layer-row${active ? " active" : ""}` },
+        expander(open, open ? "Collapse" : "List the blocks in this layer", () => { open ? expandedLayers.delete(layer.id) : expandedLayers.add(layer.id); renderList(); }),
         iconBtn(layer.visible ? "eye" : "eye-off", layer.visible ? "Hide layer" : "Show layer", () =>
           ctx.history.run(new UpdateLayerCmd(layer.id, { visible: !layer.visible }, "Toggle visibility")),
         ),
@@ -114,6 +201,7 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
       );
       row.addEventListener("click", () => doc.setActiveLayer(layer.id));
       list.append(row);
+      if (open) list.append(...groupRows(layer));
     }
   };
 
@@ -255,6 +343,7 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
   doc.events.on("activeLayerChanged", renderAll);
   doc.events.on("placementAdded", renderList);
   doc.events.on("placementRemoved", renderList);
+  ctx.selection.events.on("changed", () => { if (expandedGroups.size) renderList(); });
   doc.events.on("mapChanged", renderSettings);
   doc.events.on("reset", renderAll);
   renderAll();

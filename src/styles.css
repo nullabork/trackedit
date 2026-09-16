@@ -423,6 +423,13 @@ input[type="number"] { font-family: Consolas, monospace; }
 }
 .layer-row.active .layer-name { color: var(--orange); font-weight: 600; }
 .layer-count { color: var(--ink-2); font-size: 10px; font-family: Consolas, monospace; }
+.layer-expander { font-size: 11px; color: var(--ink-2); }
+.tree-row { height: 22px; }
+.tree-group { padding-left: 14px; }
+.tree-placement { padding-left: 34px; }
+.tree-row .layer-name { font-size: 11px; }
+.tree-row.hidden-entry .layer-name { color: var(--ink-2); font-style: italic; }
+.tree-row.selected { border-left-color: var(--teal); background: var(--bg-2); }
 .layer-btn {
   background: transparent;
   border: none;

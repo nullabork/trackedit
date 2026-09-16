@@ -10,6 +10,12 @@ export interface BlockPlacement {
   readonly coord: GridCoord;
   readonly dir: Dir;
   /**
+   * Per-placement visibility override (editor only, never exported): true
+   * shows it even when its block group is hidden, false hides it; absent
+   * follows the group. See isPlacementVisible.
+   */
+  readonly visible?: boolean;
+  /**
    * Fields from the source file the editor doesn't model yet (flags, variant,
    * waypoint, color, ...). Carried through untouched so editing an imported
    * map never destroys data.
@@ -38,6 +44,8 @@ export interface FreePlacement {
    * imported maps can contain custom items the catalog has never seen.
    */
   readonly isItem: boolean;
+  /** See BlockPlacement.visible. */
+  readonly visible?: boolean;
   /** See BlockPlacement.meta. */
   readonly meta?: Readonly<Record<string, unknown>>;
 }
@@ -113,11 +121,19 @@ export interface Layer {
   readonly placements: Map<string, Placement>;
   /** Driving lines shown on this layer (any number at once). */
   ghosts: GhostPath[];
+  /** Block names whose whole group is hidden in the editor (never exported). */
+  hiddenBlocks: string[];
+}
+
+/** Whether a placement draws: its own override, else its block group. */
+export function isPlacementVisible(layer: Pick<Layer, "hiddenBlocks">, p: Placement): boolean {
+  return p.visible ?? !layer.hiddenBlocks.includes(p.block);
 }
 
 export function createLayer(name: string): Layer {
   return {
     ghosts: [],
+    hiddenBlocks: [],
     id: newId("layer"),
     name,
     visible: true,

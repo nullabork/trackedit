@@ -26,6 +26,7 @@ import { CELL, DEFAULT_Y_OFFSET, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
+import { isPlacementVisible } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import { paintHex } from "@core/palettes";
 import type { GeometryProvider } from "./GeometryProvider";
@@ -104,9 +105,17 @@ export class DocumentRenderer {
         if (layer) this.promote(id, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
       }
     }
-    for (const [id, obj] of this.placementObjects)
-      obj.visible = !this.isolatedIds || this.isolatedIds.has(id);
+    for (const [id, obj] of this.placementObjects) obj.visible = this.shouldShow(id);
     for (const pool of this.pools.values()) pool.visible = !this.isolatedIds;
+  }
+
+  /** Isolation filter and the placement's own/group visibility, together. */
+  private shouldShow(placementId: string): boolean {
+    if (this.isolatedIds && !this.isolatedIds.has(placementId)) return false;
+    const info = this.lodInfo.get(placementId);
+    const layer = info && this.doc.getLayer(info.layerId);
+    const p = layer?.placements.get(placementId);
+    return !layer || !p || isPlacementVisible(layer, p);
   }
 
   // --- LOD state ---
@@ -197,6 +206,13 @@ export class DocumentRenderer {
   private syncLayerGroup(layer: Layer, group = this.layerGroups.get(layer.id)): void {
     if (!group) return;
     group.visible = layer.visible;
+    // Block-group hides live on the layer: refresh its near visuals and pool.
+    for (const [id, info] of this.lodInfo) {
+      if (info.layerId !== layer.id) continue;
+      const obj = this.placementObjects.get(id);
+      if (obj) obj.visible = this.shouldShow(id);
+    }
+    this.dirtyPools.add(layer.id);
     group.position.set(...layer.transform.translate);
     const [rx, ry, rz] = layer.transform.rotDeg;
     group.rotation.set(degToRad(rx), degToRad(ry), degToRad(rz), "YXZ");
@@ -541,7 +557,7 @@ export class DocumentRenderer {
     if (!group) return;
     const obj = this.buildObject(p, !this.largeMap, layer);
     if (this.wireframeOn) this.addWireframe(obj);
-    obj.visible = !this.isolatedIds || this.isolatedIds.has(p.id);
+    obj.visible = (!this.isolatedIds || this.isolatedIds.has(p.id)) && isPlacementVisible(layer, p);
     obj.userData.placementId = p.id;
     obj.userData.layerId = layer.id;
     obj.userData.blockName = p.block;
@@ -850,7 +866,7 @@ export class DocumentRenderer {
     let i = 0;
     for (const id of farIds) {
       const p = layer.placements.get(id);
-      if (!p) continue;
+      if (!p || !isPlacementVisible(layer, p)) continue;
       const def = this.catalog.get(p.block);
       const size = def?.size ?? [1, 1, 1];
       const [lx, ly, lz] = this.localPosition(p);

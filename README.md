@@ -268,6 +268,17 @@ The mood skyboxes in `public/sky/` are CC0 sky photographs from
 [Poly Haven](https://polyhaven.com/), baked to 2k equirects by
 `tools/fetch_skies.py`.
 
+## Layers panel block tree
+
+Each layer row has an expander: open it for the layer's unique block names
+(with counts), open a block for every placement of it (grid coordinate or
+metres, direction / item). Eyes on the block group hide or show all of its
+placements; eyes on a placement override that one either way, so a hidden
+group can have a few pieces switched back on (the count reads `shown/total`).
+Click a placement to select it, double-click to frame it in the viewport.
+Visibility is editor-only (`hiddenBlocks` on the layer, `visible` on a
+placement), persisted with the map and never exported.
+
 ## Ghost paths
 
 Opening a map from TMX draws the driving line of a ghost under the map's
