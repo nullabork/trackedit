@@ -167,7 +167,7 @@ export class Shell implements UiHost {
     this.panels.push(panel);
     const host = panel.side === "left" ? this.pages[0].element : this.right;
     const wrap = el("section", { class: "panel", "data-panel": panel.id },
-      panel.title ? el("header", {}, panel.title) : null,
+      panel.title ? el("header", {}, el("span", { class: "panel-title" }, panel.title), panel.actions ?? null) : null,
       panel.element,
     );
     wrap.style.order = String(panel.order ?? 50);

@@ -30,6 +30,8 @@ export interface PanelDef {
   element: HTMLElement;
   /** Lower comes first. Built-ins use 10/20/30. */
   order?: number;
+  /** Icon buttons shown at the right end of the panel's header. */
+  actions?: HTMLElement;
 }
 
 export interface UiHost {

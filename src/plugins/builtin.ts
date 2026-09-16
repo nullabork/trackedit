@@ -49,7 +49,7 @@ export const layersPlugin: EditorPlugin = {
       title: "Layers",
       side: "right",
       order: 10,
-      element: createLayersPanel(ctx),
+      ...createLayersPanel(ctx),
     });
   },
 };

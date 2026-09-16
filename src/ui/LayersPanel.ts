@@ -15,7 +15,7 @@ import { confirmDialog } from "./dialog";
  *   rules) and LAYER (the selected layer) — no gear buttons anywhere; the
  *   Layer tab simply follows the selection.
  */
-export function createLayersPanel(ctx: EditorContext): HTMLElement {
+export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; actions: HTMLElement } {
   const doc = ctx.document;
   let renamingId: string | null = null;
   let tab: "global" | "layer" = "layer";
@@ -145,15 +145,28 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
     }
   };
 
+  /** Row to scroll into view after the next render (find buttons). */
+  let revealKey: string | null = null;
+
   const placementRow = (layer: Layer, p: Placement) => {
     const on = isPlacementVisible(layer, p);
     const selected = ctx.selection.has(p.id);
-    const row = el("div", { class: `layer-row tree-row tree-placement${on ? "" : " hidden-entry"}${selected ? " selected" : ""}`, title: "Double-click to frame in the viewport" },
+    const row = el("div", {
+      class: `layer-row tree-row tree-placement${on ? "" : " hidden-entry"}${selected ? " selected" : ""}`,
+      "data-key": `p:${p.id}`,
+      title: "Click to select (Shift adds), double-click to frame in the viewport",
+    },
+      el("span", { class: "tree-spacer" }),
       iconBtn(on ? "eye" : "eye-off", on ? "Hide this one" : "Show this one", () => setPlacementVisible(layer, p, !on)),
       el("span", { class: "layer-name" }, whereLabel(p),
         el("span", { class: "layer-count" }, p.kind === "free" ? (p.isItem ? " item" : " free") : ` dir ${p.dir}`)),
     );
-    row.addEventListener("click", (e) => { e.stopPropagation(); ctx.selection.set([{ layerId: layer.id, placementId: p.id }]); });
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const entry = { layerId: layer.id, placementId: p.id };
+      if (e.shiftKey) ctx.selection.toggle(entry);
+      else ctx.selection.set([entry]);
+    });
     row.addEventListener("dblclick", (e) => { e.stopPropagation(); focusPlacement(layer, p); });
     return row;
   };
@@ -167,13 +180,22 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
       const open = expandedGroups.has(key);
       const hidden = layer.hiddenBlocks.includes(block);
       const shown = ps.filter((p) => isPlacementVisible(layer, p)).length;
-      const row = el("div", { class: `layer-row tree-row tree-group${hidden ? " hidden-entry" : ""}` },
+      // A group reads as selected when every one of its placements is.
+      const selected = ps.length > 0 && ps.every((p) => ctx.selection.has(p.id));
+      const row = el("div", { class: `layer-row tree-row tree-group${hidden ? " hidden-entry" : ""}${selected ? " selected" : ""}`, "data-key": `g:${key}` },
         expander(open, open ? "Collapse" : "List every placement", () => { open ? expandedGroups.delete(key) : expandedGroups.add(key); renderList(); }),
         iconBtn(hidden ? "eye-off" : "eye", hidden ? "Show all of this block" : "Hide all of this block", () => setGroupVisible(layer, block, hidden)),
         el("span", { class: "layer-name", title: block }, shortName(block),
           el("span", { class: "layer-count" }, shown === ps.length ? ` ${ps.length}` : ` ${shown}/${ps.length}`)),
       );
-      row.addEventListener("click", (e) => { e.stopPropagation(); ctx.selection.set(ps.map((p) => ({ layerId: layer.id, placementId: p.id }))); });
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const entries = ps.map((p) => ({ layerId: layer.id, placementId: p.id }));
+        if (e.shiftKey) {
+          const have = new Set(ctx.selection.list.map((s) => s.placementId));
+          ctx.selection.set([...ctx.selection.list, ...entries.filter((s) => !have.has(s.placementId))]);
+        } else ctx.selection.set(entries);
+      });
       rows.push(row);
       // Stable order (edits re-insert placements): by position.
       const keyOf = (p: Placement) => p.kind === "block" ? [p.coord[0], p.coord[1], p.coord[2]] : p.pos;
@@ -203,7 +225,47 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
       list.append(row);
       if (open) list.append(...groupRows(layer));
     }
+    if (revealKey) {
+      const target = list.querySelector<HTMLElement>(`[data-key="${CSS.escape(revealKey)}"]`);
+      revealKey = null;
+      target?.scrollIntoView({ block: "nearest" });
+    }
   };
+
+  /** The selected placement (first of the selection) and its layer. */
+  const selectedPlacement = (): { layer: Layer; p: Placement } | null => {
+    const entry = ctx.selection.list[0];
+    const layer = entry && doc.getLayer(entry.layerId);
+    const p = layer?.placements.get(entry.placementId);
+    return layer && p ? { layer, p } : null;
+  };
+
+  /** Expand the tree down to the selected block's group (or the block itself) and highlight it. */
+  const findSelected = (level: "group" | "placement") => {
+    const hit = selectedPlacement();
+    if (!hit) {
+      ctx.ui.setStatus("Select a block in the viewport first.");
+      return;
+    }
+    const { layer, p } = hit;
+    const key = `${layer.id}\n${p.block}`;
+    expandedLayers.add(layer.id);
+    if (level === "group") {
+      const all = [...layer.placements.values()].filter((q) => q.block === p.block);
+      ctx.selection.set(all.map((q) => ({ layerId: layer.id, placementId: q.id })));
+      revealKey = `g:${key}`;
+    } else {
+      expandedGroups.add(key);
+      ctx.selection.set([{ layerId: layer.id, placementId: p.id }]);
+      revealKey = `p:${p.id}`;
+    }
+    renderList();
+  };
+
+  const actions = el("span", { class: "panel-actions" },
+    iconBtn("find-group", "Find the selected block's group in the list", () => findSelected("group")),
+    iconBtn("find-block", "Find the selected block in the list", () => findSelected("placement")),
+  );
 
   // --- settings (bottom half) ---
 
@@ -343,12 +405,12 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
   doc.events.on("activeLayerChanged", renderAll);
   doc.events.on("placementAdded", renderList);
   doc.events.on("placementRemoved", renderList);
-  ctx.selection.events.on("changed", () => { if (expandedGroups.size) renderList(); });
+  ctx.selection.events.on("changed", () => { if (expandedLayers.size) renderList(); });
   doc.events.on("mapChanged", renderSettings);
   doc.events.on("reset", renderAll);
   renderAll();
 
-  return el("div", { class: "layers split" },
+  const element = el("div", { class: "layers split" },
     el("div", { class: "layers-top" },
       el("div", { class: "layer-actions" },
         el("button", {
@@ -362,4 +424,5 @@ export function createLayersPanel(ctx: EditorContext): HTMLElement {
       settingsBody,
     ),
   );
+  return { element, actions };
 }

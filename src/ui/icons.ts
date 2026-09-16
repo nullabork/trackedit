@@ -27,6 +27,8 @@ export const ICONS: Record<string, string> = {
   paint: '<path d="M2 3h9v4H2zM11 4.5h3v3h-3zM7.5 7v3M6.5 10h2v4h-2z"/>',
   brush: '<path d="M10 2l4 4-6 6-4-4zM4 8l-1.5 4.5L7 11"/>',
   spinner: '<path d="M8 2a6 6 0 1 1-6 6"/>',
+  "find-block": '<circle cx="8" cy="8" r="3.5"/><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/>',
+  "find-group": '<path d="M2 3.5h5v3H2zM2 9.5h5v3H2z"/><circle cx="11.5" cy="8" r="2.5"/><path d="M11.5 3.5v2M11.5 10.5v2M8.5 8h1M14 8h1"/>',
   assets: '<path d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7z"/><path d="M2.5 4.5L8 7.5l5.5-3M8 7.5V14"/>',
   sliders: '<path d="M2 4.5h6M11 4.5h3M2 11.5h3M8 11.5h6"/><circle cx="9.5" cy="4.5" r="1.6"/><circle cx="6.5" cy="11.5" r="1.6"/>',
 };

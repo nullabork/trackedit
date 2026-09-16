@@ -275,7 +275,11 @@ Each layer row has an expander: open it for the layer's unique block names
 metres, direction / item). Eyes on the block group hide or show all of its
 placements; eyes on a placement override that one either way, so a hidden
 group can have a few pieces switched back on (the count reads `shown/total`).
-Click a placement to select it, double-click to frame it in the viewport.
+Click a placement to select it (Shift adds to the selection; the same on a
+group adds all of its placements), double-click to frame it in the viewport.
+The two buttons in the panel header find the block selected in the
+viewport: one expands to and selects its block group, the other to the
+block itself.
 Visibility is editor-only (`hiddenBlocks` on the layer, `visible` on a
 placement), persisted with the map and never exported.
 
