@@ -61,6 +61,8 @@ export interface MapDump {
   mapName?: string;
   /** The game's map identity (used for Nadeo records). */
   mapUid?: string;
+  /** Block-colour palette the map picked (Classic, Stunt, Red, Orange, …). */
+  colorPalette?: string;
   decoration?: string;
   /** Custom texture pack reference (attached by the TMX bridge). */
   mod?: { url?: string };

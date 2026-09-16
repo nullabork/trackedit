@@ -1,4 +1,5 @@
 import { Box3, Mesh, Vector3 } from "three";
+import type { Object3D } from "three";
 import type { EditorContext } from "@plugins/api";
 
 export interface DebugViewOptions {
@@ -14,7 +15,10 @@ export interface DebugViewOptions {
 export function debugSubject(ctx: EditorContext, options: DebugViewOptions) {
   const ids = options.uid ? [options.uid] : ctx.selection.list.map(e => e.placementId);
   const objects = ids.map(id => {
-    const obj = ctx.renderer.getObject(id);
+    // Far placements (big maps) have no visual until the camera comes near:
+    // build it now so framing has bounds to work with.
+    const obj = ctx.renderer.getObject(id) ??
+      (ctx.renderer as { ensureNear?: (id: string) => Object3D | undefined }).ensureNear?.(id);
     if (!obj) throw new Error(`No rendered placement ${id}`);
     return obj;
   });
@@ -74,7 +78,8 @@ export function inspectDebugSubject(ctx: EditorContext, options: DebugViewOption
       materials: (Array.isArray(node.material) ? node.material : [node.material]).map(mat => {
         const map = "map" in mat ? mat.map as import("three").Texture | null : null;
         return { name: mat.userData.matName ?? mat.name, side: mat.side,
-          texture: map?.image?.src ?? null, flipY: map?.flipY ?? null };
+          texture: map ? (map.image?.src ?? "canvas") : null, flipY: map?.flipY ?? null,
+          paint: mat.userData?.paintHex ?? null, table: mat.userData?.paintTable ?? null, color: "#" + ((mat as { color?: { getHexString(): string } }).color?.getHexString() ?? "") };
       }) });
   });
   return { ids, bounds: { min: bounds.min.toArray(), max: bounds.max.toArray() }, meshes };

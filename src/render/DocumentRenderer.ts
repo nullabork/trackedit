@@ -28,7 +28,6 @@ import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
 import { isPlacementVisible } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
-import { paintHex } from "@core/palettes";
 import type { GeometryProvider } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
 import type { SceneView } from "./SceneView";
@@ -45,7 +44,7 @@ interface StreamingProvider extends GeometryProvider {
   requestLoad?(def: BlockDef | undefined, name: string, variant?: "air" | "ground"): void;
   hintPosition?(name: string, x: number, y: number, z: number): void;
   setLite?(lite: boolean): void;
-  colorize?(root: Object3D, paint: string): void;
+  colorize?(root: Object3D, palette: string, slot: string): void;
 }
 
 /** LOD bookkeeping per placement (LAYER-LOCAL position; world positions are
@@ -433,6 +432,21 @@ export class DocumentRenderer {
     };
   }
 
+  /**
+   * The placement's Object3D, building it now if the LOD pass had parked it
+   * in the far pool — framing and finding must work on big maps too.
+   */
+  ensureNear(placementId: string): Object3D | undefined {
+    const existing = this.placementObjects.get(placementId);
+    if (existing) return existing;
+    const info = this.lodInfo.get(placementId);
+    const layer = info && this.doc.getLayer(info.layerId);
+    if (!info || !layer) return undefined;
+    if (this.farSet.has(placementId))
+      this.promote(placementId, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
+    return this.placementObjects.get(placementId);
+  }
+
   private worldOf(info: LodInfo, xf: LayerXf, out: Vector3): Vector3 {
     out.set(info.lx, info.ly, info.lz).applyQuaternion(xf.q);
     out.x += xf.tx;
@@ -627,10 +641,7 @@ export class DocumentRenderer {
     // Painted placements: tint the game's colorable surfaces, resolving the
     // stored slot through the map's color palette.
     const paint = (p.meta as { color?: string } | undefined)?.color;
-    if (paint && paint !== "Default") {
-      const hex = paintHex(this.doc.colorPalette, paint);
-      if (hex) this.geometry.colorize?.(clone, hex);
-    }
+    if (paint && paint !== "Default") this.geometry.colorize?.(clone, this.doc.colorPalette, paint);
 
     if (p.kind === "block") {
       const size = (tpl.userData.sizeCells as [number, number, number]) ??

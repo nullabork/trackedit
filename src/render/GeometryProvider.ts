@@ -32,4 +32,10 @@ export interface GeometryProvider {
    * knowledge (placeholders, unknown blocks).
    */
   blockClips?(name: string, variant: "air" | "ground"): BlockClipInfo | undefined;
+
+  /**
+   * Paint a cloned placement: tint each paintable material's masked texels
+   * with the colour its colour table gives the slot under the map's palette.
+   */
+  colorize?(root: Object3D, palette: string, slot: string): void;
 }

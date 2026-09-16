@@ -421,6 +421,25 @@ this, so the editor derives it from neighbours:
 Extract with `meshdump blocks` after pulling this change: older libraries
 have no clip parts and simply keep showing every cap.
 
+### Block paint: palettes and colour tables
+
+A painted block stores only a slot (White/Green/Blue/Red/Black). The colour
+it shows is two lookups away, both taken from the game data now:
+
+- the **map's palette** (Classic, Stunt, Red, Orange, Yellow, Lime, Green,
+  Cyan, Blue, Purple, Pink, White, Black), stored in map chunk 0x0304306C as
+  an index — read on import (`colorPalette` in the dump). Maps saved before
+  palettes existed have no chunk and use Classic;
+- each **material's colour target table** (Default, Sport, Fun, TrackWall,
+  Canopy, …), named in its `.Material.Gbx`; `meshdump colortables` exports
+  the tables to `public/meshes/colortables.json` and tags `materials.json`
+  with `colorTable`. Paint resolves as `table[palette][slot]` per material,
+  so an all-orange RPG map (palette Orange, blocks painted Red/Blue/Green)
+  renders orange, not red/blue/green.
+
+Run `meshdump colortables <GameDataRoot> public/meshes` once after pulling
+this; the built-in Default table covers paint until the file exists.
+
 ### Custom items and blocks embedded in a map
 
 Maps can embed the custom blocks/items they use (a zip inside the

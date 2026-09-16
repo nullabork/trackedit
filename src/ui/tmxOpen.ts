@@ -26,6 +26,7 @@ export async function openTmxMap(ctx: EditorContext, mapId: number, fallbackName
     decoration: dump.decoration,
     mapUid: dump.mapUid ?? null,
     validationGhost: !!dump.ghost?.path?.length,
+    colorPalette: dump.colorPalette,
     modUrl: imported.modUrl,
   });
   session.ready = true;

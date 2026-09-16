@@ -87,6 +87,7 @@ export const instrumentationPlugin: EditorPlugin = {
           decoration: doc.decoration,
           size: doc.size,
           globalClampToBase: doc.globalClampToBase,
+          colorPalette: doc.colorPalette,
         },
         mode: {
           tool: ctx.tools.activeTool?.id ?? null,

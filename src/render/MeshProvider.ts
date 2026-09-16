@@ -12,6 +12,8 @@ import {
 } from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import type { BlockClipInfo, UnitClip } from "./clipAdjacency";
+import { paintHex, setColorTables } from "@core/palettes";
+import type { ColorTables } from "@core/palettes";
 import type { BlockDef } from "@core/catalog";
 import type { GeometryProvider } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -74,6 +76,8 @@ type MaterialIndex = Record<
     texture: string | null;
     color?: string;
     colorable?: boolean;
+    /** Colour target table the material paints through (Default when absent). */
+    colorTable?: string;
     hueMask?: string;
     /** Decal shader: an alpha layer drawn ON another surface (coplanar). */
     decal?: boolean;
@@ -266,7 +270,7 @@ export class MeshProvider implements GeometryProvider {
    * pixels selected by a material's HueMask change color — the rest of the
    * texture (road surface, panel detail) stays stock.
    */
-  colorize(root: Object3D, hex: string): void {
+  colorize(root: Object3D, palette: string, slot: string): void {
     root.traverse((o) => {
       const holder = o as Mesh;
       if (!(holder instanceof Mesh) || !holder.material) return;
@@ -274,6 +278,9 @@ export class MeshProvider implements GeometryProvider {
         const name = m.userData?.matName as string | undefined;
         const entry = name ? this.materialIndex[name] : undefined;
         if (!name || !entry?.colorable) return m;
+        // The slot's colour depends on this material's colour table.
+        const hex = paintHex(palette, slot, entry.colorTable ?? "Default");
+        if (!hex) return m;
         const key = `paint:${hex}:${name}`;
         let painted = this.materials.get(key);
         if (!painted) {
@@ -281,6 +288,8 @@ export class MeshProvider implements GeometryProvider {
           // swaps in asynchronously once the canvas bake finishes.
           painted = m.clone();
           painted.userData.matName = name;
+          painted.userData.paintHex = hex;
+          painted.userData.paintTable = entry.colorTable ?? "Default";
           this.materials.set(key, painted);
           const target = painted;
           void this.bakeTinted(name, entry, hex).then((tex) => {
@@ -416,6 +425,8 @@ export class MeshProvider implements GeometryProvider {
       this.index = (await res.json()) as MeshIndex;
       const mats = await fetch(this.baseUrl + "materials.json");
       if (mats.ok) this.materialIndex = (await mats.json()) as MaterialIndex;
+      const tables = await fetch(this.baseUrl + "colortables.json");
+      if (tables.ok) setColorTables((await tables.json()) as ColorTables);
       return true;
     } catch {
       return false;

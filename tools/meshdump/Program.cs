@@ -56,7 +56,7 @@ switch (args[0])
         try
         {
             var map = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
-            var json = Trackedit.MapDump.Serialize(map);
+            var json = Trackedit.MapDump.Serialize(map, args[1]);
             File.WriteAllText(args[2], json);
             return 0;
         }
@@ -134,6 +134,14 @@ switch (args[0])
             }
             Console.WriteLine(names.ToJsonString());
             return 0;
+        }
+    case "colortables":
+        {
+            // The game's colour target tables (Media/ColorTargetTables/*.json,
+            // as Openplanet extracts them) -> <outDir>/colortables.json, and
+            // each material's table name into materials.json ("colorTable").
+            if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump colortables <GameDataRoot> <outDir>"); return 1; }
+            return Trackedit.ColorTables.Export(args[1], args[2]);
         }
     case "decompress":
         {
@@ -2576,6 +2584,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                     Console.Error.WriteLine($"  huemask {name}: {ex.Message}");
                 }
             }
+            if (Trackedit.ColorTables.TableFor(root, name) is string table) entry["colorTable"] = table;
             json[name] = entry;
         }
 
