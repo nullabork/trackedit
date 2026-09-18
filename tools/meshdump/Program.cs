@@ -135,6 +135,13 @@ switch (args[0])
             Console.WriteLine(names.ToJsonString());
             return 0;
         }
+    case "lightmap-extract":
+        if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump lightmap-extract <map.Gbx> <outDir>"); return 1; }
+        return Trackedit.Lightmap.Extract(args[1], args[2]);
+    case "lightmap-inject":
+        if (args.Length < 4) { Console.Error.WriteLine("usage: meshdump lightmap-inject <map.Gbx> <pngDir> <out.Map.Gbx> [lossless]"); return 1; }
+        return Trackedit.Lightmap.Inject(args[1], args[2], args[3], args.Skip(4).Contains("lossless"),
+            args.Skip(4).FirstOrDefault(a => a.StartsWith("name="))?[5..]);
     case "lightmapinfo":
         {
             // What a map stores for its computed shadows.
@@ -161,6 +168,43 @@ switch (args[0])
                     };
                     Console.WriteLine($"  cache.{prop.Name}: {desc}");
                 }
+            // Deep structure (depth-limited reflection) for format research.
+            if (args.Length > 2 && args[2] == "deep")
+            {
+                void Describe(object? o, string indent, int depth)
+                {
+                    if (o is null || depth > 4) return;
+                    foreach (var prop in o.GetType().GetProperties())
+                    {
+                        if (prop.GetIndexParameters().Length > 0 || prop.Name is "Chunks" or "GameVersion") continue;
+                        object? v = null; try { v = prop.GetValue(o); } catch { continue; }
+                        switch (v)
+                        {
+                            case null: Console.WriteLine($"{indent}{prop.Name}: null"); break;
+                            case byte[] b: Console.WriteLine($"{indent}{prop.Name}: byte[{b.Length}] {Convert.ToHexString(b.AsSpan(0, Math.Min(16, b.Length)))}"); break;
+                            case string str: Console.WriteLine($"{indent}{prop.Name}: \"{str}\""); break;
+                            case System.Collections.IEnumerable list:
+                                var items = list.Cast<object?>().ToList();
+                                Console.WriteLine($"{indent}{prop.Name}: {v.GetType().Name}[{items.Count}]");
+                                foreach (var it in items.Take(3))
+                                {
+                                    if (it is null) continue;
+                                    if (it.GetType().IsPrimitive || it is Enum) { Console.WriteLine($"{indent}  {string.Join(", ", items.Take(12))}"); break; }
+                                    Console.WriteLine($"{indent}  - {it.GetType().Name}");
+                                    Describe(it, indent + "    ", depth + 1);
+                                }
+                                break;
+                            default:
+                                if (v.GetType().IsPrimitive || v is Enum || v.GetType().Namespace == "GBX.NET" || v is DateTime || v is TimeSpan) Console.WriteLine($"{indent}{prop.Name}: {v}");
+                                else { Console.WriteLine($"{indent}{prop.Name}: {v.GetType().Name}"); Describe(v, indent + "  ", depth + 1); }
+                                break;
+                        }
+                    }
+                }
+                Console.WriteLine("== LightmapFrames"); 
+                foreach (var f in lmMap.LightmapFrames ?? []) { Console.WriteLine($"- {f.GetType().Name}"); Describe(f, "    ", 0); }
+                Console.WriteLine("== LightmapCache"); Describe(cache, "  ", 0);
+            }
             return 0;
         }
     case "build":
