@@ -135,6 +135,13 @@ switch (args[0])
             Console.WriteLine(names.ToJsonString());
             return 0;
         }
+    case "typeinfo":
+        {
+            // Public properties of GBX.NET types whose name contains the argument (format research).
+            foreach (var t in typeof(Gbx).Assembly.GetTypes().Where(t => t.FullName?.Contains(args[1], StringComparison.OrdinalIgnoreCase) == true && !t.Name.StartsWith("Chunk") && !t.Name.Contains('<')).Take(12))
+                Console.WriteLine($"{t.FullName}: {string.Join(", ", t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly).Select(p => $"{p.Name}:{p.PropertyType.Name}"))}");
+            return 0;
+        }
     case "lightmap-extract":
         if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump lightmap-extract <map.Gbx> <outDir>"); return 1; }
         return Trackedit.Lightmap.Extract(args[1], args[2]);

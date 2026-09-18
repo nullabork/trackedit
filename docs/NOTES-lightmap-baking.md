@@ -67,6 +67,18 @@ Outcomes:
   something (the cache uid or a hash); find it before anything else.
 - C already broken → fix the encode (lossy vs lossless, alpha, size) first.
 
+### Result (2026-09-19): it works
+
+Tested in game by the map owner. **A shows the sunset grade, B shows the
+texel chart** on the terrain and blocks, and the game did not ask to
+recompute shadows. The game honours lightmap pixels it did not bake, with
+the mapping and cache uid left as they were. Only the skybox keeps the
+map's own mood, since the sky is not lit by the lightmap.
+
+In B the stadium grass shows large rectangles of differing red/green mix
+with the white 64 px grid at very different scales per rectangle: each
+terrain patch owns its own atlas rect, at its own texel density.
+
 ## 4. If edited lightmaps work: the road to a baker
 
 1. **Grade/paint the game's bake.** Works today with extract → edit → inject.
@@ -110,3 +122,31 @@ Notes for when we build it:
   have to be regenerated to match the new sun direction, or surfaces with
   normal maps will still shade as if lit from the old one.
 - Depends on experiment 1 passing (section 3) and the mapping being decoded.
+
+## 6. The sky (logged 2026-09-19, not started)
+
+The lightmap does not light the sky, so a graded map keeps its mood's
+skybox. What the map format offers, cheapest first:
+
+1. **Mood.** The decoration id carries it (`48x48Screen155Day` / `Sunset` /
+   `Night` / `Sunrise`), which sets sky, sun and clouds. `meshdump build`
+   currently keeps the template's decoration; writing the editor's mood is a
+   small change. Open question: the lightmap cache names its decoration, so
+   a mood switch may make the game want a rebake — test before relying on it.
+2. **A MediaTracker in-game clip as a filter.** A map can carry a clip that
+   plays for the whole race. GBX.NET exposes the relevant blocks:
+   - `Fog` keys: `Color`, `Intensity`, **`SkyIntensity`**, `Distance`,
+     `Coefficient`, `CloudsOpacity`, `CloudsSpeed` — tints the sky towards a
+     colour and can fade the clouds out. This is the "custom sky colour".
+   - `ColorGrading`: a LUT image + intensity — a filter over everything,
+     sky included (the image has to ship with the map or exist on the
+     player's side).
+   - `ToneMapping` (exposure), `BloomHdr`, `FxColors` (saturation,
+     contrast, brightness, near and far).
+   RPG mappers use exactly this for atmosphere, so it is a supported path.
+3. **A real custom skybox** is not something the map format offers: the sky
+   is procedural per mood, not a texture a map can replace.
+
+Natural fit with the sun/moon tool (section 5): sun colour and position
+drive the bake, fog colour and sky intensity drive the sky, and both are
+stored per map.
