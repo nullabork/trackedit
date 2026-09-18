@@ -1,6 +1,6 @@
 import type { EditorContext } from "@plugins/api";
 import { clear, el } from "./dom";
-import { cloneFlow, exportJsonFlow, importJsonFlow, newMapGuarded } from "./mapActions";
+import { cloneFlow, exportJsonFlow, importJsonFlow, newMapGuarded, saveToGameFlow } from "./mapActions";
 import { openMapBrowser } from "./MapBrowserDialog";
 import { openTmxDialog } from "./TmxDialog";
 import { openLiveDialog } from "./LiveDialog";
@@ -22,6 +22,7 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
     { label: "", divider: true },
     { label: "Import JSON…", action: () => importJsonFlow(ctx) },
     { label: "Export JSON", action: () => exportJsonFlow(ctx) },
+    { label: "Save to Trackmania…", action: () => void saveToGameFlow(ctx) },
     { label: "", divider: true },
     { label: "Clone track", action: () => void cloneFlow(ctx) },
   ];

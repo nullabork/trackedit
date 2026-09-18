@@ -421,6 +421,38 @@ this, so the editor derives it from neighbours:
 Extract with `meshdump blocks` after pulling this change: older libraries
 have no clip parts and simply keep showing every cap.
 
+### Saving to a real map file
+
+**File ▸ Save to Trackmania…** writes the track as a `.Map.Gbx` into the
+game's `Maps/Trackedit` folder (found under Documents or OneDrive Documents;
+`trackmaniaDir` in `.trackedit.local.json` overrides). `meshdump build
+<template> <placements.json> <out>` does the writing from a **template** map:
+decoration, embedded items, palette, thumbnail and metadata come from it.
+For a track opened from TMX the template is the original file (cached under
+`maps/gbx` at import); other tracks need `templateMap` in the local config —
+any map with the base you want, e.g. an empty one saved from the game editor.
+
+- Placements that still match a block or item of the template (same name
+  and pose) reuse the original object, so skins, waypoints, macroblock links
+  and item snapping survive untouched. Only new or moved placements are
+  constructed (items are modelled on one of the template's items, so a
+  template without any item cannot take new ones).
+- The map gets its own uid, derived from the editor document id: it never
+  collides with the original's records, and re-saving overwrites the same map.
+- **Shadows are not computed.** The lightmap is the bulk of a map file (1.4
+  of Islander's 1.6 MB) and is baked by the game's lightmapper for exact
+  geometry; the template's is dropped because it no longer matches. The map
+  loads and drives without it; compute shadows in the game editor, or run
+  the [Batch Compute Shadows](https://openplanet.dev/plugin/batchcomputeshadows)
+  Openplanet plugin over `Maps/Trackedit`, which drives the editor for you.
+
+`meshdump lightmapinfo <map.Gbx>` prints what a map stores for its shadows:
+three DXT1 lightmap frames (H-basis intensity + direction), the atlas mapping
+of every object into them, the sample counts and a cache uid. Baking that
+ourselves would mean reproducing the game's lightmap UVs, atlas allocator,
+GI sampler and encoding with no way to check the result outside the game, so
+the editor leaves it to the game.
+
 ### Block paint: palettes and colour tables
 
 A painted block stores only a slot (White/Green/Blue/Red/Black). The colour

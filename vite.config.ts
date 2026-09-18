@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createMapConverter } from "./tools/mapConverter";
 import { liveBridge } from "./tools/liveBridge";
 import { nadeoBridge } from "./tools/nadeoBridge";
+import { gameBridge, tmxTemplatePath } from "./tools/gameBridge";
 
 /** Machine-local settings (gitignored): Openplanet folder and optional
  *  external gbxdump override. TMX import otherwise uses meshdump's map command. */
@@ -212,6 +213,10 @@ function tmxBridge(): Plugin {
           const gbx = join(dir, "map.Map.Gbx");
           const out = join(dir, "map.json");
           await writeFile(gbx, Buffer.from(await upstream.arrayBuffer()));
+          // Keep the original: it is the template when this track is saved
+          // back to the game (tools/gameBridge.ts).
+          await mkdir(join(process.cwd(), "maps", "gbx"), { recursive: true });
+          await copyFile(gbx, tmxTemplatePath(id));
           try {
             await convertMap(gbx, out, GBXDUMP);
           } catch (err) {
@@ -780,7 +785,7 @@ function debugBridge(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tmxBridge(), nadeoBridge(MESHDUMP), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
+  plugins: [tmxBridge(), nadeoBridge(MESHDUMP), gameBridge(MESHDUMP), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
   resolve: {
     alias: {
       "@core": fileURLToPath(new URL("./src/core", import.meta.url)),

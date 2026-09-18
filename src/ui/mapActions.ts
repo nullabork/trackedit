@@ -48,6 +48,33 @@ export function exportJsonFlow(ctx: EditorContext): void {
   ctx.ui.setStatus("Exported placements JSON — feed it to gbxbuild for a .Map.Gbx");
 }
 
+/**
+ * Save the track as a real .Map.Gbx in the game's Maps/Trackedit folder
+ * (dev-server bridge -> `meshdump build`). Shadows are not computed: the
+ * game does that (editor, or the Batch Compute Shadows Openplanet plugin).
+ */
+export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
+  ctx.ui.setStatus("Writing the map file…");
+  try {
+    const tmx = /^tmx-(\d+)$/.exec(ctx.document.id);
+    const res = await fetch("/api/game/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dump: exportDump(ctx.document), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null }),
+    });
+    const json = (await res.json()) as { path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
+    if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
+    const edited = (json.blocksBuilt ?? 0) + (json.itemsBuilt ?? 0);
+    ctx.ui.setStatus(
+      `Saved ${json.path} — ${json.blocks} blocks, ${json.items} items` +
+      (edited ? ` (${edited} new or moved)` : "") +
+      (json.itemsSkipped ? `, ${json.itemsSkipped} items skipped (template has no item to model them on)` : "") +
+      ". Shadows are not computed: open it in the game editor and compute them there.");
+  } catch (err) {
+    ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 /** New map, guarding a non-empty current track (it is saved, then cleared). */
 export async function newMapGuarded(ctx: EditorContext): Promise<void> {
   const hasContent = ctx.document.layers.some((l) => l.placements.size > 0);

@@ -135,6 +135,42 @@ switch (args[0])
             Console.WriteLine(names.ToJsonString());
             return 0;
         }
+    case "lightmapinfo":
+        {
+            // What a map stores for its computed shadows.
+            Gbx.LZO = new Lzo();
+            var lmMap = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
+            var cache = lmMap.LightmapCache;
+            Console.WriteLine($"file {new FileInfo(args[1]).Length} bytes; LightmapCache: {cache?.GetType().FullName ?? "none"}");
+            foreach (var prop in typeof(CGameCtnChallenge).GetProperties().Where(x => x.Name.Contains("Lightmap")))
+            {
+                object? v = null; try { v = prop.GetValue(lmMap); } catch { }
+                Console.WriteLine($"  map.{prop.Name}: {(v is System.Collections.ICollection col ? $"{v.GetType().Name}[{col.Count}]" : v?.ToString() ?? "null")}");
+            }
+            if (cache is not null)
+                foreach (var prop in cache.GetType().GetProperties())
+                {
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    object? v = null; try { v = prop.GetValue(cache); } catch { }
+                    var desc = v switch
+                    {
+                        null => "null",
+                        byte[] bytes => $"byte[{bytes.Length}]",
+                        System.Collections.ICollection col => $"{v.GetType().Name}[{col.Count}]",
+                        _ => v.ToString(),
+                    };
+                    Console.WriteLine($"  cache.{prop.Name}: {desc}");
+                }
+            return 0;
+        }
+    case "build":
+        {
+            // Write the editor's placements into a real .Map.Gbx, using an
+            // existing map as the template (see MapBuild).
+            if (args.Length < 4) { Console.Error.WriteLine("usage: meshdump build <template.Map.Gbx> <placements.json> <out.Map.Gbx>"); return 1; }
+            try { return Trackedit.MapBuild.Run(args[1], args[2], args[3]); }
+            catch (Exception ex) { Console.Error.WriteLine($"map build failed: {ex.Message}"); return 1; }
+        }
     case "colortables":
         {
             // The game's colour target tables (Media/ColorTargetTables/*.json,
