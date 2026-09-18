@@ -83,3 +83,30 @@ Outcomes:
    the game accepts any consistent mapping — which experiment 3 would tell.
 
 Each step is checkable in game before the next one starts.
+
+## 5. Wanted: a sun and moon you can place (logged 2026-09-19, not started)
+
+Once we bake the pixels ourselves (step 3 above), lighting becomes an
+editor feature rather than a fixed mood:
+
+- A **Move sun tool**. Arming it shows a giant sphere around the map; the
+  sun sits on it and you drag it anywhere in the sky. Its position on the
+  sphere is the light direction the bake uses.
+- A **moon on the opposite side** of the sphere, always antipodal to the sun,
+  so moving one moves the other.
+- **Sun colour** and **moon colour**, each its own picker.
+- A point light is the same idea with a position instead of a direction;
+  the cache already has a `PntSamples` setting, so the game's own bakes
+  support point lights.
+
+Notes for when we build it:
+
+- Store it per map (sun direction as azimuth/elevation, two colours, maybe
+  intensities) next to mood and palette, and persist it in the map record.
+- The viewport should preview it live: drive the scene's directional light
+  and shadow from the same values, so what you drag is what gets baked.
+- The bake then uses sun + moon as the two directional lights and the sky
+  colour as ambient. The greyscale directional atlas (`frame0_Data2`) will
+  have to be regenerated to match the new sun direction, or surfaces with
+  normal maps will still shade as if lit from the old one.
+- Depends on experiment 1 passing (section 3) and the mapping being decoded.
