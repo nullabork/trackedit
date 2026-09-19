@@ -294,3 +294,23 @@ For each: which heading squares the sun/glow is nearest, how many rings up,
 and which way the car's shadow falls. Also worth noting from the settings
 file: `Fx/ColorGrading FileName` — a per-mood colour grading LUT, i.e. a
 native full-screen filter a mod can ship.
+
+### First pass (2026-09-19): the bright chart hides the sun
+
+Only K85 showed the sun: a disc with a glow and lens flare, low near the
+real horizon, inside the chart's dark lower band. Findings:
+
+- **The game draws its own sun** (disc, glow, flare) on top of the sky
+  panorama, at the position the settings give. A painted sun in the panorama
+  would be a second one, so either paint none or hide the game's.
+- Against the bright magenta-orange chart the glow washes out, so the other
+  maps told nothing. L06 only showed the sky going dark.
+- The chart's yellow "horizon" line sits clearly ABOVE the real horizon and
+  the sun: the panorama's middle row is not the horizon. The vertical mapping
+  of `SkyColor.dds` still has to be measured.
+
+Second pass, replacing the first: `Sun2 …` maps use `--dark-chart` (near-black
+sky, dim grid, the same counted heading squares, rings mirrored in blue below
+the middle row to measure how far down the visible sky reaches), plus
+**Sun2 L00**, a stock-Day baseline. K0 (sun near overhead) and K85 (sun about
+5 degrees up) give two known heights to calibrate the rings against.

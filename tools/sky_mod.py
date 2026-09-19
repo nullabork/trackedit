@@ -159,6 +159,28 @@ def srgb_to_linear(a):
     return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
 
 
+def dark_chart(w=1024, h=512):
+    """A near-black sky with a dim grid: the game's own sun and its glow stay
+    visible against it, so their heading and height can be read. Same marks
+    as chart(): 1-4 squares per quarter turn, rings every 15 degrees of image
+    latitude (the 45 ring is thickest, 30 and 60 medium), horizon line dim yellow.
+    The lower half carries the same grid mirrored in blue, to show how far
+    below the image's middle the visible sky reaches."""
+    im = Image.new("RGB", (w, h), (3, 4, 8))
+    d = ImageDraw.Draw(im)
+    for half, color in ((-1, (70, 70, 70)), (1, (30, 50, 90))):
+        for deg in range(15, 90, 15):
+            yy = int(h / 2 + half * deg / 90 * h / 2)
+            d.line([(0, yy), (w, yy)], fill=color, width={45: 4, 30: 2, 60: 2}.get(deg, 1))
+    d.line([(0, h // 2), (w, h // 2)], fill=(110, 110, 0), width=3)
+    for i in range(4):
+        x = int(i * w / 4)
+        d.line([(x, 0), (x, h)], fill=(70, 70, 70), width=2)
+        for k in range(i + 1):
+            d.rectangle([x + 12 + k * 30, h // 2 - 46, x + 12 + k * 30 + 20, h // 2 - 16], fill=(120, 120, 120))
+    return np.asarray(im)
+
+
 def chart(w=1024, h=512):
     """A sky you cannot mistake for the game's: magenta zenith to orange horizon,
     counted heading marks at the horizon, elevation rings every 15 degrees."""
@@ -188,7 +210,8 @@ def main():
     ap.add_argument("--name", required=True, help="mod name -> Skins/Stadium/Mod/<name>.zip")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--panorama", help="equirectangular image (top = zenith)")
-    src.add_argument("--chart", action="store_true", help="built-in test chart")
+    src.add_argument("--chart", action="store_true", help="built-in test chart (bright)")
+    src.add_argument("--dark-chart", action="store_true", help="near-black test chart: the game's sun stays visible against it")
     ap.add_argument("--exposure", type=float, default=2.0, help="HDR scale applied to the linear image (default 2)")
     ap.add_argument("--clouds", choices=["keep", "clear"], default="keep")
     ap.add_argument("--mood-xml", help="edited Mood.MoodSetting.xml to ship for every mood")
@@ -196,7 +219,7 @@ def main():
     ap.add_argument("--out", help="output zip (default: the game's Skins/Stadium/Mod folder)")
     args = ap.parse_args()
 
-    pixels = chart() if args.chart else np.asarray(Image.open(args.panorama).convert("RGB"))
+    pixels = chart() if args.chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
     linear = srgb_to_linear(pixels) * args.exposure
     moods_dir = game_moods_dir()
     out = args.out or os.path.join(trackmania_dir(), "Skins", "Stadium", "Mod", args.name + ".zip")
