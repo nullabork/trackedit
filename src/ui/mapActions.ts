@@ -1,4 +1,4 @@
-import { openModShareDialog, type SavedSunMod } from "./ModShareDialog";
+import { offerModShare, type SavedSunMod } from "./ModShareDialog";
 import type { EditorContext } from "@plugins/api";
 import { importDump, exportDump } from "@io/trackoJson";
 import type { MapDump } from "@io/trackoJson";
@@ -73,7 +73,7 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
       ". Shadows are not computed: open it in the game editor and compute them there." +
       (json.notes?.length ? ` ${json.notes.join(" ")}` : ""));
     // A freshly written look is a local file: offer the upload-and-link step.
-    if (json.sunMod && !json.sunMod.url && json.path) openModShareDialog(ctx, json.sunMod, json.path);
+    if (json.sunMod && !json.sunMod.url && json.path) offerModShare(ctx, json.sunMod, json.path);
   } catch (err) {
     ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
   }

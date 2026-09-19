@@ -13,6 +13,33 @@ export interface SavedSunMod {
 
 const size = (bytes: number): string => (bytes > 1 << 20 ? `${(bytes / (1 << 20)).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
 
+const SKIP_KEY = "trackedit.modShareSkipped";
+const skipped = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(SKIP_KEY) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+};
+let lastSaved: { mod: SavedSunMod; mapPath: string } | null = null;
+
+/**
+ * Called after every save that wrote a sun/sky mod without a link. Opens the
+ * share dialog — unless "Only on this machine" was already chosen for this
+ * exact zip, so an unchanged look is asked about once, not on every save.
+ */
+export function offerModShare(ctx: EditorContext, mod: SavedSunMod, mapPath: string): void {
+  lastSaved = { mod, mapPath };
+  if (!skipped().includes(mod.name)) openModShareDialog(ctx, mod, mapPath);
+}
+
+/** Open the share dialog for the last save (the Sky & light page's "Share…"). False when nothing was saved yet. */
+export function reopenModShare(ctx: EditorContext): boolean {
+  if (!lastSaved) return false;
+  openModShareDialog(ctx, lastSaved.mod, lastSaved.mapPath);
+  return true;
+}
+
 /**
  * After a save wrote a custom sun/sky: the look lives in a mod zip on this
  * machine, so other players only see it once the zip is online and the map
@@ -106,6 +133,16 @@ export function openModShareDialog(ctx: EditorContext, mod: SavedSunMod, mapPath
     title: "Share this map's sky",
     content,
     width: 460,
-    actions: [{ label: "Only on this machine", onClick: () => {} }],
+    actions: [{
+      // Keep the map as saved: it points at the local zip only, so the look
+      // shows here and nowhere else. Remembered for this zip.
+      label: "Only on this machine",
+      onClick: () => {
+        try {
+          localStorage.setItem(SKIP_KEY, JSON.stringify([...skipped().filter((n) => n !== mod.name), mod.name].slice(-50)));
+        } catch { /* storage unavailable */ }
+        ctx.ui.setStatus("Kept local: the custom sun and sky show on this machine only. Sky & light ▸ Share… brings this back.");
+      },
+    }],
   });
 }

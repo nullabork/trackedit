@@ -7,6 +7,7 @@ import { sunDirection } from "@core/sun";
 import type { Shell } from "./Shell";
 import { el } from "./dom";
 import { saveToGameFlow } from "./mapActions";
+import { reopenModShare } from "./ModShareDialog";
 
 const SUN_DEFAULT = "#fff1c4";
 const MOON_DEFAULT = "#9fb8ff";
@@ -141,7 +142,11 @@ export function buildSkyPanel(ctx: EditorContext, shell: Shell): void {
       ? ["Shared from ", el("a", { href: h.url, target: "_blank", rel: "noopener" }, h.url),
         " — saves keep this link while the look is unchanged. ",
         el("button", { class: "btn", onclick: () => doc.setAtmosphere({ hosted: null }) }, "Forget the link")]
-      : ["Not shared yet: after a save you can upload the mod and give the map its link."]));
+      : ["Not shared: the custom sun and sky only show on this machine. ",
+        el("button", {
+          class: "btn",
+          onclick: () => reopenModShare(ctx) || ctx.ui.setStatus("Save to Trackmania first: sharing starts from the mod file that save writes."),
+        }, "Share…")]));
   });
   const saveNote = el("p", { class: "hint" },
     "Save to Trackmania writes all of this into the map: the sun and sky as a mod in the game's Skins/Stadium/Mod folder, the fog as a clip. " +
