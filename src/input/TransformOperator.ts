@@ -1,3 +1,4 @@
+import { metaAfterMove } from "@core/layer";
 import { Euler, Object3D, Quaternion, Vector3 } from "three";
 import type { EditorContext } from "@plugins/api";
 import type { Layer, Placement } from "@core/layer";
@@ -436,7 +437,7 @@ export class TransformOperator implements Operator {
         ];
         const clamped = clampCoord(cells, this.ctx.document.size);
         if (clamped.every((v, i) => v === p.coord[i])) return null;
-        return { ...p, coord: clamped };
+        return { ...p, coord: clamped, meta: metaAfterMove(p.meta, p.coord[1], clamped[1]) };
       }
       return { ...p, pos: [p.pos[0] + delta.x, p.pos[1] + delta.y, p.pos[2] + delta.z] };
     }

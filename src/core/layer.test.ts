@@ -56,16 +56,25 @@ describe("blockVariantIndex", () => {
 });
 
 describe("blockIsGround", () => {
-  it("believes the map file, as long as a ground block still sits on the ground", async () => {
-    const { blockIsGround } = await import("./layer");
+  it("believes the map file, and its own rule only where the file is silent", async () => {
+    const { blockIsGround, metaAfterMove, placementVariant } = await import("./layer");
     const at = (y: number, meta?: Record<string, unknown>) => ({ coord: [10, y, 10] as [number, number, number], ...(meta ? { meta } : {}) });
     expect(blockIsGround(at(9, { isGround: true }), true)).toBe(true);
     expect(blockIsGround(at(9, { isGround: true }), false)).toBe(true); // the file outranks our idea of the base
+    expect(blockIsGround(at(13, { isGround: true }), true)).toBe(true); // on a hill: ground blocks rise with the terrain
     expect(blockIsGround(at(9, { isGround: false }), true)).toBe(false); // an air block parked at ground level
-    expect(blockIsGround(at(14, { isGround: true }), true)).toBe(false); // moved off the terrain in the editor
     // Made in the editor: no flag to read.
     expect(blockIsGround(at(9), true)).toBe(true);
     expect(blockIsGround(at(8), true)).toBe(false);
     expect(blockIsGround(at(9), false)).toBe(false);
+
+    // Moving a block to another level drops what the file said about the terrain, and nothing else.
+    const meta = { isGround: true, flags: 0x400000, idx: 7 };
+    expect(metaAfterMove(meta, 9, 9)).toBe(meta);
+    expect(metaAfterMove(meta, 9, 14)).toEqual({ flags: 0x400000, idx: 7 });
+    const moved = { id: "b", kind: "block" as const, block: "X", dir: 0 as const, coord: [1, 14, 1] as [number, number, number], meta: metaAfterMove(meta, 9, 14) };
+    expect(placementVariant(moved, true)).toBe("air2");
+    expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true)).toBe("ground2");
+    expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true, true)).toBe("air2"); // its layer is tilted
   });
 });

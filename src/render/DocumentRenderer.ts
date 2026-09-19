@@ -27,7 +27,7 @@ import { CELL, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
-import { isPlacementVisible, blockIsGround, blockVariantIndex } from "@core/layer";
+import { isPlacementVisible, placementVariant } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -766,19 +766,10 @@ export class DocumentRenderer {
    * off the terrain, or on a void base uses air — with its concrete bottom.
    */
   variantOf(p: Placement, layer?: Layer): MeshVariant {
-    const base = this.baseVariantOf(p, layer);
-    const index = p.kind === "block" ? blockVariantIndex(p) : 0;
-    return index ? `${base}${index}` : base;
-  }
-
-  private baseVariantOf(p: Placement, layer?: Layer): "air" | "ground" {
-    if (p.kind !== "block") return "air";
-    if (layer) {
-      const { rotDeg, translate } = layer.transform;
-      // Pitch/roll or vertical shift lifts blocks off the terrain; yaw doesn't.
-      if (rotDeg[0] || rotDeg[2] || translate[1] !== 0) return "air";
-    }
-    return blockIsGround(p, baseTypeOf(this.doc.decorationBase) === "stadium") ? "ground" : "air";
+    // Pitch/roll or a vertical shift of the layer lifts its blocks off the terrain; yaw doesn't.
+    const t = layer?.transform;
+    const lifted = !!t && (t.rotDeg[0] !== 0 || t.rotDeg[2] !== 0 || t.translate[1] !== 0);
+    return placementVariant(p, baseTypeOf(this.doc.decorationBase) === "stadium", lifted);
   }
 
   /** Build the visual for a placement. Shared with tools for ghost previews. */

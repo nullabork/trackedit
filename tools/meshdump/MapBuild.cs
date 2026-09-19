@@ -127,7 +127,15 @@ public static class MapBuild
                     block = own;
                     usedBlocks.Add(own);
                     if (GridKey(name, own.Coord.X, own.Coord.Y, own.Coord.Z, (int)own.Direction) == GridKey(name, x, y, z, dir)) reused++;
-                    else { own.Coord = new Int3(x, y, z); own.Direction = (Direction)dir; moved++; }
+                    else
+                    {
+                        // Moved to another level: the editor dropped the file's "ground" claim unless it still holds.
+                        if (own.Coord.Y != y)
+                            own.IsGround = p.TryGetProperty("isGround", out var og) && og.ValueKind == JsonValueKind.True;
+                        own.Coord = new Int3(x, y, z);
+                        own.Direction = (Direction)dir;
+                        moved++;
+                    }
                 }
                 else block = TakeBlock(gridPool, GridKey(name, x, y, z, dir));
                 if (block is not null && own is null) reused++;

@@ -70,16 +70,40 @@ export const GROUND_LEVEL = 9;
 /**
  * Air or ground look of a grid block. The map file says it outright
  * (`isGround`, carried in the placement's meta) and that is what the game
- * draws — so an imported block uses it, as long as a "ground" block still
- * sits at ground level (moving it off the terrain makes it an air block).
- * Blocks made in the editor have no flag: on a stadium base they are ground
- * exactly when placed at ground level.
+ * draws, so an imported block uses it — also above level 9: terrain rises
+ * (hills), and ground blocks rise with it. Blocks without the flag (made in
+ * the editor, or moved to another level — see `metaAfterMove`) are ground
+ * exactly when they sit at ground level on a stadium base.
  */
 export function blockIsGround(p: Pick<BlockPlacement, "meta" | "coord">, stadiumBase: boolean): boolean {
-  const atGround = p.coord[1] === GROUND_LEVEL;
   const flag = (p.meta as { isGround?: boolean } | undefined)?.isGround;
-  if (typeof flag === "boolean") return flag && atGround;
-  return stadiumBase && atGround;
+  if (typeof flag === "boolean") return flag;
+  return stadiumBase && p.coord[1] === GROUND_LEVEL;
+}
+
+/**
+ * A grid block's meta after a move: changing level invalidates what the map
+ * file said about standing on the terrain, so that one field is dropped and
+ * the editor's own rule takes over. Everything else rides along.
+ */
+export function metaAfterMove(meta: BlockPlacement["meta"], fromLevel: number, toLevel: number): BlockPlacement["meta"] {
+  if (!meta || fromLevel === toLevel || !("isGround" in meta)) return meta;
+  const { isGround: _stale, ...rest } = meta;
+  return rest;
+}
+
+/**
+ * The mesh variant a placement shows: "air" / "ground", plus the index of
+ * the block variant it names ("air2", "ground1", …). `lifted`: its layer is
+ * tilted or raised, which takes every block in it off the terrain. The one
+ * place this is decided — the renderer draws it, tools/variant_check.ts
+ * verifies it against what the map file says.
+ */
+export function placementVariant(p: Placement, stadiumBase: boolean, lifted = false): string {
+  if (p.kind !== "block") return "air";
+  const base = !lifted && blockIsGround(p, stadiumBase) ? "ground" : "air";
+  const index = blockVariantIndex(p);
+  return index ? `${base}${index}` : base;
 }
 
 export function blockVariantIndex(p: Pick<BlockPlacement, "meta">): number {
