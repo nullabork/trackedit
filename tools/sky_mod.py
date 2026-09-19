@@ -25,7 +25,7 @@ Point a map at it with:
 """
 import argparse, json, os, struct, sys, zipfile
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 MOODS = ["Day", "Sunset", "Night", "Sunrise"]
 WEIGHTS4 = np.array([0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64], dtype=np.int64)
@@ -161,27 +161,25 @@ def srgb_to_linear(a):
 
 def chart(w=1024, h=512):
     """A sky you cannot mistake for the game's: magenta zenith to orange horizon,
-    compass letters at the horizon, elevation rings every 15 degrees."""
+    counted heading marks at the horizon, elevation rings every 15 degrees."""
     y = np.linspace(0, 1, h)[:, None]
     top, mid, low = np.array([150, 0, 170]), np.array([255, 140, 20]), np.array([20, 40, 60])
     sky = np.where(y < 0.5, top * (1 - y * 2) + mid * (y * 2), low * np.ones_like(y))
     im = Image.fromarray(np.broadcast_to(sky[:, None, :], (h, w, 3)).astype(np.uint8).copy())
     d = ImageDraw.Draw(im)
-    fonts = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
-    try:
-        font = ImageFont.truetype(os.path.join(fonts, "arialbd.ttf"), 56)
-        small = ImageFont.truetype(os.path.join(fonts, "arial.ttf"), 20)
-    except Exception:
-        font = small = ImageFont.load_default()
+    # No text: Pillow's font layout is unreliable on some installs (glyphs
+    # came out as empty boxes in game). Headings are COUNTED squares instead:
+    # 1 square = 0 deg (left edge of the image), 2 = 90, 3 = 180, 4 = 270;
+    # elevation rings every 15 deg, thicker at 45.
     for deg in range(15, 90, 15):
         yy = int(h / 2 - deg / 90 * h / 2)
-        d.line([(0, yy), (w, yy)], fill=(255, 255, 255), width=1)
-        d.text((6, yy - 22), f"{deg}", fill=(255, 255, 255), font=small)
+        d.line([(0, yy), (w, yy)], fill=(255, 255, 255), width=3 if deg == 45 else 1)
     d.line([(0, h // 2), (w, h // 2)], fill=(255, 255, 0), width=3)
-    for i, label in enumerate(["0", "90", "180", "270"]):
+    for i in range(4):
         x = int(i * w / 4)
         d.line([(x, 0), (x, h // 2)], fill=(255, 255, 255), width=2)
-        d.text((x + 10, h // 2 - 90), label, fill=(255, 255, 255), font=font)
+        for k in range(i + 1):
+            d.rectangle([x + 12 + k * 34, h // 2 - 60, x + 12 + k * 34 + 24, h // 2 - 20], fill=(255, 255, 255))
     return np.asarray(im)
 
 

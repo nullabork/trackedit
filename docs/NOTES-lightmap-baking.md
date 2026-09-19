@@ -230,3 +230,35 @@ Unknowns this settles: whether the zip layout is `Moods/<Mood>/…`, whether
 the game accepts our BC6H, and whether settings files are honoured. If G
 shows the normal sky, check the game's log and try the ModWork folder
 (`Skins/Stadium/ModWork/Moods/<Mood>/`) with the same files.
+
+### Result of experiment 3 (2026-09-19): all three work
+
+Screenshots from the game:
+
+- **G** — the chart is the sky. The zip layout `Moods/<Mood>/SkyColor.dds`
+  is right and the game accepts our BC6H. The game's clouds draw over it, lit
+  white. The lower half of the panorama shows below the horizon line as a
+  flat band, so the image really is a full sphere.
+- **H** — same sky with no clouds: clearing `SkyClouds.dds` works.
+- **I** — **the game reads `Mood.MoodSetting.xml` from a mod.** With a green
+  sun/ambient/atmosphere and `DayTime01` moved from 0.6 to 0.30, the clouds
+  turn green-tinted, a green glow sits at the horizon where the sun now is,
+  and the scene is darker. The baked lightmap on the track does not change,
+  as expected: it needs a rebake to follow a new sun.
+
+(The heading labels rendered as empty boxes: Pillow's text layout is broken
+on this install. The chart now uses counted squares instead of text.)
+
+What this gives us, natively and per map, through one small mod zip:
+
+| want | how |
+| --- | --- |
+| any sky image | `SkyColor.dds` panorama |
+| no clouds / own clouds | `SkyClouds.dds` |
+| sun colour, moon colour, ambient | `LDirSun`, `LDirMoon`, `LAmbient` `HdrColor` |
+| sun position | `DayTime01` with `Latitude` (the sun moves along its daily arc; a free position on the sphere is not proven yet) |
+| atmosphere/horizon glow, fog colour and range, cloud tint | `HdrSun/Atmo*`, `Fog`, `Clouds` |
+| static lighting that matches | our own lightmap bake (sections 4–5) |
+
+Caveat for sharing: a local mod path only works on this machine. Other
+players need the zip hosted at a URL (`modUrl=`), which the game downloads.
