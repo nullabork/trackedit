@@ -135,6 +135,43 @@ switch (args[0])
             Console.WriteLine(names.ToJsonString());
             return 0;
         }
+    case "atmosphere":
+        try { return Trackedit.MapAtmosphere.Run(args); }
+        catch (Exception ex) { Console.Error.WriteLine($"atmosphere failed: {ex.Message}"); return 1; }
+    case "mediainfo":
+        {
+            // MediaTracker clips a map carries: clip -> tracks -> block types (+ fog keys).
+            Gbx.LZO = new Lzo();
+            var mm = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
+            Console.WriteLine($"{Path.GetFileName(args[1])}: decoration {mm.Decoration?.Id}, triggerSize {mm.ClipTriggerSize}, dayTime {mm.DayTime}, dynamicDaylight {mm.DynamicDaylight}");
+            void Clip(string label, CGameCtnMediaClip? clip)
+            {
+                if (clip is null) return;
+                Console.WriteLine($"  {label}: \"{clip.Name}\" stopWhenLeave={clip.StopWhenLeave} stopWhenRespawn={clip.StopWhenRespawn} chunks=[{string.Join(",", clip.Chunks.Select(c => c.Id.ToString("X8")))}]");
+                foreach (var track in clip.Tracks)
+                {
+                    Console.WriteLine($"    track \"{track.Name}\" keepPlaying={track.IsKeepPlaying} cycling={track.IsCycling} chunks=[{string.Join(",", track.Chunks.Select(c => c.Id.ToString("X8")))}]");
+                    foreach (var block in track.Blocks)
+                    {
+                        Console.WriteLine($"      {block.GetType().Name} chunks=[{string.Join(",", block.Chunks.Select(c => c.Id.ToString("X8") + ":v" + (c.GetType().GetProperty("Version")?.GetValue(c) ?? "-")))}]");
+                        if (block is CGameCtnMediaBlockFog fog)
+                            foreach (var k in fog.Keys) Console.WriteLine($"        t={k.Time} intens={k.Intensity} sky={k.SkyIntensity} dist={k.Distance} coef={k.Coefficient} color={k.Color} cloudsOpacity={k.CloudsOpacity} cloudsSpeed={k.CloudsSpeed}");
+                    }
+                }
+            }
+            Clip("intro", mm.ClipIntro); Clip("ambiance", mm.ClipAmbiance); Clip("global", mm.ClipGlobal); Clip("podium", mm.ClipPodium);
+            foreach (var (group, label) in new[] { (mm.ClipGroupInGame, "ingame"), (mm.ClipGroupEndRace, "endrace") })
+            {
+                if (group is null) continue;
+                Console.WriteLine($"  group {label}: {group.Clips.Count} clips chunks=[{string.Join(",", group.Chunks.Select(c => c.Id.ToString("X8")))}]");
+                foreach (var ct in group.Clips.Take(6))
+                {
+                    Console.WriteLine($"   trigger coords={ct.Trigger.Coords.Count} first={(ct.Trigger.Coords.Count > 0 ? ct.Trigger.Coords[0].ToString() : "-")} cond={ct.Trigger.Condition} val={ct.Trigger.ConditionValue} u=[{ct.Trigger.U01},{ct.Trigger.U02},{ct.Trigger.U03},{ct.Trigger.U04}]");
+                    Clip("  clip", ct.Clip);
+                }
+            }
+            return 0;
+        }
     case "typeinfo":
         {
             // Public properties of GBX.NET types whose name contains the argument (format research).

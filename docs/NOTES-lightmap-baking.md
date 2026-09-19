@@ -144,8 +144,50 @@ skybox. What the map format offers, cheapest first:
    - `ToneMapping` (exposure), `BloomHdr`, `FxColors` (saturation,
      contrast, brightness, near and far).
    RPG mappers use exactly this for atmosphere, so it is a supported path.
-3. **A real custom skybox** is not something the map format offers: the sky
-   is procedural per mood, not a texture a map can replace.
+3. **A real custom skybox: a texture mod.** Correction after research: the
+   sky IS replaceable. A map can reference a texture mod (a zip at a URL,
+   `ModPackDesc`; players download it on load — see
+   [doc.trackmania.com](https://doc.trackmania.com/create/texture-mods/mods/)),
+   and the mod's `Moods/` folder holds "ambience textures, like the skybox".
+   The game's own files (`GameData/Stadium/Media/Moods/<Mood>/`) show what
+   there is to replace:
+   - `SkyColor.dds` — a 1024×512 **equirectangular panorama of the sky**.
+     Replace it and the sky is any image you like.
+   - `SkyClouds.dds`, `Clouds.tga`, `Moon.tga` — cloud layer and moon sprite.
+   - `AmbCube.dds`, `EnvCubicHdr.dds` — ambient and reflection cubes (what
+     shiny surfaces and cars reflect); should match the new sky.
+   - `Mood.MoodSetting.xml` — sun colour (`LDirSun HdrColor`), ambient, moon,
+     time of day (`DayTime01`, latitude → **sun position**), atmosphere
+     colours, fog colour and range, cloud tints, lightmap bounce factors.
+     If the game reads this file from a mod too, it is the native version of
+     the sun/moon tool in section 5 — **untested, the next thing to try**.
+   The editor already downloads and applies mods, so writing the mod URL
+   into a saved map and generating a small mod zip are both in reach.
+4. **Far-out custom geometry** (a giant dome item around the map) is the
+   other trick mappers use. In TM2020 custom items can only use the game's
+   material library, so a dome with its own picture still needs a texture
+   mod for that picture — at which point route 3 is simpler and also fixes
+   reflections. A dome with stock materials (plain colour, glow, stars made
+   of geometry) works with no mod at all. Not researched further.
+
+### Experiment 2 (2026-09-19): mood and fog, in `Maps/Trackedit`
+
+`meshdump atmosphere <in> <out> [mood=…] [fog=r,g,b sky= intensity=
+distance= clouds= groupDonor=<map> fogDonor=<map>] [name=…]` writes these.
+MediaTracker nodes are cloned from donor maps (an in-game clip group from
+one, a Fog block from another), so every chunk version is the game's own.
+All three carry test A's sunset-graded lightmap:
+
+- **LM test D - sunset mood** — mood switched Day → Sunset, nothing else.
+  Question: does the game keep our lightmap, or demand a rebake because the
+  cache says it was baked for Day?
+- **LM test E - orange fog sky** — Day mood plus an in-game clip with a Fog
+  block (orange, sky intensity 0.8), triggered on the start block and kept
+  playing. Question: does the sky turn orange for the whole run?
+- **LM test F - sunset mood + fog** — both, fog gentler (sky 0.6,
+  intensity 0.6).
+
+`meshdump mediainfo <map>` lists a map's clips, tracks, blocks and fog keys.
 
 Natural fit with the sun/moon tool (section 5): sun colour and position
 drive the bake, fog colour and sky intensity drive the sky, and both are
