@@ -108,6 +108,17 @@ Check(MobilGeom.SegmentKind("WallStraight_VFCLeftTop_Air.Prefab.Gbx") == "Top", 
 Check(MobilGeom.SegmentKind("Curve1.Prefab.Gbx") == "", "unnamed row");
 Console.WriteLine("Mobil geometry tests passed.");
 
+// Mood settings: only the sun's numbers and colours change, brightness is the mood's own.
+const string moodXml = "<Mood>\n\t<Light EnableStars=\"1\" Latitude=\"45\" DayTime01=\"0.6\" LocalLightX=\"1\">\n\t\t<LDirSun HdrColor=\"3 2 1\"/>\n\t\t<LDirMoon HdrColor=\"0 0 0\"/>\n\t</Light>\n</Mood>";
+var moved = MoodMod.SetLightAttribute(MoodMod.SetLightAttribute(moodXml, "DayTime01", 0.5575), "Latitude", -26.5);
+Check(moved.Contains("Latitude=\"-26.5\" DayTime01=\"0.5575\" LocalLightX=\"1\""), "sun attributes replaced in place");
+Check(MoodMod.Recolour(moodXml, "LDirSun", null, 1) == moodXml, "no colour, no change");
+Check(MoodMod.Recolour(moodXml, "LDirSun", null, 2).Contains("<LDirSun HdrColor=\"6 4 2\"/>"), "brightness scales the mood's own colour");
+var sunLum = (0.2126 * 3 + 0.7152 * 2 + 0.0722 * 1).ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+Check(MoodMod.Recolour(moodXml, "LDirSun", "#ffffff", 1).Contains($"<LDirSun HdrColor=\"{sunLum} {sunLum} {sunLum}\"/>"), "a picked colour keeps the mood's luminance");
+Check(MoodMod.Recolour(moodXml, "LDirMoon", "#8899ff", 3).Contains("<LDirMoon HdrColor=\"0 0 0\"/>"), "a light the mood switches off stays off");
+Console.WriteLine("Mood mod tests passed.");
+
 static void Check(bool condition, string label)
 {
     if (!condition) throw new Exception($"Failed: {label}");

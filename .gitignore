@@ -11,3 +11,4 @@ tools/meshdump/missing_files.txt
 tools/meshdump/extract_list.txt
 .trackedit.local.json
 sheets/
+__pycache__/

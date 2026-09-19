@@ -6,7 +6,8 @@ namespace Trackedit;
 
 /// <summary>
 /// Driving path of a ghost: the validation ghost embedded in a Map.Gbx, or
-/// the first ghost of a Replay.Gbx (TMX replays). Ported from tracko's
+/// the first ghost of a Replay.Gbx (TMX replays), or a bare Ghost.Gbx (a
+/// record downloaded from Nadeo's services). Ported from tracko's
 /// ghostdump. Positions are game world metres (Y up), the same frame as
 /// free-block absPos; the editor lifts them by the decoration's vertical
 /// origin on import like it does for items.
@@ -19,6 +20,7 @@ public static class GhostDump
         {
             CGameCtnChallenge map => map.ChallengeParameters?.RaceValidateGhost,
             CGameCtnReplayRecord replay => replay.GetGhosts().FirstOrDefault(),
+            CGameCtnGhost bare => bare, // record ghosts downloaded from Nadeo
             _ => null,
         };
         if (ghost is null)
@@ -68,6 +70,9 @@ public static class GhostDump
             nickname = ghost.GhostNickname,
             raceTimeMs = ghost.RaceTime?.TotalMilliseconds,
             numSamples = path.Count,
+            // The race time at which each checkpoint was taken, in driving order;
+            // the last one is the finish. Exact, unlike anything geometry can tell.
+            checkpoints = (ghost.Checkpoints ?? []).Where(c => c.Time is not null).Select(c => (int)c.Time!.Value.TotalMilliseconds).ToArray(),
             path,
             times,
         });

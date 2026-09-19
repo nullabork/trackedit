@@ -9,6 +9,7 @@ import { History } from "@core/commands";
 import { BlockCatalog } from "@core/catalog";
 import type { CatalogJson } from "@core/catalog";
 import { SelectionModel } from "@core/selection";
+import { WaypointTypes } from "@core/waypoints";
 import { Emitter } from "@core/events";
 import { InputEngine } from "@input/InputEngine";
 import { SceneView } from "@render/SceneView";
@@ -18,6 +19,8 @@ import { MeshProvider } from "@render/MeshProvider";
 import { ToolManager } from "@tools/ToolManager";
 import { Shell } from "@ui/Shell";
 import { buildToolRail } from "@ui/ToolRail";
+import { buildTmxPanel } from "@ui/TmxPanel";
+import { buildSkyPanel } from "@ui/SkyPanel";
 import { buildMenuBar } from "@ui/MenuBar";
 import { openMapBrowser } from "@ui/MapBrowserDialog";
 import { fetchSetupStatus, openSetupDialog, setupIncomplete } from "@ui/SetupDialog";
@@ -35,6 +38,11 @@ async function boot(): Promise<void> {
 
   const catalogJson = (await (await fetch("catalog.json")).json()) as CatalogJson;
   const catalog = BlockCatalog.fromJson(catalogJson);
+
+  // Written by `meshdump waypoints` during setup; absent on older imports.
+  const waypoints = new WaypointTypes(
+    await fetch("meshes/waypoints.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})) as Record<string, string>,
+  );
 
   const document_ = new MapDocument();
   const history = new History(document_);
@@ -56,6 +64,7 @@ async function boot(): Promise<void> {
     document: document_,
     history,
     catalog,
+    waypoints,
     selection,
     view,
     renderer,
@@ -77,11 +86,15 @@ async function boot(): Promise<void> {
     view.setAmbience(document_.mood, document_.baseType);
   };
   document_.events.on("mapChanged", applyMap);
+  document_.events.on("atmosphereChanged", () => view.setAtmosphere(document_.atmosphere));
+  document_.events.on("reset", () => view.setAtmosphere(document_.atmosphere));
   applyMap();
 
   const plugins = new PluginHost(ctx);
   for (const plugin of builtinPlugins) plugins.use(plugin);
   buildToolRail(ctx, shell);
+  buildTmxPanel(ctx, shell);
+  buildSkyPanel(ctx, shell);
   buildMenuBar(ctx, shell.menubar);
 
   // Autosave: any edit persists the current track (debounced; only once a
@@ -95,6 +108,7 @@ async function boot(): Promise<void> {
   history.events.on("changed", queueSave);
   document_.events.on("mapChanged", queueSave);
   document_.events.on("reset", queueSave);
+  document_.events.on("atmosphereChanged", queueSave);
 
   // Camera pose survives reloads (per map, localStorage).
   window.setInterval(() => saveCamera(ctx), 1000);

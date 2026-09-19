@@ -11,6 +11,9 @@ import {
   TextureLoader,
 } from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+import type { BlockClipInfo, UnitClip } from "./clipAdjacency";
+import { paintHex, setColorTables } from "@core/palettes";
+import type { ColorTables } from "@core/palettes";
 import type { BlockDef } from "@core/catalog";
 import type { GeometryProvider } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -56,6 +59,10 @@ interface MeshIndexEntry {
   ground?: string | null;
   /** Items: single OBJ. */
   obj?: string | null;
+  /** Unit offsets per variant (meshdump UnitTable). */
+  units?: { air?: [number, number, number][] | null; ground?: [number, number, number][] | null } | null;
+  /** Clips per unit face per variant (meshdump ClipTable). */
+  clips?: { air?: UnitClip[] | null; ground?: UnitClip[] | null } | null;
 }
 
 interface MeshIndex {
@@ -69,6 +76,8 @@ type MaterialIndex = Record<
     texture: string | null;
     color?: string;
     colorable?: boolean;
+    /** Colour target table the material paints through (Default when absent). */
+    colorTable?: string;
     hueMask?: string;
     /** Decal shader: an alpha layer drawn ON another surface (coplanar). */
     decal?: boolean;
@@ -82,6 +91,21 @@ type MaterialIndex = Record<
 >;
 
 export type MeshVariant = "air" | "ground";
+
+/**
+ * Material names as the extraction keys them: "TrackBorders", or
+ * "PlatformIce.PlatformTech" for a terrain-modifier variant. Meshes written
+ * by older extractions name materials by their game path instead
+ * ("Stadium\\Media\\Modifier\\PlatformIce\\PlatformTech") — same
+ * rule as meshdump's EmbeddedDumper.CanonicalMaterialName.
+ */
+export function canonicalMaterialName(name: string): string {
+  const parts = name.split(/[\\/]/);
+  const stem = (parts.pop() ?? name).replace(/\.Material\.gbx$/i, "").replace(/\.gbx$/i, "");
+  const mod = parts.findIndex((p) => p.toLowerCase() === "modifier");
+  const folder = mod >= 0 && mod + 1 < parts.length ? parts[mod + 1] : null;
+  return folder ? `${folder}.${stem}` : stem;
+}
 
 /**
  * Serves real block meshes extracted from the user's game files by
@@ -161,7 +185,7 @@ export class MeshProvider implements GeometryProvider {
    * meshdump found one, otherwise a flat category tint.
    */
   private materialFor(name: string, category: string | undefined): MeshLambertMaterial {
-    const entry = this.materialIndex[name];
+    const entry = this.materialIndex[name] ?? this.materialIndex[canonicalMaterialName(name)];
     const texture = entry?.texture ?? null;
     // Flat-color materials cover content with no texture on disk (e.g. the
     // proxy meshes for procedural vegetation).
@@ -246,7 +270,7 @@ export class MeshProvider implements GeometryProvider {
    * pixels selected by a material's HueMask change color — the rest of the
    * texture (road surface, panel detail) stays stock.
    */
-  colorize(root: Object3D, hex: string): void {
+  colorize(root: Object3D, palette: string, slot: string): void {
     root.traverse((o) => {
       const holder = o as Mesh;
       if (!(holder instanceof Mesh) || !holder.material) return;
@@ -254,6 +278,9 @@ export class MeshProvider implements GeometryProvider {
         const name = m.userData?.matName as string | undefined;
         const entry = name ? this.materialIndex[name] : undefined;
         if (!name || !entry?.colorable) return m;
+        // The slot's colour depends on this material's colour table.
+        const hex = paintHex(palette, slot, entry.colorTable ?? "Default");
+        if (!hex) return m;
         const key = `paint:${hex}:${name}`;
         let painted = this.materials.get(key);
         if (!painted) {
@@ -261,6 +288,8 @@ export class MeshProvider implements GeometryProvider {
           // swaps in asynchronously once the canvas bake finishes.
           painted = m.clone();
           painted.userData.matName = name;
+          painted.userData.paintHex = hex;
+          painted.userData.paintTable = entry.colorTable ?? "Default";
           this.materials.set(key, painted);
           const target = painted;
           void this.bakeTinted(name, entry, hex).then((tex) => {
@@ -396,10 +425,23 @@ export class MeshProvider implements GeometryProvider {
       this.index = (await res.json()) as MeshIndex;
       const mats = await fetch(this.baseUrl + "materials.json");
       if (mats.ok) this.materialIndex = (await mats.json()) as MaterialIndex;
+      const tables = await fetch(this.baseUrl + "colortables.json");
+      if (tables.ok) setColorTables((await tables.json()) as ColorTables);
       return true;
     } catch {
       return false;
     }
+  }
+
+  blockClips(name: string, variant: "air" | "ground"): BlockClipInfo | undefined {
+    const entry = this.index?.blocks[name];
+    if (!entry) return undefined;
+    // A variant without its own table borrows the other's (several blocks
+    // model only air or only ground).
+    const other = variant === "air" ? "ground" : "air";
+    const units = entry.units?.[variant] ?? entry.units?.[other] ?? [];
+    const clips = entry.clips?.[variant] ?? entry.clips?.[other] ?? [];
+    return { size: entry.size ?? [1, 1, 1], units, clips };
   }
 
   /** Footprint sizes from the extraction, for catalog enrichment. */

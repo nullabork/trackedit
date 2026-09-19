@@ -96,6 +96,41 @@ export function quatRotate(q: Quat, v: Vec3): Vec3 {
   ];
 }
 
+/**
+ * How the game turns a placed block or item by its stored yaw/pitch/roll:
+ * yaw about Y, then roll about the turned Z, then pitch about the turned X —
+ * three.js Euler order "YZX" with (x = pitch, y = yaw, z = roll). Measured
+ * against record ghosts driving over tilted free blocks (TMX #84440):
+ * yaw→pitch→roll ("YXZ") puts every block with both pitch and roll off its
+ * line; this order seats them all.
+ */
+export const GAME_EULER_ORDER = "YZX" as const;
+
+/** Game yaw/pitch/roll (radians) -> quaternion, in the game's order. */
+export function quatFromGameRot(rot: Vec3): Quat {
+  const qy = quatFromAxisAngle([0, 1, 0], rot[0]);
+  const qx = quatFromAxisAngle([1, 0, 0], rot[1]);
+  const qz = quatFromAxisAngle([0, 0, 1], rot[2]);
+  return quatMul(quatMul(qy, qz), qx);
+}
+
+/** Quaternion -> game yaw/pitch/roll (radians); inverse of quatFromGameRot. */
+export function gameRotFromQuat(q: Quat): Vec3 {
+  const [x, y, z, w] = q;
+  const m11 = 1 - 2 * (y * y + z * z);
+  const m13 = 2 * (x * z + y * w);
+  const m21 = 2 * (x * y + z * w);
+  const m22 = 1 - 2 * (x * x + z * z);
+  const m23 = 2 * (y * z - x * w);
+  const m31 = 2 * (x * z - y * w);
+  const m33 = 1 - 2 * (x * x + y * y);
+  // three.js Euler.setFromRotationMatrix, order "YZX".
+  const roll = Math.asin(Math.min(Math.max(m21, -1), 1));
+  if (Math.abs(m21) < 0.9999999)
+    return [Math.atan2(-m31, m11), Math.atan2(-m23, m22), roll];
+  return [Math.atan2(m13, m33), 0, roll];
+}
+
 /** Quaternion -> Euler YXZ (radians, [x, y, z]); matches three.js. */
 export function eulerYXZFromQuat(q: Quat): Vec3 {
   const [x, y, z, w] = q;

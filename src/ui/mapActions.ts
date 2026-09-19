@@ -1,3 +1,4 @@
+import { offerModShare, type SavedSunMod } from "./ModShareDialog";
 import type { EditorContext } from "@plugins/api";
 import { importDump, exportDump } from "@io/trackoJson";
 import type { MapDump } from "@io/trackoJson";
@@ -37,7 +38,7 @@ export function importJsonFlow(ctx: EditorContext): void {
 }
 
 export function exportJsonFlow(ctx: EditorContext): void {
-  const dump = exportDump(ctx.document);
+  const dump = exportDump(ctx.document, undefined, ctx.waypoints);
   const blob = new Blob([JSON.stringify(dump, null, 1)], { type: "application/json" });
   const a = el("a", {
     href: URL.createObjectURL(blob),
@@ -46,6 +47,36 @@ export function exportJsonFlow(ctx: EditorContext): void {
   a.click();
   URL.revokeObjectURL(a.href);
   ctx.ui.setStatus("Exported placements JSON — feed it to gbxbuild for a .Map.Gbx");
+}
+
+/**
+ * Save the track as a real .Map.Gbx in the game's Maps/Trackedit folder
+ * (dev-server bridge -> `meshdump build`). Shadows are not computed: the
+ * game does that (editor, or the Batch Compute Shadows Openplanet plugin).
+ */
+export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
+  ctx.ui.setStatus("Writing the map file…");
+  try {
+    const tmx = /^tmx-(\d+)$/.exec(ctx.document.id);
+    const res = await fetch("/api/game/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dump: exportDump(ctx.document, undefined, ctx.waypoints), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
+    });
+    const json = (await res.json()) as { sunMod?: SavedSunMod | null; notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
+    if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
+    const edited = (json.blocksBuilt ?? 0) + (json.itemsBuilt ?? 0);
+    ctx.ui.setStatus(
+      `Saved ${json.path} — ${json.blocks} blocks, ${json.items} items` +
+      (edited ? ` (${edited} new or moved)` : "") +
+      (json.itemsSkipped ? `, ${json.itemsSkipped} items skipped (template has no item to model them on)` : "") +
+      ". Shadows are not computed: open it in the game editor and compute them there." +
+      (json.notes?.length ? ` ${json.notes.join(" ")}` : ""));
+    // A freshly written look is a local file: offer the upload-and-link step.
+    if (json.sunMod && !json.sunMod.url && json.path) offerModShare(ctx, json.sunMod, json.path);
+  } catch (err) {
+    ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** New map, guarding a non-empty current track (it is saved, then cleared). */

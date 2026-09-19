@@ -5,6 +5,8 @@ import type { GridCoord } from "./math";
 import { CELL, MAP_SIZE, coordEquals, newId } from "./math";
 import type { BaseType, MapBase, Mood } from "./mapbase";
 import { baseTypeOf, parseDecoration } from "./mapbase";
+import type { Atmosphere } from "./atmosphere";
+import { cloneAtmosphere } from "./atmosphere";
 
 export interface DocumentEvents extends Record<string, unknown> {
   placementAdded: { layer: Layer; placement: Placement };
@@ -14,6 +16,8 @@ export interface DocumentEvents extends Record<string, unknown> {
   /** Any layer property change: name, visibility, settings, transform. */
   layerChanged: { layer: Layer };
   activeLayerChanged: { layer: Layer };
+  /** Custom sun, fog or sky changed (core/atmosphere.ts). */
+  atmosphereChanged: Record<string, never>;
   /** Whole document replaced (new/import). Rebuild everything. */
   reset: Record<string, never>;
   /** Map base or mood changed (size, decoration, lighting). */
@@ -34,6 +38,10 @@ export class MapDocument {
   decorationBase = "48x48Screen155";
   mood: Mood = "Day";
   size: GridCoord = MAP_SIZE;
+  /** The game's map uid (from import) — the key Nadeo's record services use. */
+  mapUid: string | null = null;
+  /** Whether the imported map file carried a validation ghost (null = unknown). */
+  validationGhost: boolean | null = null;
   /** The map's own custom texture pack (mod) URL, from import — if any. */
   modUrl: string | null = null;
   /** Slug of the mod currently APPLIED (any downloaded mod, not just the map's). */
@@ -50,6 +58,14 @@ export class MapDocument {
   setColorPalette(name: string): void {
     this.colorPalette = name;
     this.events.emit("mapChanged", {});
+  }
+
+  /** Custom sun, fog and sky (all null = the mood's own). */
+  atmosphere: Atmosphere = cloneAtmosphere(null);
+
+  setAtmosphere(patch: Partial<Atmosphere>): void {
+    this.atmosphere = { ...this.atmosphere, ...patch };
+    this.events.emit("atmosphereChanged", {});
   }
 
   /** Full game decoration id, e.g. "NoStadium48x48Sunset". */
@@ -191,9 +207,12 @@ export class MapDocument {
       name?: string;
       decoration?: string;
       size?: GridCoord;
+      mapUid?: string | null;
+      validationGhost?: boolean | null;
       modUrl?: string | null;
       activeMod?: string | null;
       colorPalette?: string;
+      atmosphere?: Atmosphere | null;
     },
   ): void {
     this.layerList = layers.length ? layers : [createLayer("Base")];
@@ -205,10 +224,13 @@ export class MapDocument {
       this.mood = parsed.mood;
     }
     if (meta?.size) this.size = meta.size;
+    this.mapUid = meta?.mapUid ?? null;
+    this.validationGhost = meta?.validationGhost ?? null;
     // Mods are per-map: opening a map replaces them (undefined = clear).
     this.modUrl = meta?.modUrl ?? null;
     this.activeMod = meta?.activeMod ?? null;
     this.colorPalette = meta?.colorPalette ?? "Classic";
+    this.atmosphere = cloneAtmosphere(meta?.atmosphere);
     this.events.emit("reset", {});
     this.events.emit("mapChanged", {});
   }

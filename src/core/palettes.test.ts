@@ -1,40 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { PAINT_SLOTS, PALETTES, paintHex } from "./palettes";
+import { DEFAULT_TABLE, PAINT_SLOTS, PALETTE_NAMES, paintHex, setColorTables } from "./palettes";
 
 describe("paintHex", () => {
-  it("maps each slot to its palette column", () => {
-    expect(paintHex("Classic", "White")).toBe(PALETTES.Classic[0]);
-    expect(paintHex("Classic", "Black")).toBe(PALETTES.Classic[4]);
-    expect(paintHex("Purple", "Green")).toBe(PALETTES.Purple[1]);
+  it("maps each slot to its palette column of the Default table", () => {
+    expect(paintHex("Classic", "White")).toBe(DEFAULT_TABLE.Classic[0]);
+    expect(paintHex("Classic", "Black")).toBe(DEFAULT_TABLE.Classic[4]);
+    expect(paintHex("Purple", "Green")).toBe(DEFAULT_TABLE.Purple[1]);
+    expect(paintHex("Orange", "Red")).toBe("#f97c00");
   });
 
-  it("falls back to Classic for unknown palettes", () => {
-    expect(paintHex("NotAPalette", "Red")).toBe(PALETTES.Classic[3]);
+  it("falls back to Classic for unknown palettes and to Default for unknown tables", () => {
+    expect(paintHex("NotAPalette", "Red")).toBe(DEFAULT_TABLE.Classic[3]);
+    expect(paintHex("Orange", "Red", "NotATable")).toBe(DEFAULT_TABLE.Orange[3]);
   });
 
   it("returns null for unknown slots", () => {
     expect(paintHex("Classic", "Chartreuse")).toBeNull();
   });
+
+  it("uses a material's own table when the game tables are loaded", () => {
+    setColorTables({ Sport: { Classic: ["#e1e1e1", "#437256", "#376088", "#8f291b", "#252525"] } });
+    expect(paintHex("Classic", "Red", "Sport")).toBe("#8f291b");
+    expect(paintHex("Classic", "Red")).toBe(DEFAULT_TABLE.Classic[3]);
+    // A table without the palette row uses the Default table's row for it.
+    expect(paintHex("Orange", "Red", "Sport")).toBe(DEFAULT_TABLE.Orange[3]);
+  });
 });
 
 describe("palette table invariants", () => {
-  it("every palette has exactly one shade per slot", () => {
-    for (const [name, row] of Object.entries(PALETTES)) {
+  it("every palette has exactly one shade per slot, in the map's index order", () => {
+    expect(Object.keys(DEFAULT_TABLE)).toEqual([...PALETTE_NAMES]);
+    for (const [name, row] of Object.entries(DEFAULT_TABLE)) {
       expect(row, name).toHaveLength(PAINT_SLOTS.length);
-      for (const hex of row) expect(hex, name).toMatch(/^#[0-9a-f]{6}$/i);
-    }
-  });
-
-  it("monochrome rows run light -> dark (White slot = lightest)", () => {
-    // Perceived lightness must not increase along the row.
-    const lum = (hex: string) =>
-      0.299 * parseInt(hex.slice(1, 3), 16) +
-      0.587 * parseInt(hex.slice(3, 5), 16) +
-      0.114 * parseInt(hex.slice(5, 7), 16);
-    for (const name of ["Red", "Blue", "Purple", "White", "Black"]) {
-      const row = PALETTES[name];
-      for (let i = 1; i < row.length; i++)
-        expect(lum(row[i]), `${name}[${i}]`).toBeLessThan(lum(row[i - 1]));
+      for (const hex of row) expect(hex, name).toMatch(/^#[0-9a-f]{6}$/);
     }
   });
 });

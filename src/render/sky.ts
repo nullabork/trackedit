@@ -5,6 +5,7 @@ import {
   Texture,
   TextureLoader,
 } from "three";
+import { lightDirection } from "@core/atmosphere";
 
 /**
  * Skyboxes, one per mood. Two layers:
@@ -60,6 +61,36 @@ export function applySky(mood: string, apply: (tex: Texture) => void): void {
   );
 }
 
+const customSkies = new Map<string, Texture>();
+
+/**
+ * A map's custom sky image as a background texture. The game stretches the
+ * image over HALF the sky — left edge at the sun, right edge opposite it —
+ * and mirrors it for the other half, so the preview does the same; the
+ * caller turns the background so the seam follows the sun.
+ */
+export function customSky(url: string, apply: (tex: Texture) => void): void {
+  const hit = customSkies.get(url);
+  if (hit) return apply(hit);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, W / 2, H);
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, 0, 0, W / 2, H);
+    const tex = new CanvasTexture(canvas);
+    tex.mapping = EquirectangularReflectionMapping;
+    tex.colorSpace = SRGBColorSpace;
+    customSkies.set(url, tex);
+    apply(tex);
+  };
+  img.src = url;
+}
+
 const W = 2048;
 const H = 1024;
 const HORIZON = H / 2;
@@ -82,21 +113,21 @@ const SPECS: Record<string, SkySpec> = {
   Day: {
     sky: ["#2a66c8", "#5f9be0", "#cfe4f4"],
     ground: ["#9fb8c8", "#4e6474"],
-    lightDir: [0.6, 1, 0.35],
+    lightDir: [...lightDirection("Day", null)],
     glow: { color: "rgba(255,255,240,0.55)", size: 0.36 },
     clouds: { tint: "#ffffff", shade: "#b8cbdc", count: 64 },
   },
   Night: {
     sky: ["#020409", "#060d1c", "#122036"],
     ground: ["#0c1522", "#05080e"],
-    lightDir: [0.3, 1, 0.5],
+    lightDir: [...lightDirection("Night", null)],
     glow: { color: "rgba(190,210,255,0.30)", size: 0.14, disc: "#e8eeff" },
     stars: 700,
   },
   Sunrise: {
     sky: ["#5a7cb4", "#b393b8", "#ffd9a6"],
     ground: ["#94847a", "#3e3835"],
-    lightDir: [1, 0.35, 0.2],
+    lightDir: [...lightDirection("Sunrise", null)],
     glow: { color: "rgba(255,214,150,0.75)", size: 0.5, disc: "#fff2d8" },
     clouds: { tint: "#ffe4c8", shade: "#b48ba0", count: 34 },
     band: { color: "rgba(255,190,120,0.5)", height: 0.10 },
@@ -104,7 +135,7 @@ const SPECS: Record<string, SkySpec> = {
   Sunset: {
     sky: ["#31215c", "#a44a72", "#ff8a3c"],
     ground: ["#5e4038", "#22191a"],
-    lightDir: [-1, 0.3, -0.25],
+    lightDir: [...lightDirection("Sunset", null)],
     glow: { color: "rgba(255,150,70,0.8)", size: 0.55, disc: "#ffd9a8" },
     clouds: { tint: "#ffb888", shade: "#7a3a5c", count: 34 },
     band: { color: "rgba(255,110,50,0.55)", height: 0.12 },

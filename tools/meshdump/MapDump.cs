@@ -13,10 +13,47 @@ namespace Trackedit;
 /// </summary>
 public static class MapDump
 {
-    public static string Serialize(CGameCtnChallenge map) => JsonSerializer.Serialize(new
+    /// <summary>
+    /// Palette rows of the game's colour target tables, in the order the map
+    /// stores its choice (chunk 0x0304306C: int version, byte index — absent
+    /// on maps saved before palettes existed, which use Classic).
+    /// </summary>
+    public static readonly string[] PaletteNames =
+        ["Classic", "Stunt", "Red", "Orange", "Yellow", "Lime", "Green", "Cyan", "Blue", "Purple", "Pink", "White", "Black"];
+
+    /// <summary>
+    /// The map's block-colour palette name (Classic when unset). Read from
+    /// the raw body: GBX.NET parses the chunk but exposes nothing of it.
+    /// Layout: id 0x0304306C, "PIKS", size, int version, byte palette index.
+    /// </summary>
+    public static string ColorPalette(string mapPath)
+    {
+        try
+        {
+            using var ms = new MemoryStream();
+            Gbx.Decompress(mapPath, ms);
+            var d = ms.ToArray();
+            var pattern = new byte[] { 0x6C, 0x30, 0x04, 0x03, (byte)'P', (byte)'I', (byte)'K', (byte)'S' };
+            for (var i = d.Length - pattern.Length - 9; i >= 0; i--)
+            {
+                var hit = true;
+                for (var k = 0; k < pattern.Length && hit; k++) hit = d[i + k] == pattern[k];
+                if (!hit) continue;
+                var size = BitConverter.ToInt32(d, i + 8);
+                if (size < 5 || i + 12 + size > d.Length) return "Classic";
+                int index = d[i + 12 + 4];
+                return index >= 0 && index < PaletteNames.Length ? PaletteNames[index] : "Classic";
+            }
+        }
+        catch { /* unreadable: default */ }
+        return "Classic";
+    }
+
+    public static string Serialize(CGameCtnChallenge map, string? mapPath = null) => JsonSerializer.Serialize(new
     {
         mapName = map.MapName,
         mapUid = map.MapUid,
+        colorPalette = mapPath is null ? "Classic" : ColorPalette(mapPath),
         decoration = map.Decoration?.Id,
         mod = Pack(map.ModPackDesc),
         blocks = (map.Blocks ?? []).Select(b => new

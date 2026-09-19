@@ -8,6 +8,8 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createMapConverter } from "./tools/mapConverter";
 import { liveBridge } from "./tools/liveBridge";
+import { nadeoBridge } from "./tools/nadeoBridge";
+import { gameBridge, tmxTemplatePath } from "./tools/gameBridge";
 
 /** Machine-local settings (gitignored): Openplanet folder and optional
  *  external gbxdump override. TMX import otherwise uses meshdump's map command. */
@@ -27,11 +29,17 @@ const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
  * Dev-server bridge to TrackmaniaExchange: the browser can't call TMX (CORS)
  * or run the .NET converter, but the dev server can do both.
  *
- *   GET /api/tmx/search?q=name   -> TMX map search JSON
+ *   GET /api/tmx/search?q=…      -> TMX map search JSON; q is a name, a TMX map
+ *                                   id ("84442", "#84442") or a TMX map URL
  *   GET /api/tmx/load/:id        -> downloads the map, runs gbxdump, returns dump JSON
  *                                   (+ `ghost` when the map carries a validation ghost)
+ *   GET /api/tmx/info/:id        -> the map's TMX card: name, uid, uploader/authors, medals,
+ *                                   awards, replays, downloads, tags, upload date, ghost blocks
+ *   GET /api/tmx/replays/:id     -> the map's TMX replays (id, time, driver, date) + author time
  *   GET /api/tmx/ghost/:id       -> the driving path of the TMX replay closest to the
- *                                   map's author time (404 when the map has no replay file)
+ *                                   map's author time (404 when the map has no replay file);
+ *                                   ?replay=<ReplayId> picks one, ?source=map extracts the
+ *                                   map's own validation ghost instead
  */
 function tmxBridge(): Plugin {
   const convertMap = createMapConverter(process.cwd());
@@ -47,6 +55,77 @@ function tmxBridge(): Plugin {
   return {
     name: "tmx-bridge",
     configureServer(server) {
+      type TmxReplay = { ReplayId: number; ReplayTime: number; HasFile?: boolean; User?: { Name?: string }; ReplayAt?: string; Position?: number };
+      const tmxReplays = async (id: string) => {
+        const mapRes = await fetch(
+          `https://trackmania.exchange/api/maps?id=${id}&fields=${encodeURIComponent("MapId,MapUid,Medals.Author,Medals.Gold")}`,
+          { headers: TMX_HEADERS });
+        const mapJson = (await mapRes.json()) as { Results?: { MapUid?: string; Medals?: { Author?: number; Gold?: number } }[] };
+        const authorTime = mapJson.Results?.[0]?.Medals?.Author ?? 0;
+        const mapUid = mapJson.Results?.[0]?.MapUid ?? null;
+        const listRes = await fetch(
+          `https://trackmania.exchange/api/replays?mapid=${id}&count=100&fields=${encodeURIComponent("ReplayId,ReplayTime,HasFile,User.Name,ReplayAt,Position")}`,
+          { headers: TMX_HEADERS });
+        if (!listRes.ok) throw new Error(`TMX replays ${listRes.status}`);
+        const list = (await listRes.json()) as { Results?: TmxReplay[] };
+        const replays = (list.Results ?? []).filter((r) => r.HasFile !== false && r.ReplayTime > 0);
+        return { authorTime, mapUid, replays };
+      };
+
+      server.middlewares.use("/api/tmx/info", async (req, res) => {
+        try {
+          const id = (req.url ?? "").split("?")[0].split("/").filter(Boolean).pop();
+          if (!id || !/^\d+$/.test(id)) throw new Error("bad map id");
+          const fields = "MapId,Name,MapUid,OnlineMapId,Uploader.Name,Uploader.UserId,Authors,Medals.Author,Medals.Gold,Medals.Silver,Medals.Bronze,"
+            + "AwardCount,ReplayCount,DownloadCount,CommentCount,UploadedAt,UpdatedAt,HasGhostBlocks,Tags,EmbeddedObjectsCount,MapType";
+          const r = await fetch(`https://trackmania.exchange/api/maps?id=${id}&fields=${encodeURIComponent(fields)}`, { headers: TMX_HEADERS });
+          if (!r.ok) throw new Error(`TMX ${r.status}`);
+          type Info = {
+            MapId: number; Name: string; MapUid?: string; OnlineMapId?: string;
+            Uploader?: { Name?: string; UserId?: number };
+            Authors?: { User?: { Name?: string; UserId?: number }; Role?: string }[];
+            Medals?: { Author?: number; Gold?: number; Silver?: number; Bronze?: number };
+            AwardCount?: number; ReplayCount?: number; DownloadCount?: number; CommentCount?: number;
+            UploadedAt?: string; UpdatedAt?: string; HasGhostBlocks?: boolean; Tags?: { Name?: string }[];
+            EmbeddedObjectsCount?: number; MapType?: string;
+          };
+          const m = ((await r.json()) as { Results?: Info[] }).Results?.[0];
+          if (!m) { res.statusCode = 404; res.end(JSON.stringify({ error: "not on TMX" })); return; }
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            mapId: m.MapId, name: m.Name, mapUid: m.MapUid ?? null, onlineMapId: m.OnlineMapId ?? null,
+            uploader: { name: m.Uploader?.Name ?? "", userId: m.Uploader?.UserId ?? null },
+            authors: (m.Authors ?? []).map((a) => ({ name: a.User?.Name ?? "", userId: a.User?.UserId ?? null, role: a.Role ?? "" })),
+            medals: { author: m.Medals?.Author ?? 0, gold: m.Medals?.Gold ?? 0, silver: m.Medals?.Silver ?? 0, bronze: m.Medals?.Bronze ?? 0 },
+            awardCount: m.AwardCount ?? 0, replayCount: m.ReplayCount ?? 0, downloadCount: m.DownloadCount ?? 0, commentCount: m.CommentCount ?? 0,
+            uploadedAt: m.UploadedAt ?? null, updatedAt: m.UpdatedAt ?? null, hasGhostBlocks: !!m.HasGhostBlocks,
+            tags: (m.Tags ?? []).map((t) => t.Name ?? "").filter(Boolean), embeddedObjects: m.EmbeddedObjectsCount ?? 0, mapType: m.MapType ?? "",
+          }));
+        } catch (err) {
+          res.statusCode = 502;
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+      });
+
+      server.middlewares.use("/api/tmx/replays", async (req, res) => {
+        try {
+          const id = (req.url ?? "").split("?")[0].split("/").filter(Boolean).pop();
+          if (!id || !/^\d+$/.test(id)) throw new Error("bad map id");
+          const { authorTime, mapUid, replays } = await tmxReplays(id);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            authorTime,
+            mapUid,
+            replays: replays.map((r) => ({
+              replayId: r.ReplayId, time: r.ReplayTime, driver: r.User?.Name ?? "", at: r.ReplayAt ?? "", position: r.Position ?? null,
+            })),
+          }));
+        } catch (err) {
+          res.statusCode = 502;
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+      });
+
       server.middlewares.use("/api/tmx/ghost", async (req, res) => {
         let dir: string | null = null;
         const fail = (code: number, msg: string) => {
@@ -55,26 +134,34 @@ function tmxBridge(): Plugin {
           res.end(JSON.stringify({ error: msg }));
         };
         try {
-          const id = (req.url ?? "").split("/").filter(Boolean).pop();
+          const url = new URL(req.url ?? "", "http://x");
+          const id = url.pathname.split("/").filter(Boolean).pop();
           if (!id || !/^\d+$/.test(id)) return fail(400, "bad map id");
-          const mapRes = await fetch(
-            `https://trackmania.exchange/api/maps?id=${id}&fields=${encodeURIComponent("MapId,Medals.Author")}`,
-            { headers: TMX_HEADERS });
-          const mapJson = (await mapRes.json()) as { Results?: { Medals?: { Author?: number } }[] };
-          const authorTime = mapJson.Results?.[0]?.Medals?.Author ?? 0;
-          const listRes = await fetch(
-            `https://trackmania.exchange/api/replays?mapid=${id}&count=50&fields=${encodeURIComponent("ReplayId,ReplayTime,HasFile,User.Name")}`,
-            { headers: TMX_HEADERS });
-          if (!listRes.ok) return fail(502, `TMX replays ${listRes.status}`);
-          const list = (await listRes.json()) as { Results?: { ReplayId: number; ReplayTime: number; HasFile?: boolean; User?: { Name?: string } }[] };
-          const usable = (list.Results ?? []).filter((r) => r.HasFile !== false && r.ReplayTime > 0);
+          if (url.searchParams.get("source") === "map") {
+            // The map's own validation ghost: re-download the map and extract.
+            const mapFile = await fetch(`https://trackmania.exchange/maps/download/${id}`, { headers: TMX_HEADERS });
+            if (!mapFile.ok) return fail(502, `TMX map download ${mapFile.status}`);
+            dir = await mkdtemp(join(tmpdir(), "trackedit-ghost-"));
+            const mapGbx = join(dir, "map.Map.Gbx");
+            await writeFile(mapGbx, Buffer.from(await mapFile.arrayBuffer()));
+            const mapGhost = await extractGhost(mapGbx, join(dir, "ghost.json"));
+            if (!mapGhost) return fail(404, "the map has no validation ghost");
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ source: "map", ...mapGhost }));
+            return;
+          }
+          const { authorTime, replays } = await tmxReplays(id);
+          const usable = [...replays];
           if (!usable.length) return fail(404, "no replay with a file on TMX");
-          // Closest to the author time: a representative clean line, not a
-          // cut or a crawl. Without an author time, the fastest.
+          const wanted = Number(url.searchParams.get("replay"));
+          // A specific replay, else the one closest to the author time: a
+          // representative clean line, not a cut or a crawl. Without an
+          // author time, the fastest.
           usable.sort((a, b) => authorTime
             ? Math.abs(a.ReplayTime - authorTime) - Math.abs(b.ReplayTime - authorTime)
             : a.ReplayTime - b.ReplayTime);
-          const pick = usable[0];
+          const pick = wanted ? usable.find((r) => r.ReplayId === wanted) : usable[0];
+          if (!pick) return fail(404, `replay #${wanted} is not on this map`);
           const file = await fetch(`https://trackmania.exchange/recordgbx/${pick.ReplayId}`, { headers: TMX_HEADERS });
           if (!file.ok) return fail(502, `TMX replay download ${file.status}`);
           dir = await mkdtemp(join(tmpdir(), "trackedit-ghost-"));
@@ -96,8 +183,13 @@ function tmxBridge(): Plugin {
 
       server.middlewares.use("/api/tmx/search", async (req, res) => {
         try {
-          const q = new URL(req.url ?? "", "http://x").searchParams.get("q") ?? "";
-          const api = `https://trackmania.exchange/api/maps?name=${encodeURIComponent(q)}&count=25&fields=${encodeURIComponent("MapId,Name,Uploader.Name,AwardCount,Medals.Author")}`;
+          const q = (new URL(req.url ?? "", "http://x").searchParams.get("q") ?? "").trim();
+          // A bare id ("84442", "#84442") or a TMX map link
+          // (trackmania.exchange/maps/84442, /mapshow/84442, ?id=84442) looks
+          // the map up by id; anything else is a name search.
+          const idMatch = /^#?(\d+)$/.exec(q) ?? /(?:\/maps\/|\/mapshow\/|[?&]id=)(\d+)/i.exec(q);
+          const query = idMatch ? `id=${idMatch[1]}` : `name=${encodeURIComponent(q)}&count=25`;
+          const api = `https://trackmania.exchange/api/maps?${query}&fields=${encodeURIComponent("MapId,Name,Uploader.Name,AwardCount,Medals.Author")}`;
           const upstream = await fetch(api, { headers: { "User-Agent": "trackedit-dev" } });
           res.setHeader("content-type", "application/json");
           res.end(await upstream.text());
@@ -121,6 +213,10 @@ function tmxBridge(): Plugin {
           const gbx = join(dir, "map.Map.Gbx");
           const out = join(dir, "map.json");
           await writeFile(gbx, Buffer.from(await upstream.arrayBuffer()));
+          // Keep the original: it is the template when this track is saved
+          // back to the game (tools/gameBridge.ts).
+          await mkdir(join(process.cwd(), "maps", "gbx"), { recursive: true });
+          await copyFile(gbx, tmxTemplatePath(id));
           try {
             await convertMap(gbx, out, GBXDUMP);
           } catch (err) {
@@ -448,6 +544,8 @@ function setupBridge(): Plugin {
       st.phase = "items";
       st.progress = null;
       await runOne("items");
+      // Which blocks/items are start, checkpoint, finish (meshes/waypoints.json).
+      await runOne("waypoints");
       st.phase = "done";
       st.progress = 1;
       st.done = true;
@@ -689,7 +787,7 @@ function debugBridge(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tmxBridge(), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
+  plugins: [tmxBridge(), nadeoBridge(MESHDUMP), gameBridge(MESHDUMP), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
   resolve: {
     alias: {
       "@core": fileURLToPath(new URL("./src/core", import.meta.url)),

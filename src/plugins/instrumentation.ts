@@ -1,3 +1,4 @@
+import { customSunFrom, sunFromHeading } from "@core/atmosphere";
 import { captureDebugSubject, frameDebugSubject, inspectDebugSubject, type DebugViewOptions } from "@render/debugView";
 import { Vector3 } from "three";
 import type { EditorContext, EditorPlugin } from "./api";
@@ -87,6 +88,7 @@ export const instrumentationPlugin: EditorPlugin = {
           decoration: doc.decoration,
           size: doc.size,
           globalClampToBase: doc.globalClampToBase,
+          colorPalette: doc.colorPalette,
         },
         mode: {
           tool: ctx.tools.activeTool?.id ?? null,
@@ -212,6 +214,21 @@ export const instrumentationPlugin: EditorPlugin = {
         // nothing is lost; the reply goes out before the unload.
         window.setTimeout(() => window.location.reload(), 50);
         return { ok: true, reloading: true };
+      }
+      if (action === "tool") {
+        // ?action=tool&uid=sun
+        if (!uid || !ctx.tools.all.some((t) => t.id === uid)) return { ok: false, error: `no tool ${uid ?? "(none)"}` };
+        ctx.tools.setActive(uid);
+        return { ok: true, tool: uid };
+      }
+      if (action === "atmosphere") {
+        // ?action=atmosphere&uid=<JSON patch of core/atmosphere.ts Atmosphere>, or
+        // uid=sun:<heading>,<height> to place the sun by compass. No arg = read.
+        if (uid?.startsWith("sun:")) {
+          const [heading, altitude] = uid.slice(4).split(",").map(Number);
+          ctx.document.setAtmosphere({ sun: customSunFrom(sunFromHeading(heading, altitude), ctx.document.atmosphere.sun) });
+        } else if (uid) ctx.document.setAtmosphere(JSON.parse(uid));
+        return { ok: true, atmosphere: ctx.document.atmosphere };
       }
       if (action === "mood") {
         // uid doubles as the value slot: ?action=mood&uid=Night

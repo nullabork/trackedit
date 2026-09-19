@@ -24,7 +24,10 @@ import type { Layer, Placement } from "@core/layer";
 import type { BlockCatalog, BlockDef } from "@core/catalog";
 import { CELL, DEFAULT_Y_OFFSET, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
-import { paintHex } from "@core/palettes";
+import { GAME_EULER_ORDER } from "@core/math";
+import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
+import { isPlacementVisible } from "@core/layer";
+import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
 import type { SceneView } from "./SceneView";
@@ -41,7 +44,7 @@ interface StreamingProvider extends GeometryProvider {
   requestLoad?(def: BlockDef | undefined, name: string, variant?: "air" | "ground"): void;
   hintPosition?(name: string, x: number, y: number, z: number): void;
   setLite?(lite: boolean): void;
-  colorize?(root: Object3D, paint: string): void;
+  colorize?(root: Object3D, palette: string, slot: string): void;
 }
 
 /** LOD bookkeeping per placement (LAYER-LOCAL position; world positions are
@@ -101,9 +104,17 @@ export class DocumentRenderer {
         if (layer) this.promote(id, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
       }
     }
-    for (const [id, obj] of this.placementObjects)
-      obj.visible = !this.isolatedIds || this.isolatedIds.has(id);
+    for (const [id, obj] of this.placementObjects) obj.visible = this.shouldShow(id);
     for (const pool of this.pools.values()) pool.visible = !this.isolatedIds;
+  }
+
+  /** Isolation filter and the placement's own/group visibility, together. */
+  private shouldShow(placementId: string): boolean {
+    if (this.isolatedIds && !this.isolatedIds.has(placementId)) return false;
+    const info = this.lodInfo.get(placementId);
+    const layer = info && this.doc.getLayer(info.layerId);
+    const p = layer?.placements.get(placementId);
+    return !layer || !p || isPlacementVisible(layer, p);
   }
 
   // --- LOD state ---
@@ -194,6 +205,13 @@ export class DocumentRenderer {
   private syncLayerGroup(layer: Layer, group = this.layerGroups.get(layer.id)): void {
     if (!group) return;
     group.visible = layer.visible;
+    // Block-group hides live on the layer: refresh its near visuals and pool.
+    for (const [id, info] of this.lodInfo) {
+      if (info.layerId !== layer.id) continue;
+      const obj = this.placementObjects.get(id);
+      if (obj) obj.visible = this.shouldShow(id);
+    }
+    this.dirtyPools.add(layer.id);
     group.position.set(...layer.transform.translate);
     const [rx, ry, rz] = layer.transform.rotDeg;
     group.rotation.set(degToRad(rx), degToRad(ry), degToRad(rz), "YXZ");
@@ -369,7 +387,9 @@ export class DocumentRenderer {
       this.lodInfo.delete(id);
       this.farSet.delete(id);
       this.placementObjects.delete(id);
+      this.cellsOf.delete(id);
     }
+    this.cellIndex.delete(layerId);
     this.pools.get(layerId)?.dispose();
     this.pools.delete(layerId);
     this.dirtyPools.delete(layerId);
@@ -412,6 +432,21 @@ export class DocumentRenderer {
     };
   }
 
+  /**
+   * The placement's Object3D, building it now if the LOD pass had parked it
+   * in the far pool — framing and finding must work on big maps too.
+   */
+  ensureNear(placementId: string): Object3D | undefined {
+    const existing = this.placementObjects.get(placementId);
+    if (existing) return existing;
+    const info = this.lodInfo.get(placementId);
+    const layer = info && this.doc.getLayer(info.layerId);
+    if (!info || !layer) return undefined;
+    if (this.farSet.has(placementId))
+      this.promote(placementId, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
+    return this.placementObjects.get(placementId);
+  }
+
   private worldOf(info: LodInfo, xf: LayerXf, out: Vector3): Vector3 {
     out.set(info.lx, info.ly, info.lz).applyQuaternion(xf.q);
     out.x += xf.tx;
@@ -420,11 +455,95 @@ export class DocumentRenderer {
     return out;
   }
 
+  // --- clip caps: shown only on open sides (see render/clipAdjacency) ---
+
+  /** Layer id -> cell key -> ids of the grid placements occupying it. */
+  private readonly cellIndex = new Map<string, Map<string, Set<string>>>();
+  /** Placement id -> the cells it was registered under. */
+  private readonly cellsOf = new Map<string, { layerId: string; keys: string[] }>();
+
+  private clipSubject(layer: Layer, p: Placement): ClipSubject | null {
+    if (p.kind !== "block") return null;
+    const info = this.geometry.blockClips?.(p.block, this.variantOf(p, layer));
+    if (!info) return null;
+    return { pose: { coord: p.coord, dir: p.dir }, info };
+  }
+
+  private registerCells(layer: Layer, p: Placement): void {
+    const s = this.clipSubject(layer, p);
+    if (!s) return;
+    let cells = this.cellIndex.get(layer.id);
+    if (!cells) this.cellIndex.set(layer.id, (cells = new Map()));
+    const keys = occupiedCells(s).map(cellKey);
+    for (const k of keys) {
+      let set = cells.get(k);
+      if (!set) cells.set(k, (set = new Set()));
+      set.add(p.id);
+    }
+    this.cellsOf.set(p.id, { layerId: layer.id, keys });
+  }
+
+  private unregisterCells(placementId: string): { layerId: string; keys: string[] } | undefined {
+    const reg = this.cellsOf.get(placementId);
+    if (!reg) return undefined;
+    this.cellsOf.delete(placementId);
+    const cells = this.cellIndex.get(reg.layerId);
+    for (const k of reg.keys) {
+      const set = cells?.get(k);
+      set?.delete(placementId);
+      if (set && set.size === 0) cells?.delete(k);
+    }
+    return reg;
+  }
+
+  /** Toggle a placed block's clip parts by what its neighbours join. */
+  private applyClips(layer: Layer, p: Placement, obj: Object3D): void {
+    const s = this.clipSubject(layer, p);
+    if (!s || !s.info.clips.length) return;
+    const cells = this.cellIndex.get(layer.id);
+    const hidden = hiddenClipParts(s, (cell) => {
+      const out: ClipSubject[] = [];
+      for (const id of cells?.get(cellKey(cell)) ?? []) {
+        if (id === p.id) continue;
+        const q = layer.placements.get(id);
+        const qs = q && this.clipSubject(layer, q);
+        if (qs) out.push(qs);
+      }
+      return out;
+    });
+    obj.traverse((o) => {
+      if (o.name.startsWith("clip:")) o.visible = !hidden.has(o.name);
+    });
+  }
+
+  /** Re-evaluate the clips of every built block touching these cells. */
+  private refreshClipsAround(layerId: string, keys: string[]): void {
+    const layer = this.doc.getLayer(layerId);
+    const cells = this.cellIndex.get(layerId);
+    if (!layer || !cells) return;
+    const seen = new Set<string>();
+    for (const k of keys) {
+      const [x, y, z] = k.split(",").map(Number);
+      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        for (const id of cells.get(cellKey([x + dx, y + dy, z + dz])) ?? []) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const q = layer.placements.get(id);
+          const obj = this.placementObjects.get(id);
+          if (q && obj) this.applyClips(layer, q, obj);
+        }
+      }
+    }
+  }
+
   private addPlacement(layer: Layer, p: Placement): void {
     this.ensureLayerGroup(layer);
     let ids = this.byBlock.get(p.block);
     if (!ids) this.byBlock.set(p.block, (ids = new Set()));
     ids.add(p.id);
+    this.registerCells(layer, p);
+    const reg = this.cellsOf.get(p.id);
+    if (reg) this.refreshClipsAround(layer.id, reg.keys);
 
     const [lx, ly, lz] = this.localPosition(p);
     const info: LodInfo = { layerId: layer.id, block: p.block, lx, ly, lz };
@@ -452,7 +571,7 @@ export class DocumentRenderer {
     if (!group) return;
     const obj = this.buildObject(p, !this.largeMap, layer);
     if (this.wireframeOn) this.addWireframe(obj);
-    obj.visible = !this.isolatedIds || this.isolatedIds.has(p.id);
+    obj.visible = (!this.isolatedIds || this.isolatedIds.has(p.id)) && isPlacementVisible(layer, p);
     obj.userData.placementId = p.id;
     obj.userData.layerId = layer.id;
     obj.userData.blockName = p.block;
@@ -462,6 +581,7 @@ export class DocumentRenderer {
     }
     group.add(obj);
     this.placementObjects.set(p.id, obj);
+    this.applyClips(layer, p, obj);
   }
 
   private removePlacement(placementId: string): void {
@@ -470,6 +590,8 @@ export class DocumentRenderer {
       obj.removeFromParent();
       this.placementObjects.delete(placementId);
     }
+    const reg = this.unregisterCells(placementId);
+    if (reg) this.refreshClipsAround(reg.layerId, reg.keys);
     if (this.isolatedIds?.delete(placementId) && this.isolatedIds.size === 0) this.setIsolation(null);
     const info = this.lodInfo.get(placementId);
     if (info) {
@@ -519,10 +641,7 @@ export class DocumentRenderer {
     // Painted placements: tint the game's colorable surfaces, resolving the
     // stored slot through the map's color palette.
     const paint = (p.meta as { color?: string } | undefined)?.color;
-    if (paint && paint !== "Default") {
-      const hex = paintHex(this.doc.colorPalette, paint);
-      if (hex) this.geometry.colorize?.(clone, hex);
-    }
+    if (paint && paint !== "Default") this.geometry.colorize?.(clone, this.doc.colorPalette, paint);
 
     if (p.kind === "block") {
       const size = (tpl.userData.sizeCells as [number, number, number]) ??
@@ -546,8 +665,19 @@ export class DocumentRenderer {
       return obj;
     }
 
+    if (p.pivot) {
+      // The anchor is where the game rotates the item; the model's origin
+      // sits `pivot` away from it (e.g. custom items pivot at their centre).
+      const obj = new Group();
+      clone.position.set(...p.pivot);
+      obj.add(clone);
+      obj.position.set(...p.pos);
+      obj.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
+      obj.userData.originOffset = [...p.pivot];
+      return obj;
+    }
     clone.position.set(...p.pos);
-    clone.rotation.set(p.rot[1], p.rot[0], p.rot[2], "YXZ");
+    clone.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
     return clone;
   }
 
@@ -747,7 +877,7 @@ export class DocumentRenderer {
     let i = 0;
     for (const id of farIds) {
       const p = layer.placements.get(id);
-      if (!p) continue;
+      if (!p || !isPlacementVisible(layer, p)) continue;
       const def = this.catalog.get(p.block);
       const size = def?.size ?? [1, 1, 1];
       const [lx, ly, lz] = this.localPosition(p);
@@ -755,7 +885,7 @@ export class DocumentRenderer {
       if (p.kind === "block") {
         q.setFromEuler(e.set(0, -p.dir * (Math.PI / 2), 0));
       } else {
-        q.setFromEuler(e.set(p.rot[1], p.rot[0], p.rot[2], "YXZ"));
+        q.setFromEuler(e.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER));
       }
       scl.set(
         Math.max(size[0] * CELL[0], 4),

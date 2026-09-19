@@ -10,6 +10,12 @@ export interface BlockPlacement {
   readonly coord: GridCoord;
   readonly dir: Dir;
   /**
+   * Per-placement visibility override (editor only, never exported): true
+   * shows it even when its block group is hidden, false hides it; absent
+   * follows the group. See isPlacementVisible.
+   */
+  readonly visible?: boolean;
+  /**
    * Fields from the source file the editor doesn't model yet (flags, variant,
    * waypoint, color, ...). Carried through untouched so editing an imported
    * map never destroys data.
@@ -26,11 +32,20 @@ export interface FreePlacement {
   /** Yaw/pitch/roll in radians. */
   readonly rot: Vec3;
   /**
+   * Where the model's origin sits relative to the anchor point, in
+   * model-local metres (the game's PivotPosition). `pos` is the anchor and
+   * rotation happens around it; the mesh is drawn from `pos + R * pivot`.
+   * Absent when the origin is the anchor (official items).
+   */
+  readonly pivot?: Vec3;
+  /**
    * Whether this is an item (CGameCtnAnchoredObject) or a free block.
    * Recorded at creation so export doesn't have to guess from the catalog —
    * imported maps can contain custom items the catalog has never seen.
    */
   readonly isItem: boolean;
+  /** See BlockPlacement.visible. */
+  readonly visible?: boolean;
   /** See BlockPlacement.meta. */
   readonly meta?: Readonly<Record<string, unknown>>;
 }
@@ -72,13 +87,41 @@ export interface LayerTransform {
  * FreePlacement.pos), so the layer transform moves the line with the track.
  */
 export interface GhostPath {
-  source: "map" | "tmx";
+  /** Identity for toggling: "map", "tmx:<replayId>", "nadeo:<accountId>". */
+  key: string;
+  source: "map" | "tmx" | "nadeo";
+  /** TMX replay id, when that is where it came from. */
+  replayId?: number;
+  /** Nadeo account id of the record holder, for leaderboard ghosts. */
+  accountId?: string;
   /** Who drove it, and for TMX which replay — status/UI text only. */
   label: string;
   timeMs?: number;
   path: Vec3[];
   /** Sample times in ms, parallel to `path`, when the source had them. */
   times?: number[];
+  /**
+   * Race times (ms) at which the run took each checkpoint, in order; the last
+   * is the finish. From the ghost itself, so exact.
+   */
+  checkpoints?: number[];
+  /** Who drove it, when the source said. */
+  driver?: string;
+  /** Editor only: false hides the line without unloading it. */
+  visible?: boolean;
+  /** Editor only: number the checkpoints along the line in the viewport. */
+  showNumbers?: boolean;
+}
+
+/** One hue per line on a layer, by its position in `Layer.ghosts`. */
+export const LINE_HUES = ["#2dd4bf", "#f97316", "#a78bfa", "#facc15", "#f472b6", "#38bdf8", "#a3e635", "#f87171"];
+export const lineHue = (index: number): string => LINE_HUES[((index % LINE_HUES.length) + LINE_HUES.length) % LINE_HUES.length];
+
+/** The toggle identity of a line: where it came from. */
+export function ghostKeyOf(g: { source: "map" | "tmx" | "nadeo"; replayId?: number; accountId?: string }): string {
+  if (g.source === "tmx") return `tmx:${g.replayId ?? 0}`;
+  if (g.source === "nadeo") return `nadeo:${g.accountId ?? ""}`;
+  return "map";
 }
 
 export interface Layer {
@@ -91,11 +134,21 @@ export interface Layer {
   settings: LayerSettings;
   transform: LayerTransform;
   readonly placements: Map<string, Placement>;
-  ghost?: GhostPath;
+  /** Driving lines shown on this layer (any number at once). */
+  ghosts: GhostPath[];
+  /** Block names whose whole group is hidden in the editor (never exported). */
+  hiddenBlocks: string[];
+}
+
+/** Whether a placement draws: its own override, else its block group. */
+export function isPlacementVisible(layer: Pick<Layer, "hiddenBlocks">, p: Placement): boolean {
+  return p.visible ?? !layer.hiddenBlocks.includes(p.block);
 }
 
 export function createLayer(name: string): Layer {
   return {
+    ghosts: [],
+    hiddenBlocks: [],
     id: newId("layer"),
     name,
     visible: true,

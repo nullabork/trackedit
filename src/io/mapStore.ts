@@ -1,8 +1,10 @@
 import type { GhostPath, Layer, Placement } from "@core/layer";
+import { ghostKeyOf } from "@core/layer";
 import { DEFAULT_LOD_DISTANCE, DEFAULT_ROTATION_STEP, createLayer } from "@core/layer";
 import type { MapDocument } from "@core/document";
 import type { GridCoord, Vec3 } from "@core/math";
 import type { Mood } from "@core/mapbase";
+import type { Atmosphere } from "@core/atmosphere";
 
 /**
  * Map persistence, backed by the dev server's file store (maps/*.json via
@@ -30,7 +32,10 @@ export interface StoredLayer {
   transform: { translate: Vec3; rotDeg: Vec3 };
   placements: Placement[];
   /** Ghost driving line (validation ghost / TMX replay), layer-local metres. */
+  ghosts?: GhostPath[];
+  /** Records saved before lines became a list. */
   ghost?: GhostPath;
+  hiddenBlocks?: string[];
 }
 
 export interface StoredMapMeta {
@@ -53,12 +58,18 @@ export interface CameraPose {
 
 export interface StoredMap extends StoredMapMeta {
   globalClampToBase?: boolean;
+  /** The game's map uid (from import), if known. */
+  mapUid?: string | null;
+  /** Whether the map file carried a validation ghost (null/absent = unknown). */
+  validationGhost?: boolean | null;
   /** The map's own custom texture pack URL (from import), if any. */
   modUrl?: string | null;
   /** Slug of the applied mod from the downloaded-mods library. */
   activeMod?: string | null;
   /** Palette painted blocks resolve through (core/palettes.ts). */
   colorPalette?: string;
+  /** Custom sun, fog and sky (core/atmosphere.ts). */
+  atmosphere?: Atmosphere;
   /**
    * Last camera pose, so a map opened on another browser/machine starts
    * where you left it. Editor convenience only — never exported to Gbx.
@@ -88,7 +99,8 @@ export function serializeDoc(doc: MapDocument): StoredMap {
         rotDeg: [...l.transform.rotDeg] as Vec3,
       },
       placements: [...l.placements.values()],
-      ...(l.ghost ? { ghost: l.ghost } : {}),
+      ...(l.ghosts.length ? { ghosts: l.ghosts } : {}),
+      ...(l.hiddenBlocks.length ? { hiddenBlocks: [...l.hiddenBlocks] } : {}),
     };
   });
   return {
@@ -97,9 +109,12 @@ export function serializeDoc(doc: MapDocument): StoredMap {
     updatedAt: Date.now(),
     placementCount: count,
     globalClampToBase: doc.globalClampToBase,
+    mapUid: doc.mapUid,
+    validationGhost: doc.validationGhost,
     modUrl: doc.modUrl,
     activeMod: doc.activeMod,
     colorPalette: doc.colorPalette,
+    atmosphere: doc.atmosphere,
     decorationBase: doc.decorationBase,
     mood: doc.mood,
     size: [...doc.size] as GridCoord,
@@ -122,8 +137,11 @@ export function toLayers(rec: StoredMap): Layer[] {
       translate: [...sl.transform.translate] as Vec3,
       rotDeg: [...sl.transform.rotDeg] as Vec3,
     };
+    layer.hiddenBlocks = [...(sl.hiddenBlocks ?? [])];
     for (const p of sl.placements) layer.placements.set(p.id, p);
-    if (sl.ghost?.path?.length) layer.ghost = sl.ghost;
+    layer.ghosts = (sl.ghosts ?? (sl.ghost?.path?.length ? [sl.ghost] : []))
+      .filter((g) => g.path?.length)
+      .map((g) => ({ ...g, key: g.key ?? ghostKeyOf(g) }));
     return layer;
   });
 }

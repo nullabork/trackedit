@@ -1,6 +1,15 @@
 import type { PanelDef, UiHost } from "@plugins/api";
 import { clear, el } from "./dom";
 
+interface DrawerPage {
+  id: string;
+  label: string;
+  element: HTMLElement;
+  tab: HTMLElement;
+  icon: HTMLElement;
+  enabled: boolean;
+}
+
 /**
  * The fixed page layout (docs/STYLE-GUIDE.md): vertical tool rail on the
  * left, a sliding block drawer next to it, viewport in the middle, dockable
@@ -21,8 +30,9 @@ export class Shell implements UiHost {
   /** Top-right viewport overlay (mood switcher etc.). */
   readonly viewportCorner: HTMLElement;
   private drawer: HTMLElement;
-  private drawerTab: HTMLElement;
-  private drawerTabIcon: HTMLElement;
+  private drawerTabs: HTMLElement;
+  private pages: DrawerPage[] = [];
+  private activePage = "bits";
   private right: HTMLElement;
   private statusText: HTMLElement;
   private hud: HTMLElement;
@@ -43,22 +53,19 @@ export class Shell implements UiHost {
     this.hud.style.display = "none";
     this.viewportCorner = el("div", { class: "viewport-corner" });
 
-    // Permanent tab on the drawer's seam: shows the panel's name and toggles
-    // it open/closed — visible even while the drawer is fully closed (it
-    // lives on the viewport edge, so the sliding drawer can't clip it).
-    this.drawerTabIcon = el("span", { class: "drawer-tab-icon" }, "◂");
-    this.drawerTab = el("button", { class: "drawer-tab", title: "Toggle the track bits panel" },
-      this.drawerTabIcon,
-      el("span", { class: "drawer-tab-label" }, "Track bits"),
-    );
-    this.drawerTab.addEventListener("click", () => this.setDrawerOpen(!this.drawerOpen));
+    // Permanent tabs on the drawer's seam, one per drawer page: each shows
+    // its page's name and opens it (or closes the drawer when it is the
+    // page showing) — visible even while the drawer is fully closed (they
+    // live on the viewport edge, so the sliding drawer can't clip them).
+    this.drawerTabs = el("div", { class: "drawer-tabs" });
+    this.registerDrawerPage({ id: "bits", label: "Track bits", element: el("div", { class: "drawer-page" }) });
 
     root.append(
       this.menubar,
       el("div", { class: "main" },
         this.rail,
         this.drawer,
-        el("div", { class: "viewport-wrap" }, this.canvas, this.hud, this.viewportCorner, this.drawerTab),
+        el("div", { class: "viewport-wrap" }, this.canvas, this.hud, this.viewportCorner, this.drawerTabs),
         this.right,
       ),
       el("div", { class: "statusbar" }, this.statusText, this.statusInfo, this.statusActions),
@@ -70,20 +77,104 @@ export class Shell implements UiHost {
     } catch { /* storage unavailable */ }
     this.drawerWidth = Math.min(Math.max(this.drawerWidth, 220), 520);
     this.buildDrawerGrip();
+    this.buildDockGrip();
     this.applyDrawer();
   }
 
-  /** Slide the block drawer in/out (place tool opens it; its tab toggles). */
+  /** Drag the right dock's left edge to resize it; width persists per browser. */
+  private buildDockGrip(): void {
+    const KEY = "trackedit.dockWidth";
+    const apply = (w: number) => (this.right.style.width = `${Math.min(Math.max(w, 220), 560)}px`);
+    try {
+      const saved = Number(localStorage.getItem(KEY));
+      if (Number.isFinite(saved) && saved > 0) apply(saved);
+    } catch { /* storage unavailable */ }
+    const grip = el("div", { class: "dock-grip" });
+    let dragging = false;
+    grip.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    grip.addEventListener("pointermove", (e) => {
+      if (dragging) apply(this.right.getBoundingClientRect().right - e.clientX);
+    });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      try {
+        localStorage.setItem(KEY, String(parseFloat(this.right.style.width)));
+      } catch { /* storage unavailable */ }
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    this.right.append(grip);
+  }
+
+  /** Slide the drawer in/out on whatever page is showing. */
   setDrawerOpen(open: boolean): void {
     this.drawerOpen = open;
     this.applyDrawer();
   }
 
+  /** Add a page to the drawer with its own seam tab. */
+  registerDrawerPage(def: { id: string; label: string; element: HTMLElement }): void {
+    const icon = el("span", { class: "drawer-tab-icon" }, "▸");
+    const tab = el("button", { class: "drawer-tab", title: `Toggle the ${def.label} panel` },
+      icon, el("span", { class: "drawer-tab-label" }, def.label));
+    const page: DrawerPage = { ...def, tab, icon, enabled: true };
+    tab.addEventListener("click", () => {
+      if (!page.enabled) return;
+      if (this.drawerOpen && this.activePage === def.id) this.setDrawerOpen(false);
+      else this.openDrawerPage(def.id);
+    });
+    def.element.classList.add("drawer-page");
+    this.pages.push(page);
+    this.drawerTabs.append(tab);
+    this.drawer.append(def.element);
+    this.applyDrawer();
+  }
+
+  /** Show a page and make sure the drawer is open. */
+  openDrawerPage(id: string): void {
+    if (this.pages.some((p) => p.id === id)) this.activePage = id;
+    this.drawerOpen = true;
+    this.applyDrawer();
+  }
+
+  /** Grey a page's tab out (e.g. TMX info when the map is not from TMX). */
+  setDrawerPageEnabled(id: string, enabled: boolean): void {
+    const page = this.pages.find((p) => p.id === id);
+    if (!page || page.enabled === enabled) return;
+    page.enabled = enabled;
+    if (!enabled && this.drawerOpen && this.activePage === id) this.drawerOpen = false;
+    this.applyDrawer();
+  }
+
+  isDrawerPageOpen(id: string): boolean {
+    return this.drawerOpen && this.activePage === id;
+  }
+
+  private readonly drawerListeners: Array<() => void> = [];
+
+  /** Called whenever the drawer opens, closes or switches page. */
+  onDrawerChanged(cb: () => void): void {
+    this.drawerListeners.push(cb);
+  }
+
   private applyDrawer(): void {
+    for (const cb of this.drawerListeners) cb();
     this.drawer.classList.toggle("open", this.drawerOpen);
     this.drawer.style.width = this.drawerOpen ? `${this.drawerWidth}px` : "0px";
     this.drawer.style.setProperty("--drawer-w", `${this.drawerWidth}px`);
-    this.drawerTabIcon.textContent = this.drawerOpen ? "◂" : "▸";
+    for (const p of this.pages) {
+      const showing = this.drawerOpen && p.id === this.activePage;
+      p.element.hidden = p.id !== this.activePage;
+      p.tab.classList.toggle("active", showing);
+      p.tab.classList.toggle("disabled", !p.enabled);
+      p.tab.setAttribute("aria-disabled", String(!p.enabled));
+      p.icon.textContent = showing ? "◂" : "▸";
+    }
   }
 
   /** Drag the drawer's right edge to resize; width persists per browser. */
@@ -117,9 +208,9 @@ export class Shell implements UiHost {
 
   registerPanel(panel: PanelDef): void {
     this.panels.push(panel);
-    const host = panel.side === "left" ? this.drawer : this.right;
+    const host = panel.side === "left" ? this.pages[0].element : this.right;
     const wrap = el("section", { class: "panel", "data-panel": panel.id },
-      panel.title ? el("header", {}, panel.title) : null,
+      panel.title ? el("header", {}, el("span", { class: "panel-title" }, panel.title), panel.actions ?? null) : null,
       panel.element,
     );
     wrap.style.order = String(panel.order ?? 50);

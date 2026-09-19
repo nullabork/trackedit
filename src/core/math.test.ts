@@ -3,7 +3,10 @@ import {
   clampCoord,
   degToRad,
   eulerYXZFromQuat,
+  gameRotFromQuat,
   quatFromEulerYXZ,
+  quatFromGameRot,
+  quatFromAxisAngle,
   quatMul,
   quatRotate,
   QUAT_IDENTITY,
@@ -61,5 +64,32 @@ describe("quaternions (three.js YXZ conventions)", () => {
     const both = quatMul(yaw, pitch);
     const v: Vec3 = [0, 0, 1];
     close(quatRotate(both, v), quatRotate(yaw, quatRotate(pitch, v)));
+  });
+});
+
+describe("game rotation order (yaw, then roll, then pitch)", () => {
+  const close = (a: readonly number[], b: readonly number[]) =>
+    a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 6));
+
+  it("composes yaw * roll * pitch", () => {
+    const rot = [0.7, -0.4, 0.3] as const;
+    const expected = quatMul(quatMul(
+      quatFromAxisAngle([0, 1, 0], rot[0]), quatFromAxisAngle([0, 0, 1], rot[2])), quatFromAxisAngle([1, 0, 0], rot[1]));
+    close(quatFromGameRot(rot), expected);
+  });
+
+  it("is not the yaw-pitch-roll order the editor uses for layers", () => {
+    const rot = [0.7, -0.4, 0.3] as const;
+    const yxz = quatFromEulerYXZ([rot[1], rot[0], rot[2]]);
+    const game = quatFromGameRot(rot);
+    expect(Math.abs(yxz[0] - game[0]) + Math.abs(yxz[1] - game[1]) + Math.abs(yxz[2] - game[2])).toBeGreaterThan(0.01);
+  });
+
+  it("round-trips yaw/pitch/roll through a quaternion", () => {
+    for (const rot of [[1.5707964, -1.3089969, -0.5235988], [-0.78539777, -0.7853982, -0.5235988], [1.5707964, 1.5707964, -2.8797934], [0, 0, 0]] as const) {
+      const back = gameRotFromQuat(quatFromGameRot(rot));
+      // Compare as rotations (angles may differ by 2π / gimbal aliasing).
+      close(quatRotate(quatFromGameRot(back), [1, 2, 3]), quatRotate(quatFromGameRot(rot), [1, 2, 3]));
+    }
   });
 });

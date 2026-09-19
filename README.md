@@ -93,8 +93,10 @@ in the static production build. Plugin source: [`tools/TrackeditLive`](tools/Tra
   on first import using the .NET 8 SDK (or a newer SDK with the .NET 8 runtime)
   and runs its managed DLL on Linux, Windows, or macOS. First build needs
   NuGet access unless packages are already cached. No local configuration
-  is needed. Existing `TRACKEDIT_GBXDUMP` / `.trackedit.local.json` `gbxdump`
-  settings override the bundled converter with an external executable.
+  is needed. `TRACKEDIT_GBXDUMP` / `.trackedit.local.json` `gbxdump` name an
+  external converter used only when the bundled one cannot build or run: the
+  bundled `map` command defines the JSON dialect (item pivots, scale, …), and
+  an older external dump would silently drop those fields.
 - To convert a local map manually:
   `dotnet run --project tools/meshdump -c Release -- map input.Map.Gbx output.json`.
   Run converter contract checks with
@@ -266,6 +268,21 @@ The mood skyboxes in `public/sky/` are CC0 sky photographs from
 [Poly Haven](https://polyhaven.com/), baked to 2k equirects by
 `tools/fetch_skies.py`.
 
+## Layers panel block tree
+
+Each layer row has an expander: open it for the layer's unique block names
+(with counts), open a block for every placement of it (grid coordinate or
+metres, direction / item). Eyes on the block group hide or show all of its
+placements; eyes on a placement override that one either way, so a hidden
+group can have a few pieces switched back on (the count reads `shown/total`).
+Click a placement to select it (Shift adds to the selection; the same on a
+group adds all of its placements), double-click to frame it in the viewport.
+The two buttons in the panel header find the block selected in the
+viewport: one expands to and selects its block group, the other to the
+block itself.
+Visibility is editor-only (`hiddenBlocks` on the layer, `visible` on a
+placement), persisted with the map and never exported.
+
 ## Ghost paths
 
 Opening a map from TMX draws the driving line of a ghost under the map's
@@ -274,10 +291,20 @@ like every placement. The map's own validation ghost is used when the
 author left one in (`ChallengeParameters.RaceValidateGhost`); otherwise the
 dev server lists the map's TMX replays and downloads the one whose time is
 closest to the author medal (`/recordgbx/<ReplayId>`), the most
-representative clean line. **File ▸ Ghost path from TMX** fetches one for
-the active layer of an already-open TMX map. The path is stored on the
-layer (`ghost` in the map record) so it survives reloads. The tube's
-thickness is a render setting (Render settings ▸ Ghost line thickness).
+representative clean line. The **TM Exchange** drawer tab (beside Track
+bits; greyed out unless the map came from TMX) shows the map's TMX card —
+name, TMX link, a *Play in game* link (`trackmania://openplanet/play/mx/<id>`,
+handled by Openplanet's Play plugin), uploader/authors with profile links,
+author/gold/silver/bronze times, finishes on Nadeo's leaderboard, awards,
+replays, downloads, upload date, ghost blocks, tags — and every driving
+line available: the map's own validation ghost, the TMX replays (driver,
+time, date) and the Nadeo world top 10. Click a row to show its line on the
+active layer and again to hide it; any number can show at once, each in
+its own hue (bright at the start, darker toward the finish), and **Hide all
+lines** clears them. Lines are stored on the layer (`ghosts` in the map
+record) so they survive reloads. The tube's thickness is a render setting
+(Render settings ▸ Ghost line thickness). There is no URL to open a map in
+the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from
 tracko's ghostdump: TM2020 ghosts keep their samples in `CPlugEntRecordData`
@@ -370,8 +397,224 @@ Regenerate with `python tools/build_catalog.py <parsed-maps-dir>`.
   (DDS → PNG/KTX2), materials
 - Vertex/edge snap modes, align-to-plane across selections
 - Multi-select, grouping, gizmo translate/rotate
-- Custom item/block support (embedded assets)
 - Instanced rendering for very large maps
+
+### Clips: caps that only show on open sides
+
+Every unit face of a block can carry *clips*: the platform edge trims, the
+"turbines" on the ends of special platforms (boost, cruise control, reset…),
+deco walls, base undersides. The game shows a clip only while that side is
+open; when the neighbouring block's facing side carries a clip of the same
+clip group, both vanish and the surfaces tile. Maps store nothing about
+this, so the editor derives it from neighbours:
+
+- meshdump writes each clip's geometry as its own OBJ group
+  (`clip:<id>:<face>:<x,y,z>`) and lists every unit's clips per variant in
+  `index.json` (`units`, `clips` with `group` / `sym` from the game's
+  ClipGroupId / SymmetricalClipGroupId).
+- `render/clipAdjacency.ts` turns a placed block's faces by its `dir`, finds
+  the block in the adjacent cell (per unit, so multi-cell blocks work),
+  and hides the parts whose clips join. The renderer re-evaluates a block
+  and its neighbours whenever a grid placement is added or removed.
+- Free blocks and items keep all their caps, as in the game.
+
+Extract with `meshdump blocks` after pulling this change: older libraries
+have no clip parts and simply keep showing every cap.
+
+### Saving to a real map file
+
+**File ▸ Save to Trackmania…** writes the track as a `.Map.Gbx` into the
+game's `Maps/Trackedit` folder (found under Documents or OneDrive Documents;
+`trackmaniaDir` in `.trackedit.local.json` overrides). `meshdump build
+<template> <placements.json> <out>` does the writing from a **template** map:
+decoration, embedded items, palette, thumbnail and metadata come from it.
+For a track opened from TMX the template is the original file (cached under
+`maps/gbx` at import); other tracks need `templateMap` in the local config —
+any map with the base you want, e.g. an empty one saved from the game editor.
+
+- Placements that still match a block or item of the template (same name
+  and pose) reuse the original object, so skins, waypoints, macroblock links
+  and item snapping survive untouched. Only new or moved placements are
+  constructed (items are modelled on one of the template's items, so a
+  template without any item cannot take new ones).
+- The map gets its own uid, derived from the editor document id: it never
+  collides with the original's records, and re-saving overwrites the same map.
+- **Shadows are not computed.** The lightmap is the bulk of a map file (1.4
+  of Islander's 1.6 MB) and is baked by the game's lightmapper for exact
+  geometry; the template's is dropped because it no longer matches. The map
+  loads and drives without it; compute shadows in the game editor, or run
+  the [Batch Compute Shadows](https://openplanet.dev/plugin/batchcomputeshadows)
+  Openplanet plugin over `Maps/Trackedit`, which drives the editor for you.
+
+`meshdump lightmapinfo <map.Gbx>` prints what a map stores for its shadows:
+three DXT1 lightmap frames (H-basis intensity + direction), the atlas mapping
+of every object into them, the sample counts and a cache uid. Baking that
+ourselves would mean reproducing the game's lightmap UVs, atlas allocator,
+GI sampler and encoding with no way to check the result outside the game, so
+the editor leaves it to the game.
+
+### Driving lines in the layer list, and the checkpoints they take
+
+Every loaded line (validation ghost, TMX replay, Nadeo record) is a row under
+its layer in the Layers panel, in the line's own hue, with an eye (hide
+without unloading) and an ✕ (unload). Clicking a line turns the LAYER
+settings tab into **LINE**: "Show checkpoint numbers beside the line" puts a
+tag at the start (S), every checkpoint (1, 2, …) and the finish (F), drawn
+over the map geometry at a constant screen size so they can be found from
+anywhere. Expanding a line lists those waypoints in driving order with the
+time each was taken; double-click one to fly there (it also selects the
+block). The right dock is resizable (drag its left edge).
+
+How the list is made: a ghost records WHEN it took each checkpoint
+(`meshdump ghost` emits `checkpoints`, the finish last), so the count and the
+order are the game's own. Each time is a point on the line, and the waypoint
+nearest that point is the one taken — trigger zones are bigger than the
+models (gates, custom platform checkpoints), so "nearest", not "inside";
+linked checkpoints count once and the one actually driven is listed. Lines
+saved before those times were kept are fetched again, once, when their
+waypoints are first wanted; without times the fallback is geometry (segment
+against oriented box, once per lap, respawns ignored). What IS a waypoint
+comes from the game's definitions, not names: `meshdump waypoints <GameData>
+<meshes>` writes `waypoints.json` (run by setup; "DecoPlatformDirtSlope2Start"
+is a slope). The same table tags checkpoints, starts and finishes placed in
+the editor when saving to the game — without its waypoint property a
+checkpoint is plain scenery there.
+
+### Sky and light: the sun tool and the "Sky & light" page
+
+The **sun tool** (sun icon in the tool rail) shows the sky as a dome around
+the map — height rings every 15°, compass letters, the sun's path for the
+day in orange — with the sun as a handle you drag anywhere above the
+horizon; the moon sits opposite. The **Sky & light** drawer page (third tab
+on the drawer's seam) holds the rest:
+
+- **Sun**: heading and height as numbers, sun colour and brightness, moon
+  colour and brightness, reset to the mood's own sun.
+- **Fog and tint**: colour, strength, how much of it washes over the sky,
+  distance, cloud opacity.
+- **Sky image**: any PNG/JPEG/WebP. The game stretches a sky image over
+  HALF the sky (left edge at the sun, right edge opposite it) and mirrors it
+  for the other half, and it draws its own sun disc on top.
+
+While the tool or the page is in use the viewport previews all of it (light
+direction and colour with shadows, fog, the sky image turned to follow the
+sun) whatever the render settings say. It is stored with the track
+(`atmosphere` in the map record, `src/core/atmosphere.ts`).
+
+How it reaches the game (**Save to Trackmania**): the game takes two numbers
+for the sun, `DayTime01` and `Latitude` in a mood's `Mood.MoodSetting.xml`.
+Measured in game, the sun runs along a great circle that rises due East
+(-X) at 0.5 and sets due West at 0.75, tilted from the zenith by the
+latitude, so every direction above the horizon is one pair
+(`src/core/sun.ts`: `sunDirection`, `solveSun`). Saving writes
+
+- a **mod zip** into the game's `Skins/Stadium/Mod` folder and points the
+  map at it: `meshdump moodmod` patches the game's own four mood settings
+  files (sun position; colours rescaled to each mood's own brightness, so
+  Night stays sunless), and `tools/sky_mod.py --append` adds the sky image
+  (BC6H, rows moved to where the game really shows them; needs Python with
+  numpy and Pillow). The zip is named after a hash of its content. A map has
+  room for ONE mod: a map that already uses a texture pack keeps it and the
+  save says the sun was skipped.
+- the fog as a **MediaTracker clip** on the start block
+  (`meshdump atmosphere fog=…`), cloned from two TMX maps fetched once into
+  `maps/gbx`. The map's own in-game clips are kept.
+- the editor's **mood** (the decoration's Day/Sunset/Night/Sunrise suffix).
+
+**Sharing the look.** The mod zip is a local file, so right after a save
+only this machine sees the sun and sky. A save that wrote a new zip opens a
+three-step dialog: get the file (browser download, or shown in Explorer /
+the file manager), upload it anywhere that serves the file itself, paste the
+link. The dev server downloads the link and compares it byte for byte with
+the zip before it writes the link into the map — a share page or a stale
+upload is caught there ("Use it anyway" overrides). The zips are
+reproducible, so the same look keeps the same name and link across saves;
+change the sun or sky image and the next save asks again. The link is kept
+with the track and shown on the Sky & light page.
+
+Limits: static geometry only takes the new light
+after **computing shadows in the game**; the Night mood's own light (where
+its moon is) is not understood yet. Research log:
+`docs/NOTES-lightmap-baking.md`.
+
+### Block paint: palettes and colour tables
+
+A painted block stores only a slot (White/Green/Blue/Red/Black). The colour
+it shows is two lookups away, both taken from the game data now:
+
+- the **map's palette** (Classic, Stunt, Red, Orange, Yellow, Lime, Green,
+  Cyan, Blue, Purple, Pink, White, Black), stored in map chunk 0x0304306C as
+  an index — read on import (`colorPalette` in the dump). Maps saved before
+  palettes existed have no chunk and use Classic;
+- each **material's colour target table** (Default, Sport, Fun, TrackWall,
+  Canopy, …), named in its `.Material.Gbx`; `meshdump colortables` exports
+  the tables to `public/meshes/colortables.json` and tags `materials.json`
+  with `colorTable`. Paint resolves as `table[palette][slot]` per material,
+  so an all-orange RPG map (palette Orange, blocks painted Red/Blue/Green)
+  renders orange, not red/blue/green.
+
+Run `meshdump colortables <GameDataRoot> public/meshes` once after pulling
+this; the built-in Default table covers paint until the file exists.
+
+### Custom items and blocks embedded in a map
+
+Maps can embed the custom blocks/items they use (a zip inside the
+`.Map.Gbx`). On TMX import the bridge runs `meshdump embedded`, which exports
+each item's mesh into `public/meshes/embedded/` and keys `index.json` by the
+names the map uses. What makes them look and sit right:
+
+- **Materials.** Embedded meshes reference game materials by path (Mesh
+  Modeler crystals: `Stadium\Media\Modifier\PlatformIce\PlatformTech`;
+  fbx-style items: a user-material instance whose `Link` holds the path).
+  Both are rewritten to the library's short names (`TrackBorders`,
+  `PlatformIce.PlatformTech`), the same keys the official blocks use, so
+  custom pieces pick up the same textures.
+- **Rotation order.** Yaw/pitch/roll is applied yaw, then roll, then pitch
+  (`GAME_EULER_ORDER` in `core/math.ts`), verified against record ghosts
+  driving over tilted free blocks. Everything that turns a placement goes
+  through that one constant.
+- **Pivots.** Items rotate about the game's anchor point, which for custom
+  items is usually their centre, not the model origin. The dump carries the
+  anchored object's `PivotPosition` as `pivotPos`; the importer keeps it on
+  the placement (`pivot`) and the renderer draws the model at
+  `pos + R * pivot`. Without it, every flipped or turned custom item lands a
+  cell away and below where it belongs. Export writes `pivotPos` back.
+- The bundled converter is always used first for TMX import; an external
+  `gbxdump` override only steps in when the bundled one cannot run, because
+  an older dump silently drops `pivotPos`.
+
+### Records from Nadeo (the in-game leaderboard)
+
+The TM Exchange panel lists the map's world top 10 from Nadeo's services —
+the list the game shows in single player — and its finish count (how many
+accounts hold a record, found by binary-searching the leaderboard offset),
+and loads a record's ghost as a line the same way. Nadeo requires an account: create a
+free dedicated server account at
+<https://www.trackmania.com/player/dedicated-servers> and put its login in
+the gitignored `.trackedit.local.json`:
+
+```json
+{ "nadeo": { "login": "<server login>", "password": "<server password>" } }
+```
+
+Player names come from the record files themselves (the bridge reads just
+the header of each, `meshdump ghostname`). An OAuth app from
+<https://api.trackmania.com/manager> (`"oauth": { "clientId": "…",
+"clientSecret": "…" }` under `nadeo`) is an optional faster source. Records are looked up by
+the game's map uid, which TMX import stores on the document (older stored
+maps resolve it through TMX when the dialog opens).
+
+Embedded items GBX.NET cannot parse get two rescue attempts: Mesh Modeler
+items whose crystal carries chunks or modifier layers the reader stumbles on
+are repaired by dropping the lightmap chunk and, if needed, trailing
+modifier layers until the file parses (`tools/meshdump/CrystalRepair.cs`;
+the export only uses the geometry layer), and fbx-style items are scanned
+for inline Solid2 meshes like unreadable official prefabs. The index marks
+both with `salvaged`.
+
+`meshdump embedzip <map.Gbx> <dir>` unpacks a map's embedded assets for
+inspection; `meshdump iteminfo <file.Item.Gbx>` prints an item's model,
+mesh and material bindings.
 
 ### Inspecting rendering problems
 

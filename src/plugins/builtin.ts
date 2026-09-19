@@ -3,6 +3,7 @@ import { PlaceTool } from "@tools/PlaceTool";
 import { SelectTool } from "@tools/SelectTool";
 import { EraseTool } from "@tools/EraseTool";
 import { PaintTool } from "@tools/PaintTool";
+import { SunTool } from "@tools/SunTool";
 import { createPalettePanel } from "@ui/PalettePanel";
 import { createLayersPanel } from "@ui/LayersPanel";
 
@@ -19,6 +20,7 @@ export const toolsPlugin: EditorPlugin = {
     ctx.tools.register(new SelectTool(ctx));
     ctx.tools.register(new EraseTool(ctx));
     ctx.tools.register(new PaintTool(ctx));
+    ctx.tools.register(new SunTool(ctx));
     // Placing and selecting are one or the other: nothing is armed to place
     // until a palette row is clicked (which switches to place), so start in
     // select.
@@ -49,7 +51,7 @@ export const layersPlugin: EditorPlugin = {
       title: "Layers",
       side: "right",
       order: 10,
-      element: createLayersPanel(ctx),
+      ...createLayersPanel(ctx),
     });
   },
 };
