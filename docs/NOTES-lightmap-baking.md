@@ -471,3 +471,43 @@ start), in the predicted cell:
 | 3 | 90° right, 75° up | 0.6250 / 15 | seam 0, top of the image | mirrored 88/87 |
 | 4 | dead ahead, 20° up | 0.5278 / 0 | seam 64, upper-middle | the seam itself (80 and mirrored 80) |
 | 5 | overhead (89°) | 0.6250 / 1 | above the image's fitted top: shows what the dome does at the zenith | mirrored 88/87 |
+
+### Result of the sixth pass (2026-09-19): the predictions held
+
+| id | target | ahead of the car (read) | sun (read) | verdict |
+| --- | --- | --- | --- | --- |
+| 1 | 30° right, 30° up | mirrored 83/82 → 34° | seam 48, middle of the row | heading ✓, row ✓ (higher in it than the linear fit said) |
+| 2 | 120° left, 60° up | normal 90/91 → 124°, sun on the left | seam 16, a bit below the middle | ✓ |
+| 3 | 90° right, 75° up | mirrored 88/87 → 90° | top ring (row 0), half way between the pole and the ring's edge, above normal 17 | ✓ |
+| 4 | dead ahead, 20° up | the seam (64 / mirrored 64, 80 / mirrored 80) | seam 64, middle of the row, straight above the car's nose | ✓ |
+| 5 | overhead (89°) | — | a few degrees from the pole where all columns meet | ✓ |
+
+1. **The model is good enough to build the sun tool on.** Five targets
+   chosen in advance, five hits: heading within half a column every time,
+   the right row every time, left/right as predicted, and latitude ≈ 0 at
+   noon really puts the sun overhead. It now lives in `src/core/sun.ts`
+   (`sunDirection`, `solveSun`, `dayTime01FromMapHours`) with tests, and in
+   `tools/sky_mod.py --sun`.
+2. **The top of `SkyColor.dds` is the zenith.** Looking straight up, the
+   columns pinch into a pole, so the linear fit from the fifth pass (top row
+   reached at 76°) was wrong at the high end. Image latitude against the
+   model's height, all readings so far:
+
+   | real height | 0° | 5° | 20° | 25° | 30° | 45° | 60° | 75° | 90° |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | image latitude | −7.5 | −1 | 22 | 22..26 | 37 | 50 | 66 | 83 | 90 |
+
+   Steep near the horizon (the horizon is half a row BELOW the image's
+   middle line, 20° up is already 22°), then roughly "real + 6°" up to the
+   pole. Readings are good to a third of a row (±5°). Anything painted into
+   a sky (horizon glow, a sun halo) should go through this table, not a plain
+   equirectangular mapping.
+3. **The sun disc wanders a few degrees around the seam** (both sides, up to
+   about 5° of arc, at every height). The dome follows the sun's heading
+   only approximately, or the disc and the dome use slightly different
+   inputs. Too small to matter for lighting; it means a sun painted into the
+   image would not sit exactly under the game's disc.
+4. Still open: what night does (the 06:00 glow), and a height check that
+   does not go through the sky image — a shadow cast by a block of known
+   height, in a screenshot or a computed lightmap, would give the sun's
+   height to a degree.
