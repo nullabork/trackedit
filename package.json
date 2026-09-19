@@ -12,7 +12,8 @@
     "typecheck:bridge": "tsc --noEmit --strict --module esnext --moduleResolution bundler --target es2022 --skipLibCheck tools/liveBridge.ts",
     "test": "vitest run",
     "roundtrip": "tsx tools/roundtrip_check.ts",
-    "variantcheck": "tsx tools/variant_check.ts"
+    "variantcheck": "tsx tools/variant_check.ts",
+    "capcheck": "python tools/cap_check.py"
   },
   "dependencies": {
     "three": "^0.168.0"

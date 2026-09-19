@@ -1289,6 +1289,9 @@ sealed class Dumper(string root, string outDir, string? filter)
     private readonly List<TerrainModifier> activeModifiers = [];
     private readonly Dictionary<string, TerrainModifier?> modifierCache = [];
     private Dictionary<string, Dictionary<string, List<string>>>? skinSlots;
+    /// <summary>Filled when MESHDUMP_CAP_REPORT names a file: one record per top/bottom cap placed.</summary>
+    private static readonly JsonArray? CapReport = Environment.GetEnvironmentVariable("MESHDUMP_CAP_REPORT") is null ? null : new JsonArray();
+
     /// <summary>Block (or item) currently being exported, for diagnostics.</summary>
     private string currentBlock = "";
     private int ok, failed, skipped;
@@ -1414,6 +1417,8 @@ sealed class Dumper(string root, string outDir, string? filter)
             }
         }
         Console.WriteLine($"clip-aliased {aliased} geometry-less blocks (deco walls etc.)");
+        if (CapReport is not null)
+            File.WriteAllText(Environment.GetEnvironmentVariable("MESHDUMP_CAP_REPORT")!, CapReport.ToJsonString());
 
         Finish(index);
         return 0;
@@ -2154,16 +2159,41 @@ sealed class Dumper(string root, string outDir, string? filter)
                         // sideways-tilted platform reuses the straight
                         // slope's underside, which must turn 90° to follow
                         // the tilt (unturned it pokes up through the deck).
+                        // The game's own word on a cap's direction is its clip's
+                        // TopBottomMultiDir — SameDir for nearly all of them: the cap faces the
+                        // way its block does, i.e. NO turn. The shape fit below may only overrule
+                        // that when it is overwhelming. Measured over the deco-wall family with
+                        // tools/cap_check.py: where a turn was right the fit improved by ~95 %,
+                        // where it was wrong (quarter-round walls got their quarter-disc caps
+                        // turned away from the wall) by ~10 %, on near-equal errors.
+                        const float Decisive = 0.75f;
                         var best = q;
-                        var bestErr = Err(q) - 0.5f; // keep the default unless clearly better
+                        var unturned = Err(q);
+                        var bestErr = unturned * (1f - Decisive);
+                        var bestTurn = 0;
+                        var errs = new float[4];
+                        errs[0] = unturned;
                         foreach (var deg in new[] { 90f, 180f, 270f })
                         {
                             var cand = Quaternion.Concatenate(
                                 Quaternion.CreateFromAxisAngle(Vector3.UnitY, deg * MathF.PI / 180f), q);
                             var e = Err(cand);
-                            if (e < bestErr) { bestErr = e; best = cand; }
+                            errs[(int)(deg / 90f)] = e;
+                            if (e < bestErr) { bestErr = e; best = cand; bestTurn = (int)(deg / 90f); }
                         }
                         q = best;
+                        // Developer report (tools/cap_check.ts): the quarter turn the shape fit chose for
+                        // this cap, next to what the game data says about its direction.
+                        CapReport?.Add(new JsonObject
+                        {
+                            ["block"] = currentBlock, ["ground"] = preferGround, ["variant"] = variant.Name,
+                            ["unit"] = $"{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}",
+                            ["unitDir"] = unit.Dir.ToString(), ["unitMultiDir"] = unit.MultiDir.ToString(),
+                            ["face"] = face, ["clip"] = clip.Ident.Id,
+                            ["multiDir"] = (clip as CGameCtnBlockInfoClip)?.TopBottomMultiDir.ToString(),
+                            ["hasBody"] = hasBody, ["tall"] = tall, ["turn"] = bestTurn,
+                            ["errs"] = new JsonArray(errs.Select(e => (JsonNode)MathF.Round(e, 2)).ToArray()),
+                        });
                     }
                     var t = off + extraEff + center - Vector3.Transform(center, q);
 

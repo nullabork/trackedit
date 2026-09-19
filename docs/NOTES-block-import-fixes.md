@@ -245,6 +245,42 @@ ends: every field `meshdump map` writes must be present, and every field of
 every record — unknown ones included — must come back out of the editor's
 import/export.
 
+## 5e. Caps turned away from their block (DecoWallCurve1Grass, RHEVARA)
+
+Report: "the black section is extending past the curve". A quarter-round
+deco wall whose quarter-disc top and bottom caps were turned 180°, filling
+the corner the wall curves away from. Not a variant problem.
+
+The extractor chose each cap's quarter turn by fitting its shape against the
+block ("the attachment stores no direction"). For this block the four
+candidates scored 25.0 / 25.5 / 23.7 / 26.7 — a coin toss, lost. But the game
+does say: every cap clip carries `TopBottomMultiDir`, and of the 942 cap
+clips nearly all are `SameDir` (the rest `SymmetricalDirs` / `AllDir`): the
+cap faces the way its block does — NO turn.
+
+**The check came first** (`tools/cap_check.py`, `npm run capcheck`): purely
+geometric, so it judges the result whatever rule produced it — seen from
+above, a cap has to lie inside the outline (convex hull) of the rest of its
+block. It skips what it cannot judge (blocks whose other geometry does not
+outline them, and ground "...Ground" undersides, which are terrain skirts
+that spread on purpose). On the deco-wall family (655 blocks, 1,309 meshes):
+
+| rule | blocks flagged |
+| --- | --- |
+| shape fit (before) | 111 |
+| never turn (the data, taken literally) | 94 — fixes 26, but breaks 9 transition pieces whose turn WAS right |
+| no turn unless the fit is decisive, ≥ 75 % better (now) | **86** — fixes the 26, newly flags 1 (`DecoWallWaterDiag`) |
+
+What separated right turns from wrong ones: where turning was right the fit
+improved by ~95 %; where it was wrong, by ~10 % on near-equal errors. The
+extractor can write that evidence per cap (`MESHDUMP_CAP_REPORT=<file>`:
+block, unit, clip, its `TopBottomMultiDir`, the chosen turn, all four
+errors).
+
+Open: 85 deco-wall blocks (slopes, loop starts, tilt transitions) are flagged
+under every rule — either real, or sloped multi-unit shapes the top-view
+outline test is too blunt for. Go through them before trusting the count.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
@@ -259,3 +295,6 @@ import/export.
   path cannot run, fail loudly or verify what the fallback produced.
 - Measure placement, do not eyeball it: things that must connect give a
   number (ends that meet), and a number can rank every convention at once.
+- Every fix of a CLASS of bug ships with a check that scans for the rest of
+  the class (`npm run roundtrip`, `variantcheck`, `capcheck`): the report
+  that found one block should find the other hundred.
