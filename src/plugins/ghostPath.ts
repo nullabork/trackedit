@@ -62,9 +62,25 @@ export const ghostPathPlugin: EditorPlugin = {
       tags.length = 0;
     };
 
+    /** The checkpoint tags alone: cheap, and the only thing waypoint changes touch (tubes are not). */
+    const rebuildTags = () => {
+      clearTags();
+      for (const layer of ctx.document.layers)
+        layer.ghosts.forEach((ghost, gi) => {
+          if (!ghost.showNumbers || ghost.path.length < 2 || ghost.visible === false || !layer.visible) return;
+          for (const pass of passesOf(ctx, layer, ghost)) {
+            // Passes are world metres: the tags live in the scene, not the layer group.
+            const tag = numberTag(pass.number === null ? pass.label[0] : String(pass.number), lineHue(gi));
+            tag.position.set(pass.pos[0], pass.pos[1] + NUMBER_LIFT, pass.pos[2]);
+            ctx.view.scene.add(tag);
+            tags.push(tag);
+          }
+        });
+    };
+
     const rebuild = () => {
       for (const id of [...built.keys()]) clearLayer(id);
-      clearTags();
+      rebuildTags();
       const radius = ctx.view.getRenderPrefs().ghostRadius || DEFAULT_RADIUS;
       for (const layer of ctx.document.layers) {
         const group = ctx.renderer.getLayerGroup(layer.id);
@@ -74,14 +90,6 @@ export const ghostPathPlugin: EditorPlugin = {
           if (ghost.path.length < 2 || ghost.visible === false || !layer.visible) return;
           const total = ghost.path.length;
           const color = new Color(lineHue(gi));
-          if (ghost.showNumbers)
-            for (const pass of passesOf(ctx, layer, ghost)) {
-              // Passes are world metres: the tags live in the scene, not the layer group.
-              const tag = numberTag(pass.number === null ? pass.label[0] : String(pass.number), lineHue(gi));
-              tag.position.set(pass.pos[0], pass.pos[1] + NUMBER_LIFT, pass.pos[2]);
-              ctx.view.scene.add(tag);
-              tags.push(tag);
-            }
           let index = 0;
           for (const run of splitRespawns(ghost.path)) {
             const t0 = index / total;
@@ -104,17 +112,8 @@ export const ghostPathPlugin: EditorPlugin = {
     ctx.document.events.on("layerAdded", rebuild);
     ctx.document.events.on("layerRemoved", rebuild);
     ctx.document.events.on("layerChanged", rebuild);
-    // The numbers depend on the waypoints: follow edits, once per burst.
-    let queued = false;
-    const rebuildSoon = () => {
-      if (queued || !tags.length) return;
-      queued = true;
-      queueMicrotask(() => {
-        queued = false;
-        rebuild();
-      });
-    };
-    onPassesChanged(ctx, rebuildSoon);
+    // The numbers depend on the waypoints: follow map edits and late-loading item meshes.
+    onPassesChanged(ctx, rebuildTags);
     ctx.view.onRenderPrefsChanged(rebuild);
     rebuild();
   },
