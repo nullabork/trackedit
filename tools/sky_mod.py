@@ -199,21 +199,31 @@ def draw_number(d, x, y, text, scale, fill):
         x += 4 * scale
 
 
-def grid_chart(w=1024, h=512, cols=16, rows=12):
+def grid_chart(w=1024, h=512, cols=16, rows=12, tag=None):
     """A near-black sky cut into numbered cells, so a position can be reported
-    as one number. Cell n sits at column n % 16 (each 22.5 degrees of heading,
-    0 = the image's left edge) and row n // 16 (each 15 degrees of image
-    latitude, row 0 = the top). Rows 0-5 are the upper half of the image,
-    rows 6-11 the lower half (numbers in blue there)."""
+    as one number — and so that any screenshot explains itself:
+
+    - the big number is the cell. Cell n sits at column n % 16 (the image's
+      left edge = column 0) and row n // 16 (row 0 = the top; 15 degrees of
+      image latitude per row). Rows 0-5 are grey, rows 6-11 blue.
+    - the ORANGE CORNER is at the cell's top RIGHT in the normal copy of the
+      sky and at its top LEFT in the mirrored copy (the game mirrors the image
+      for the other half of the sky; symmetric numbers like 88 or 101 would
+      not tell otherwise).
+    - the small YELLOW number bottom-left is `tag`, identifying which test
+      mod (and so which map) the screenshot came from."""
     im = Image.new("RGB", (w, h), (3, 4, 8))
     d = ImageDraw.Draw(im)
     cw, ch = w / cols, h / rows
     for r in range(rows):
         for c in range(cols):
-            x0, y0 = int(c * cw), int(r * ch)
+            x0, y0, x1 = int(c * cw), int(r * ch), int((c + 1) * cw) - 1
             color = (150, 150, 150) if r < rows // 2 else (70, 110, 190)
-            d.rectangle([x0, y0, int((c + 1) * cw) - 1, int((r + 1) * ch) - 1], outline=(60, 60, 60))
-            draw_number(d, x0 + 8, y0 + 10, str(r * cols + c), 4, color)
+            d.rectangle([x0, y0, x1, int((r + 1) * ch) - 1], outline=(60, 60, 60))
+            draw_number(d, x0 + 6, y0 + 5, str(r * cols + c), 4, color)
+            d.polygon([(x1 - 12, y0 + 1), (x1 - 1, y0 + 1), (x1 - 1, y0 + 12)], fill=(230, 110, 0))
+            if tag is not None:
+                draw_number(d, x0 + 6, y0 + 26, str(tag), 3, (200, 190, 0))
     d.line([(0, h // 2), (w, h // 2)], fill=(130, 130, 0), width=3)
     return np.asarray(im)
 
@@ -250,6 +260,7 @@ def main():
     src.add_argument("--chart", action="store_true", help="built-in test chart (bright)")
     src.add_argument("--grid-chart", action="store_true", help="near-black sky cut into numbered cells (report a position as one number)")
     src.add_argument("--dark-chart", action="store_true", help="near-black test chart: the game's sun stays visible against it")
+    ap.add_argument("--tag", type=int, help="grid chart only: a small id drawn in every cell, to tell test mods apart in screenshots")
     ap.add_argument("--exposure", type=float, default=2.0, help="HDR scale applied to the linear image (default 2)")
     ap.add_argument("--clouds", choices=["keep", "clear"], default="keep")
     ap.add_argument("--mood-xml", help="edited Mood.MoodSetting.xml to ship for every mood")
@@ -257,7 +268,7 @@ def main():
     ap.add_argument("--out", help="output zip (default: the game's Skins/Stadium/Mod folder)")
     args = ap.parse_args()
 
-    pixels = chart() if args.chart else grid_chart() if args.grid_chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
+    pixels = chart() if args.chart else grid_chart(tag=args.tag) if args.grid_chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
     linear = srgb_to_linear(pixels) * args.exposure
     moods_dir = game_moods_dir()
     out = args.out or os.path.join(trackmania_dir(), "Skins", "Stadium", "Mod", args.name + ".zip")

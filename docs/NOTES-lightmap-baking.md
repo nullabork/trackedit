@@ -384,3 +384,23 @@ What this establishes:
 If time sets the heading and latitude sets the height, the two together reach
 most of the sky, which is what the sun tool needs: pick a point on the
 sphere, solve for (DayTime01, Latitude), write them into the map's mod.
+
+### Fifth pass: self-describing cells, `Sun5 …` (replaces `Sun4 …`)
+
+The map owner's idea: a screenshot should say by itself which map it is,
+which cell, and whether the copy is mirrored. `--grid-chart --tag N` now
+draws in every cell: the big cell number; an **orange corner, top RIGHT in
+the normal copy and top LEFT in the mirrored one**; and a small **yellow
+id** bottom-left. Same questions as the fourth pass, ids:
+
+| id | map | settings |
+| --- | --- | --- |
+| 1 | T55 | DayTime01 0.55 |
+| 2 | T70 | DayTime01 0.70 |
+| 3 | N0 | 0.625, latitude 0 |
+| 4 | N85 | 0.625, latitude 85 |
+| 5 | S45 | 0.625, latitude −45 |
+| 6 / 7 / 8 | D0600 / D1200 / D1800 | map DayTime, grid in all four moods |
+
+Per map two screenshots are enough: one of the sun, one straight ahead of
+the car at the start.
