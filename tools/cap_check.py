@@ -24,6 +24,7 @@ Exit code 1 when any cap sticks out (tolerance: 1.5 m, 8 % of a cap's
 vertices). Not an editor feature — run it after touching the extractor.
 """
 import argparse, json, os, re, sys
+from concurrent.futures import ProcessPoolExecutor
 
 TOLERANCE_M = 1.5
 ALLOWED_FRACTION = 0.08
@@ -114,7 +115,7 @@ def main():
     args = ap.parse_args()
 
     index = json.load(open(os.path.join(args.meshes, "index.json"), encoding="utf-8"))["blocks"]
-    report, checked = {}, 0
+    jobs = []
     for block, entry in sorted(index.items()):
         if args.filter and args.filter.lower() not in block.lower():
             continue
@@ -122,10 +123,12 @@ def main():
             if not re.fullmatch(r"(air|ground)\d*", key) or not rel:
                 continue
             path = os.path.join(args.meshes, rel)
-            if not os.path.exists(path):
-                continue
-            checked += 1
-            problems = check(path)
+            if os.path.exists(path):
+                jobs.append((block, key, path))
+    # The meshes are gigabytes of text: parse them on every core.
+    report, checked = {}, len(jobs)
+    with ProcessPoolExecutor() as pool:
+        for (block, key, _), problems in zip(jobs, pool.map(check, [j[2] for j in jobs], chunksize=16)):
             if problems:
                 report.setdefault(block, {})[key] = problems
     caps = sum(len(p) for v in report.values() for p in v.values())
