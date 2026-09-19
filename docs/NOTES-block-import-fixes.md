@@ -195,7 +195,8 @@ blocks. It rotated correct meshes. When a block looks wrong, first ask which
 field of the MAP says what to draw.
 
 **Verification, and air vs ground.** `meshdump variantcheck <map> <GameData>
-[meshesDir] [report.json]` (editor: File ▸ Verify block variants…) checks every
+[meshesDir] [report.json]` (`npm run variantcheck` runs it over every cached
+map; developer tooling, not an editor feature) checks every
 block of a map against its definition: the variant it names has to exist.
 Over five real maps (about 23,000 checked blocks, variants 0–4 in use) not one
 names a variant its block lacks — which is also the proof that bits 21+ ARE

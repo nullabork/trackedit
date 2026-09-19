@@ -4,7 +4,7 @@ import { importDump, exportDump } from "@io/trackoJson";
 import type { MapDump } from "@io/trackoJson";
 import { newId } from "@core/math";
 import { el } from "./dom";
-import { confirmDialog, openDialog } from "./dialog";
+import { confirmDialog } from "./dialog";
 import { openNewMapDialog } from "./NewMapDialog";
 import { persistNow, session } from "./session";
 
@@ -81,58 +81,6 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
     if (json.sunMod && !json.sunMod.url && json.path) offerModShare(ctx, json.sunMod, json.path);
   } catch (err) {
     ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-interface VariantReport {
-  error?: string;
-  blocks: number;
-  custom: number;
-  undefinedBlocks: number;
-  outOfRange: number;
-  notExtracted: number;
-  byVariant: Record<string, number>;
-  perBlock: Record<string, { used: Record<string, number>; airVariants: string[]; groundVariants: string[]; notExtracted: string[] }>;
-}
-
-/**
- * Check every block of the open TMX map against the game's definitions: the
- * variant each one names (air/ground + index, from the map file's flags) has
- * to exist for that block, and the mesh extraction has to know it.
- */
-export async function verifyVariantsFlow(ctx: EditorContext): Promise<void> {
-  const tmx = /^tmx-(\d+)$/.exec(ctx.document.id);
-  if (!tmx) {
-    ctx.ui.setStatus("Verify block variants reads the map's original file: open the map from TMX first.");
-    return;
-  }
-  ctx.ui.setStatus("Checking every block against the game's definitions…");
-  try {
-    const r = (await (await fetch(`/api/game/verify?tmx=${tmx[1]}`)).json()) as VariantReport;
-    if (r.error) throw new Error(r.error);
-    const checked = r.blocks - r.custom - r.undefinedBlocks;
-    const variants = Object.entries(r.byVariant).sort(([a], [b]) => a.localeCompare(b));
-    const stale = Object.entries(r.perBlock).filter(([, b]) => b.notExtracted.length);
-    const table = el("table", { class: "tmx-stats" },
-      ...variants.map(([name, n]) => el("tr", {}, el("td", {}, name), el("td", {}, String(n)))));
-    const content = el("div", { class: "settings-dialog" },
-      el("p", { class: "dialog-message" },
-        `${checked} blocks checked (${r.custom} custom blocks and ${r.undefinedBlocks} without a readable definition skipped). ` +
-        (r.outOfRange === 0
-          ? "Every one names a variant its block really has."
-          : `${r.outOfRange} name a variant their block does not have — the flags are being read wrong for them.`)),
-      table,
-      el("p", { class: r.notExtracted ? "dialog-message" : "hint" },
-        r.notExtracted === 0
-          ? "The mesh extraction knows every variant this map uses."
-          : `${r.notExtracted} blocks use a variant the mesh extraction does not know yet, so they show their base look: ` +
-            `${stale.slice(0, 12).map(([name, b]) => `${name} (${b.notExtracted.join(", ")})`).join(", ")}${stale.length > 12 ? "…" : ""}. ` +
-            "Re-import the game assets (tool rail ▸ Game assets) to extract them."),
-    );
-    openDialog({ title: "Block variants", content, width: 420 });
-    ctx.ui.setStatus(`Block variants: ${checked} checked, ${r.outOfRange} wrong, ${r.notExtracted} not extracted yet.`);
-  } catch (err) {
-    ctx.ui.setStatus(`Variant check failed: ${err instanceof Error ? err.message : err}`);
   }
 }
 

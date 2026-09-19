@@ -13,8 +13,6 @@ import { extname, join } from "node:path";
  *   POST /api/game/save   -> body { dump, docId, tmxId?, atmosphere? } ; { path, blocks, items, notes, … }
  *   POST /api/game/sky?name=&doc= -> body = image bytes ; { file }   (custom sky images, kept under maps/sky)
  *   GET  /api/game/sky/<file>     -> the image
- *   GET  /api/game/verify?tmx=<id> -> `meshdump variantcheck` on the map's original file: does every
- *                                    block name a variant its definition has, and does the extraction know it
  *   GET  /api/game/mod/<name>.zip -> download a sun/sky mod this bridge wrote
  *   POST /api/game/mod/reveal     -> body { name } ; shows the zip in the file manager
  *   POST /api/game/mod/url        -> body { name, url, mapPath, force? } ; checks that the URL serves exactly
@@ -195,25 +193,6 @@ export function gameBridge(meshdump: string): Plugin {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(body));
       };
-
-      server.middlewares.use("/api/game/verify", async (req, res) => {
-        let work: string | null = null;
-        try {
-          const tmxId = Number(new URL(req.url ?? "/", "http://x").searchParams.get("tmx"));
-          if (!Number.isInteger(tmxId) || tmxId <= 0) return send(res, 400, { error: "tmx=<map id> required: the check reads the map's original file" });
-          const map = await tmxMapFile(tmxId);
-          const gameData = join(localCfg().openplanetDir ?? join(homedir(), "OpenplanetNext"), "Extract", "GameData", "Stadium");
-          work = await mkdtemp(join(tmpdir(), "trackedit-verify-"));
-          const report = join(work, "report.json");
-          // Exit code 2 = problems found: the report is still written.
-          await run(meshdump, ["variantcheck", map, gameData, join(process.cwd(), "public", "meshes"), report]).catch(() => "");
-          send(res, 200, JSON.parse(await readFile(report, "utf-8")));
-        } catch (err) {
-          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
-        } finally {
-          if (work) await rm(work, { recursive: true, force: true }).catch(() => {});
-        }
-      });
 
       server.middlewares.use("/api/game/status", (_req, res) => {
         const dir = trackmaniaDir();
