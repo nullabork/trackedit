@@ -246,6 +246,11 @@ Screenshots from the game:
   and the scene is darker. The baked lightmap on the track does not change,
   as expected: it needs a rebake to follow a new sun.
 
+A close-up of the car on map I confirms it: **the car is lit and reflects
+green** (rims, bodywork highlights) while the road under it keeps its baked
+grey. Dynamic objects follow the mod's sun at once; static geometry follows
+the lightmap, so the two only agree after a rebake with the same sun.
+
 (The heading labels rendered as empty boxes: Pillow's text layout is broken
 on this install. The chart now uses counted squares instead of text.)
 
