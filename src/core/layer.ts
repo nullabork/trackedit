@@ -52,6 +52,18 @@ export interface FreePlacement {
 
 export type Placement = BlockPlacement | FreePlacement;
 
+/**
+ * Which of its block's variants a placed block uses, from the map file's
+ * block flags (bits 21 and up): 0 = the base variant, 1 = "InPillar" (the
+ * look a block takes stacked inside a pillar), 2 and up = further layouts a
+ * block defines (deco-wall loop ends, for one, come in a second, mirrored
+ * layout). The game's block definitions list them as AdditionalVariantsAir /
+ * AdditionalVariantsGround; `meshdump blocks` exports each that differs.
+ */
+export function blockVariantIndex(p: Pick<BlockPlacement, "meta">): number {
+  return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
+}
+
 /** Per-layer grid configuration — each layer can have its own resolution. */
 export interface LayerSettings {
   /** Grid step in metres. Defaults to the game's native 32x8x32 cell. */

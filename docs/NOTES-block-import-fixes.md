@@ -163,6 +163,41 @@ Still open: tracko's `gbxbuild` writes `PivotPosition = 0` for every item,
 so an exported map would put custom items back in the wrong place in-game
 until it reads the `pivotPos` the editor now emits.
 
+## 5c. Placed blocks name a VARIANT of their block (RHEVARA, TMX #357419)
+
+Report: a deco-wall loop end (`DecoWallLoopEndGrass`) drew its concrete on
+the side the record line drives through; "there must be a block setting for
+whether the support concrete is drawn".
+
+There is, and we ignored it. A block definition holds more than the air /
+ground pair: `AdditionalVariantsAir` / `AdditionalVariantsGround`
+(`meshdump unitinfo` lists them). For this block: `Variant Air`, `Variant Air
+InPillar`, and a second `Variant Air` whose wall clip sits on the SOUTH face
+instead of the west one — the mirrored layout. `PlatformBase` has the same
+three (`InPillar Air` is the look a platform takes stacked inside a pillar).
+A placed block picks one with **flags bits 21 and up** (0 = base, 1 =
+InPillar, 2… = the further layouts); GBX.NET exposes bit 21 only as the
+unnamed `Bit21`. On this map: 4,318 blocks name variant 1 and 1,442 variant
+2, and all 153 `DecoWallLoopEndGrass` name variant 2 — every one of them was
+drawn mirrored. Checked against the record line: through the base variant it
+crosses a wall of the selected block, through variant 2 it crosses nothing.
+
+Fix, generic: `meshdump blocks` exports every additional variant that
+differs from its base as `air1.obj`, `air2.obj`, `ground1.obj` … (identical
+ones are dropped — most InPillar variants look like their base) with their
+unit and clip tables; `blockVariantIndex` (core/layer.ts) reads the index
+from a placement's flags; the renderer asks for `air2` etc. and falls back to
+the base when a variant has no mesh of its own. Needs a block re-extraction.
+
+A wrong turn on the way, kept as a warning: the first attempt "fixed" the
+symptom by changing how the extractor orients underside shells on body-less
+blocks. It rotated correct meshes. When a block looks wrong, first ask which
+field of the MAP says what to draw.
+
+Still unread on a placed block: `Variant` / `SubVariant` (flags' low bits),
+which choose among a variant's `Mobils[variant][subVariant]` — the extractor
+always takes `[0][0]`.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

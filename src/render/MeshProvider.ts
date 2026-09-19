@@ -16,6 +16,10 @@ import { paintHex, setColorTables } from "@core/palettes";
 import type { ColorTables } from "@core/palettes";
 import type { BlockDef } from "@core/catalog";
 import type { GeometryProvider } from "./GeometryProvider";
+import { baseVariant } from "./GeometryProvider";
+
+/** Separates a block name from its variant in cache keys (no block name contains it). */
+const KEY_SEP = "|";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
 
 async function loadBitmap(url: string): Promise<ImageBitmap> {
@@ -60,10 +64,14 @@ interface MeshIndexEntry {
   /** Items: single OBJ. */
   obj?: string | null;
   /** Unit offsets per variant (meshdump UnitTable). */
-  units?: { air?: [number, number, number][] | null; ground?: [number, number, number][] | null } | null;
+  units?: Record<string, [number, number, number][] | null> | null;
   /** Clips per unit face per variant (meshdump ClipTable). */
-  clips?: { air?: UnitClip[] | null; ground?: UnitClip[] | null } | null;
+  clips?: Record<string, UnitClip[] | null> | null;
 }
+
+/** Additional variants that differ from their base ride along as air1, air2, ground1, … -> OBJ path. */
+const variantPath = (entry: MeshIndexEntry | undefined, variant: string): string | null =>
+  ((entry as Record<string, unknown> | undefined)?.[variant] as string | null | undefined) ?? null;
 
 interface MeshIndex {
   blocks: Record<string, MeshIndexEntry>;
@@ -90,7 +98,8 @@ type MaterialIndex = Record<
   }
 >;
 
-export type MeshVariant = "air" | "ground";
+import type { MeshVariant } from "./GeometryProvider";
+export type { MeshVariant };
 
 /**
  * Material names as the extraction keys them: "TrackBorders", or
@@ -433,14 +442,15 @@ export class MeshProvider implements GeometryProvider {
     }
   }
 
-  blockClips(name: string, variant: "air" | "ground"): BlockClipInfo | undefined {
+  blockClips(name: string, variant: MeshVariant): BlockClipInfo | undefined {
     const entry = this.index?.blocks[name];
     if (!entry) return undefined;
-    // A variant without its own table borrows the other's (several blocks
-    // model only air or only ground).
-    const other = variant === "air" ? "ground" : "air";
-    const units = entry.units?.[variant] ?? entry.units?.[other] ?? [];
-    const clips = entry.clips?.[variant] ?? entry.clips?.[other] ?? [];
+    // A variant without its own table borrows its base's, then the other
+    // base's (several blocks model only air or only ground).
+    const base = baseVariant(variant);
+    const other = base === "air" ? "ground" : "air";
+    const units = entry.units?.[variant] ?? entry.units?.[base] ?? entry.units?.[other] ?? [];
+    const clips = entry.clips?.[variant] ?? entry.clips?.[base] ?? entry.clips?.[other] ?? [];
     return { size: entry.size ?? [1, 1, 1], units, clips };
   }
 
@@ -455,8 +465,11 @@ export class MeshProvider implements GeometryProvider {
   /** Cache key for a block+variant. Ground requests fall back to the air key
    * when no ground OBJ exists (and vice versa), so nothing loads twice. */
   private variantKey(base: string, variant: MeshVariant): string {
-    if (variant !== "ground") return base;
-    return this.index?.blocks[base]?.ground ? base + " ground" : base;
+    const entry = this.index?.blocks[base];
+    // An additional variant with a mesh of its own; otherwise its base.
+    if (variant !== "air" && variant !== "ground" && variantPath(entry, variant)) return base + KEY_SEP + variant;
+    if (baseVariant(variant) !== "ground") return base;
+    return entry?.ground ? base + KEY_SEP + "ground" : base;
   }
 
   getTemplate(
@@ -481,8 +494,10 @@ export class MeshProvider implements GeometryProvider {
     const entry = this.index?.blocks[base] ?? this.index?.items?.[base];
     // In-game, elevated blocks use the air variant (with underside geometry);
     // only terrain-seated blocks show the underside-less ground variant.
-    const objPath =
-      key === base ? (entry?.air ?? entry?.obj ?? entry?.ground) : entry?.ground;
+    const own = key.includes(KEY_SEP) ? key.slice(key.indexOf(KEY_SEP) + 1) : null;
+    const objPath = own === null ? (entry?.air ?? entry?.obj ?? entry?.ground)
+      : own === "ground" ? entry?.ground
+      : variantPath(entry, own);
     if (!entry || !objPath) return;
     this.pending.add(key);
     this.loadQueue.push({

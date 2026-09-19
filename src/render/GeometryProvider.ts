@@ -11,6 +11,17 @@ import type { BlockClipInfo } from "./clipAdjacency";
  * interface, so swapping providers is a one-line change in main.ts — and
  * plugins can wrap or replace it.
  */
+/**
+ * Which of a block's meshes a placement shows: the base "air" / "ground"
+ * pair, or one of the block's additional variants ("air1", "air2",
+ * "ground1", …) that the placement's flags name — "InPillar" looks,
+ * mirrored layouts. A variant the extraction did not write falls back to
+ * its base.
+ */
+export type MeshVariant = string;
+
+export const baseVariant = (variant: MeshVariant): "air" | "ground" => (variant.startsWith("ground") ? "ground" : "air");
+
 export interface GeometryProvider {
   /**
    * Returns a template Object3D for the block; callers clone it per
@@ -22,7 +33,7 @@ export interface GeometryProvider {
     def: BlockDef | undefined,
     name: string,
     load?: boolean,
-    variant?: "air" | "ground",
+    variant?: MeshVariant,
   ): Object3D;
 
   /**
@@ -31,7 +42,7 @@ export interface GeometryProvider {
    * (see render/clipAdjacency). Undefined when the provider has no such
    * knowledge (placeholders, unknown blocks).
    */
-  blockClips?(name: string, variant: "air" | "ground"): BlockClipInfo | undefined;
+  blockClips?(name: string, variant: MeshVariant): BlockClipInfo | undefined;
 
   /**
    * Paint a cloned placement: tint each paintable material's masked texels

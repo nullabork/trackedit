@@ -43,3 +43,14 @@ describe("createLayer", () => {
     expect(createLayer("a").id).not.toBe(createLayer("a").id);
   });
 });
+
+describe("blockVariantIndex", () => {
+  it("reads the variant a placed block names from its flags", async () => {
+    const { blockVariantIndex } = await import("./layer");
+    expect(blockVariantIndex({})).toBe(0);
+    expect(blockVariantIndex({ meta: { flags: 0x1000c000 } })).toBe(0); // ghost + low bits only
+    expect(blockVariantIndex({ meta: { flags: 0x10200000 } })).toBe(1); // "InPillar"
+    expect(blockVariantIndex({ meta: { flags: 0x10400000 } })).toBe(2); // second layout (the mirrored loop end)
+    expect(blockVariantIndex({ meta: { flags: 0x00600000 } })).toBe(3);
+  });
+});

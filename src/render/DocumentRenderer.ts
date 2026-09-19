@@ -27,9 +27,9 @@ import { CELL, DEFAULT_Y_OFFSET, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
-import { isPlacementVisible } from "@core/layer";
+import { isPlacementVisible, blockVariantIndex } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
-import type { GeometryProvider } from "./GeometryProvider";
+import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
 import type { SceneView } from "./SceneView";
 
@@ -42,7 +42,7 @@ export interface PickResult {
 /** Optional streaming hooks a provider may offer (MeshProvider does). */
 interface StreamingProvider extends GeometryProvider {
   isLoaded?(name: string): boolean;
-  requestLoad?(def: BlockDef | undefined, name: string, variant?: "air" | "ground"): void;
+  requestLoad?(def: BlockDef | undefined, name: string, variant?: MeshVariant): void;
   hintPosition?(name: string, x: number, y: number, z: number): void;
   setLite?(lite: boolean): void;
   colorize?(root: Object3D, palette: string, slot: string): void;
@@ -765,7 +765,13 @@ export class DocumentRenderer {
    * terrain use the ground variant (no underside); anything elevated, tilted
    * off the terrain, or on a void base uses air — with its concrete bottom.
    */
-  variantOf(p: Placement, layer?: Layer): "air" | "ground" {
+  variantOf(p: Placement, layer?: Layer): MeshVariant {
+    const base = this.baseVariantOf(p, layer);
+    const index = p.kind === "block" ? blockVariantIndex(p) : 0;
+    return index ? `${base}${index}` : base;
+  }
+
+  private baseVariantOf(p: Placement, layer?: Layer): "air" | "ground" {
     if (p.kind !== "block") return "air";
     if (p.coord[1] !== DEFAULT_Y_OFFSET) return "air";
     if (baseTypeOf(this.doc.decorationBase) !== "stadium") return "air";

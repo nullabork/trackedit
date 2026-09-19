@@ -617,9 +617,13 @@ switch (args[0])
                 Console.WriteLine("not a BlockInfo");
                 return 1;
             }
-            foreach (var variant in new (string, CGameCtnBlockInfoVariant?)[] { ("air", bi.VariantBaseAir), ("ground", bi.VariantBaseGround) })
+            // Base variants first, then the additional ones a placed block can select.
+            var allVariants = new List<(string, CGameCtnBlockInfoVariant?)> { ("air", bi.VariantBaseAir), ("ground", bi.VariantBaseGround) };
+            allVariants.AddRange((bi.AdditionalVariantsAir ?? []).Select((v, i) => ($"air+{i + 1}", (CGameCtnBlockInfoVariant?)v)));
+            allVariants.AddRange((bi.AdditionalVariantsGround ?? []).Select((v, i) => ($"ground+{i + 1}", (CGameCtnBlockInfoVariant?)v)));
+            foreach (var variant in allVariants)
             {
-                Console.WriteLine($"[{variant.Item1}] units: {variant.Item2?.BlockUnitModels?.Length ?? 0}");
+                Console.WriteLine($"[{variant.Item1}] units: {variant.Item2?.BlockUnitModels?.Length ?? 0}, name '{variant.Item2?.Name}', mobils {variant.Item2?.Mobils?.Length ?? 0}, noPillarBelow {variant.Item2?.NoPillarBelowIndex}");
                 foreach (var u in variant.Item2?.BlockUnitModels ?? [])
                 {
                     if (u is null) continue;
@@ -1317,10 +1321,31 @@ sealed class Dumper(string root, string outDir, string? filter)
                 // base mesh and swap materials through terrain modifiers.
                 SetModifiers(info.MaterialModifierFile?.FilePath, info.MaterialModifier2File?.FilePath);
                 string? air, ground;
+                // A placed block names one VARIANT of its block (flags bits
+                // 21+): the base, "InPillar" (stacked inside a pillar), or a
+                // second layout (deco-wall loop ends come mirrored). Export
+                // every one that differs from its base as air1.obj, air2.obj,
+                // ground1.obj … (docs/NOTES-block-import-fixes.md).
+                var extraVariants = new List<string>();
                 try
                 {
                     air = ExportVariant(info.VariantBaseAir, blockDir, "air");
                     ground = ExportVariant(info.VariantBaseGround, blockDir, "ground");
+                    foreach (var (tag, variant) in AdditionalVariants(info))
+                    {
+                        var basePath = Path.Combine(blockDir, (tag.StartsWith("ground") ? "ground" : "air") + ".obj");
+                        var path = ExportVariant(variant, blockDir, tag);
+                        if (path is null) continue;
+                        // Most additional variants look exactly like their base: keep one file.
+                        if (File.Exists(basePath) && new FileInfo(basePath).Length == new FileInfo(path).Length
+                            && File.ReadAllBytes(basePath).AsSpan().SequenceEqual(File.ReadAllBytes(path)))
+                        {
+                            File.Delete(path);
+                            if (File.Exists(path + ".src.json")) File.Delete(path + ".src.json");
+                            continue;
+                        }
+                        extraVariants.Add(tag);
+                    }
                 }
                 finally
                 {
@@ -1340,6 +1365,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                     ["units"] = UnitTable(info),
                     ["clips"] = ClipTable(info),
                 };
+                foreach (var tag in extraVariants) blocks[name]![tag] = $"{name}/{tag}.obj";
                 ok++;
             }
             catch (Exception ex)
@@ -1564,7 +1590,18 @@ sealed class Dumper(string root, string outDir, string? filter)
                 if (u is not null) arr.Add(new JsonArray(u.RelativeOffset.X, u.RelativeOffset.Y, u.RelativeOffset.Z));
             return arr;
         }
-        return new JsonObject { ["air"] = Units(info.VariantBaseAir), ["ground"] = Units(info.VariantBaseGround) };
+        var table = new JsonObject { ["air"] = Units(info.VariantBaseAir), ["ground"] = Units(info.VariantBaseGround) };
+        foreach (var (tag, variant) in AdditionalVariants(info)) table[tag] = Units(variant);
+        return table;
+    }
+
+    /// <summary>The variants a placed block can select beyond the base pair: air1, air2, …, ground1, ….</summary>
+    private static IEnumerable<(string Tag, CGameCtnBlockInfoVariant Variant)> AdditionalVariants(CGameCtnBlockInfo info)
+    {
+        var air = info.AdditionalVariantsAir ?? [];
+        for (var i = 0; i < air.Length; i++) if (air[i] is not null) yield return ($"air{i + 1}", air[i]);
+        var ground = info.AdditionalVariantsGround ?? [];
+        for (var i = 0; i < ground.Length; i++) if (ground[i] is not null) yield return ($"ground{i + 1}", ground[i]);
     }
 
     /// <summary>
@@ -1615,7 +1652,9 @@ sealed class Dumper(string root, string outDir, string? filter)
             }
             return arr;
         }
-        return new JsonObject { ["air"] = Clips(info.VariantBaseAir), ["ground"] = Clips(info.VariantBaseGround) };
+        var table = new JsonObject { ["air"] = Clips(info.VariantBaseAir), ["ground"] = Clips(info.VariantBaseGround) };
+        foreach (var (tag, variant) in AdditionalVariants(info)) table[tag] = Clips(variant);
+        return table;
     }
 
     private static int[]? UnitsSize(CGameCtnBlockInfoVariant? variant)
@@ -1643,7 +1682,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         var mobil = variant.Mobils[0].Length > 0 ? variant.Mobils[0][0] : null;
         if (mobil is null) return null;
 
-        if (tag == "ground")
+        if (tag.StartsWith("ground"))
         {
             // Ground bodies carry terrain-blend skirts (GrassFence & co.) that
             // reach a whole cell past the footprint; in-game they merge into
@@ -1659,7 +1698,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         // The game fills exposed faces with per-unit CLIPS: bottom clips are
         // the concrete undersides, side clips the end caps. Merge them in so
         // pieces look closed from below/behind like in-game.
-        AddUnitClips(builder, variant, tag == "ground");
+        AddUnitClips(builder, variant, tag.StartsWith("ground"));
 
         if (builder.IsEmpty) return null;
         Directory.CreateDirectory(blockDir);
