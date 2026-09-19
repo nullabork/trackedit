@@ -404,3 +404,70 @@ id** bottom-left. Same questions as the fourth pass, ids:
 
 Per map two screenshots are enough: one of the sun, one straight ahead of
 the car at the start.
+
+### Readings from `Sun5 …` (2026-09-19): the sun follows a plain solar model
+
+Read off the map owner's screenshots (the mirror corner also unmasked a
+mirrored id "2" that looks like a "5"). "Ahead" is the cell corner nearest
+the screen centre, so headings are good to about half a column (±5.6°).
+
+| id | settings | ahead of the car | sun |
+| --- | --- | --- | --- |
+| 2 T70 | 0.70, lat 45 | mirrored 93/92 → 146° from the sun | seam 64, upper quarter of row 4 |
+| 4 N85 | 0.625, lat 85 | mirrored 88/87 → 90° | seam 96, on the middle line |
+| 5 S45 | 0.625, lat −45 | **normal** 87/88 → 90°, other side | seam 32, lower third of row 2 |
+| 6 D0600 | map 06:00 | mirrored 84/83 → 45° | night; a glow on seam 64, low in row 4 |
+| 7 D1200 | map 12:00 | mirrored 86/85 → 67° | seam 32, middle of row 2 |
+| 8 D1800 | map 18:00 | mirrored 94/93 → 157° | seam 64, middle of row 4 |
+
+(1 T55 and 3 N0 were not run.)
+
+1. **Which side.** In the normal copy numbers rise to the right, so the sun
+   (column 0) is to the viewer's LEFT; facing the mirrored copy it is to the
+   RIGHT. Northern latitudes: sun on the car's right; latitude −45: on its
+   left. The test map's start faces the game's East (−X; start x=28, finish
+   x=22). So: **sunrise due East (−X), noon due South (−Z) for positive
+   latitude, sunset due West (+X)** — the game's own compass.
+2. **The model.** A great circle: angle θ = (DayTime01 − 0.5) · 720°, tilted
+   from the zenith by the latitude:
+   `dir = cosθ·East + sinθ·(cos(lat)·Up + sin(lat)·South)`.
+   Predicted headings from East: 0.6 → 65° (read 67), 0.70 → 153° (read 146),
+   noon → 90° at any latitude (read 90, both hemispheres). Predicted noon
+   heights: lat 85 → 5°, just above where a horizon sun showed (K85/J75,
+   centre of row 6) — read: the middle line, half a row higher. Fits.
+3. **Inverse.** For a direction (e, s, u) = (East, South, Up parts):
+   θ = acos(e), latitude = atan2(s, u). Every point above the horizon is
+   reachable with DayTime01 in 0.5..0.75 and a latitude in −90..90; the game
+   took 85 and −45 without complaint. `tools/sky_mod.py --sun AZ,ALT` does
+   this (also `--daytime01`, `--latitude`), patching the game's own mood
+   settings file instead of a hand-edited copy.
+4. **The map's DayTime is continuous, not just a mood switch.**
+   `GameCtnDecorationMood/Default.MoodBlender.xml` reads `SunRise="06:00"
+   SunFall="21:00" Latitude="47.5"`. Mapping 06:00..21:00 linearly onto
+   0.5..0.75 gives 12:00 → 0.60 (read: identical to stock Day) and 18:00 →
+   0.70 (read: within a column of T70, same row; the Sunset mood's own 0.73
+   would put the sun a row lower and nearly behind the car). So map time
+   alone can move the sun along the latitude-47.5 arc with no mod at all.
+   Night is not understood: at 06:00 the game showed night with a glow 45°
+   right of ahead and about 20° up, which is not the sun's circle mirrored.
+5. **Vertical mapping of `SkyColor.dds`: about 11.7° of real height per
+   chart row, not 15°.** Two independent signs: fitting image latitude
+   against the model's heights (0° → −7.5, 5° → −1, 25° → 22..26, 45° → 50)
+   gives image ≈ 1.28 · height − 7.5°; and the cells ahead of the car are
+   about as tall as wide on screen (300 × 285 px) where a column is 11.25°.
+   So the image's middle line is ≈ 6° up, its bottom ≈ −64°, and its top row
+   would be reached near 76° — what the dome does above that is unknown.
+
+### Sixth pass: `Sun6 …` — predictions instead of sweeps
+
+Built with `--sun`, which solves the settings from a target. If the model
+holds, the sun lands where the file name says (relative to the car at the
+start), in the predicted cell:
+
+| id | target (heading from ahead, height) | solved DayTime01 / Latitude | predicted sun cell | predicted ahead |
+| --- | --- | --- | --- | --- |
+| 1 | 30° right, 30° up | 0.5575 / 40.9 | seam 48, bottom edge of the row | mirrored column 2 (…82 / 98) |
+| 2 | 120° left (behind-left), 60° up | 0.6451 / −26.6 | seam 16, middle | normal column 10 (90 / 106) |
+| 3 | 90° right, 75° up | 0.6250 / 15 | seam 0, top of the image | mirrored 88/87 |
+| 4 | dead ahead, 20° up | 0.5278 / 0 | seam 64, upper-middle | the seam itself (80 and mirrored 80) |
+| 5 | overhead (89°) | 0.6250 / 1 | above the image's fitted top: shows what the dome does at the zenith | mirrored 88/87 |

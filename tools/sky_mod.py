@@ -23,7 +23,7 @@ endpoints) — no external tools.
 Point a map at it with:
   meshdump atmosphere in.Map.Gbx out.Map.Gbx mod=Skins\\Stadium\\Mod\\<name>.zip
 """
-import argparse, json, os, struct, sys, zipfile
+import argparse, json, math, os, re, struct, sys, zipfile
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -252,6 +252,46 @@ def chart(w=1024, h=512):
     return np.asarray(im)
 
 
+# ---------------------------------------------------------------- the sun
+#
+# Measured in game (docs/NOTES-lightmap-baking.md, section 8): the sun runs
+# along a great circle. It rises due East (the game's East, -X) at DayTime01
+# 0.5, sets due West at 0.75 (720 degrees of arc per unit), and Latitude
+# tilts the circle away from the zenith: towards South (-Z) when positive,
+# North when negative. So any point of the sky above the horizon is one
+# (DayTime01, Latitude) pair.
+
+SUNRISE01, SUNSET01 = 0.5, 0.75
+
+
+def sun_position(daytime01, latitude):
+    """(azimuth, altitude) in degrees. Azimuth turns from East towards South."""
+    t = math.radians((daytime01 - SUNRISE01) / (SUNSET01 - SUNRISE01) * 180)
+    lat = math.radians(latitude)
+    e, s, u = math.cos(t), math.sin(t) * math.sin(lat), math.sin(t) * math.cos(lat)
+    return math.degrees(math.atan2(s, e)), math.degrees(math.asin(max(-1, min(1, u))))
+
+
+def solve_sun(azimuth, altitude):
+    """(DayTime01, Latitude) that put the sun at azimuth/altitude (degrees)."""
+    az, alt = math.radians(azimuth), math.radians(altitude)
+    e, s, u = math.cos(alt) * math.cos(az), math.cos(alt) * math.sin(az), math.sin(alt)
+    t = math.degrees(math.acos(max(-1, min(1, e))))
+    return SUNRISE01 + t / 180 * (SUNSET01 - SUNRISE01), math.degrees(math.atan2(s, u))
+
+
+def mood_xml_with_sun(path, daytime01, latitude):
+    """The game's own mood settings with only the sun's two numbers changed."""
+    xml = open(path, encoding="utf-8").read()
+    for key, value in (("DayTime01", daytime01), ("Latitude", latitude)):
+        if value is None:
+            continue
+        xml, n = re.subn(r'(<Light [^>]*?[ ]%s=")[^"]*(")' % key, lambda m: m.group(1) + ("%.6g" % value) + m.group(2), xml, count=1)
+        if n != 1:
+            raise SystemExit(f"{path}: no {key} on <Light>")
+    return xml
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", required=True, help="mod name -> Skins/Stadium/Mod/<name>.zip")
@@ -264,9 +304,22 @@ def main():
     ap.add_argument("--exposure", type=float, default=2.0, help="HDR scale applied to the linear image (default 2)")
     ap.add_argument("--clouds", choices=["keep", "clear"], default="keep")
     ap.add_argument("--mood-xml", help="edited Mood.MoodSetting.xml to ship for every mood")
+    ap.add_argument("--sun", help="AZIMUTH,ALTITUDE in degrees: put the sun there (azimuth from East towards South, negative = towards North); solves DayTime01 and Latitude")
+    ap.add_argument("--daytime01", type=float, help="DayTime01 for the mood settings (0.5 sunrise, 0.625 noon, 0.75 sunset)")
+    ap.add_argument("--latitude", type=float, help="Latitude for the mood settings")
     ap.add_argument("--moods", nargs="*", default=MOODS)
     ap.add_argument("--out", help="output zip (default: the game's Skins/Stadium/Mod folder)")
     args = ap.parse_args()
+
+    daytime01, latitude = args.daytime01, args.latitude
+    if args.sun:
+        az, alt = (float(v) for v in args.sun.split(","))
+        if alt <= 0:
+            raise SystemExit("--sun: the altitude has to be above the horizon")
+        daytime01, latitude = solve_sun(az, alt)
+        print("sun at azimuth %g, altitude %g -> DayTime01 %.5f, Latitude %.3f" % (az, alt, daytime01, latitude))
+    if (daytime01 is not None or latitude is not None) and args.mood_xml:
+        raise SystemExit("--mood-xml already carries the sun; drop it or --sun/--daytime01/--latitude")
 
     pixels = chart() if args.chart else grid_chart(tag=args.tag) if args.grid_chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
     linear = srgb_to_linear(pixels) * args.exposure
@@ -281,8 +334,10 @@ def main():
                 z.writestr(f"Moods/{mood}/SkyClouds.dds", clear_clouds_dds(os.path.join(moods_dir, mood, "SkyClouds.dds")))
             if args.mood_xml:
                 z.write(args.mood_xml, f"Moods/{mood}/Mood.MoodSetting.xml")
+            elif daytime01 is not None or latitude is not None:
+                z.writestr(f"Moods/{mood}/Mood.MoodSetting.xml", mood_xml_with_sun(os.path.join(moods_dir, mood, "Mood.MoodSetting.xml"), daytime01, latitude))
     print(f"wrote {out} ({os.path.getsize(out)} bytes): moods {', '.join(args.moods)}, clouds {args.clouds}" +
-          (", mood settings included" if args.mood_xml else ""))
+          (", mood settings included" if args.mood_xml or daytime01 is not None or latitude is not None else ""))
     print("map reference: Skins\\Stadium\\Mod\\" + args.name + ".zip")
 
 
