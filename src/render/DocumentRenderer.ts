@@ -23,11 +23,11 @@ import {
 import type { MapDocument } from "@core/document";
 import type { Layer, Placement } from "@core/layer";
 import type { BlockCatalog, BlockDef } from "@core/catalog";
-import { CELL, DEFAULT_Y_OFFSET, degToRad } from "@core/math";
+import { CELL, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
-import { isPlacementVisible, blockVariantIndex } from "@core/layer";
+import { isPlacementVisible, blockIsGround, blockVariantIndex } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -773,14 +773,12 @@ export class DocumentRenderer {
 
   private baseVariantOf(p: Placement, layer?: Layer): "air" | "ground" {
     if (p.kind !== "block") return "air";
-    if (p.coord[1] !== DEFAULT_Y_OFFSET) return "air";
-    if (baseTypeOf(this.doc.decorationBase) !== "stadium") return "air";
     if (layer) {
       const { rotDeg, translate } = layer.transform;
       // Pitch/roll or vertical shift lifts blocks off the terrain; yaw doesn't.
       if (rotDeg[0] || rotDeg[2] || translate[1] !== 0) return "air";
     }
-    return "ground";
+    return blockIsGround(p, baseTypeOf(this.doc.decorationBase) === "stadium") ? "ground" : "air";
   }
 
   /** Build the visual for a placement. Shared with tools for ghost previews. */

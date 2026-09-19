@@ -142,6 +142,10 @@ switch (args[0])
         // Which blocks and items are start / finish / checkpoint (see Waypoints).
         if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump waypoints <GameDataRoot> <outDir>"); return 1; }
         return Trackedit.Waypoints.Run(args[1], args[2]);
+    case "variantcheck":
+        // Does every block of a map name a variant its definition has? (see VariantCheck)
+        if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump variantcheck <map.Gbx> <GameDataRoot> [meshesDir] [report.json]"); return 1; }
+        return Trackedit.VariantCheck.Run(args[1], args[2], args.Length > 3 ? args[3] : null, args.Length > 4 ? args[4] : null);
     case "moodmod":
         // A settings-only mood mod: the sun moved and recoloured (see MoodMod).
         try { return Trackedit.MoodMod.Run(args); }

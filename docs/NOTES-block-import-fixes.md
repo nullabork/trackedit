@@ -194,6 +194,19 @@ symptom by changing how the extractor orients underside shells on body-less
 blocks. It rotated correct meshes. When a block looks wrong, first ask which
 field of the MAP says what to draw.
 
+**Verification, and air vs ground.** `meshdump variantcheck <map> <GameData>
+[meshesDir] [report.json]` (editor: File ▸ Verify block variants…) checks every
+block of a map against its definition: the variant it names has to exist.
+Over five real maps (about 23,000 checked blocks, variants 0–4 in use) not one
+names a variant its block lacks — which is also the proof that bits 21+ ARE
+the variant index. The same pass showed our air/ground GUESS was wrong: the
+editor said "ground" for y = 8 on a stadium base, but every block the files
+flag as ground sits at y = 9, and pillars the file marks ground were drawn as
+air. The map file says it per block (`isGround`), so that is now what decides
+(`blockIsGround`, core/layer.ts): the file's flag for imported blocks — as
+long as a ground block still sits at ground level — and "placed at ground
+level on a stadium base" for blocks made in the editor.
+
 Still unread on a placed block: `Variant` / `SubVariant` (flags' low bits),
 which choose among a variant's `Mobils[variant][subVariant]` — the extractor
 always takes `[0][0]`.

@@ -60,6 +60,28 @@ export type Placement = BlockPlacement | FreePlacement;
  * layout). The game's block definitions list them as AdditionalVariantsAir /
  * AdditionalVariantsGround; `meshdump blocks` exports each that differs.
  */
+/**
+ * The grid level blocks sit on the terrain at. Measured over real maps: every
+ * block a map file flags as "ground" sits at level 9 (the decoration's
+ * vertical origin, 8, plus one), none at 8.
+ */
+export const GROUND_LEVEL = 9;
+
+/**
+ * Air or ground look of a grid block. The map file says it outright
+ * (`isGround`, carried in the placement's meta) and that is what the game
+ * draws — so an imported block uses it, as long as a "ground" block still
+ * sits at ground level (moving it off the terrain makes it an air block).
+ * Blocks made in the editor have no flag: on a stadium base they are ground
+ * exactly when placed at ground level.
+ */
+export function blockIsGround(p: Pick<BlockPlacement, "meta" | "coord">, stadiumBase: boolean): boolean {
+  const atGround = p.coord[1] === GROUND_LEVEL;
+  const flag = (p.meta as { isGround?: boolean } | undefined)?.isGround;
+  if (typeof flag === "boolean") return flag && atGround;
+  return stadiumBase && atGround;
+}
+
 export function blockVariantIndex(p: Pick<BlockPlacement, "meta">): number {
   return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
 }

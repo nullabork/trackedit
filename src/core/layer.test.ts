@@ -54,3 +54,18 @@ describe("blockVariantIndex", () => {
     expect(blockVariantIndex({ meta: { flags: 0x00600000 } })).toBe(3);
   });
 });
+
+describe("blockIsGround", () => {
+  it("believes the map file, as long as a ground block still sits on the ground", async () => {
+    const { blockIsGround } = await import("./layer");
+    const at = (y: number, meta?: Record<string, unknown>) => ({ coord: [10, y, 10] as [number, number, number], ...(meta ? { meta } : {}) });
+    expect(blockIsGround(at(9, { isGround: true }), true)).toBe(true);
+    expect(blockIsGround(at(9, { isGround: true }), false)).toBe(true); // the file outranks our idea of the base
+    expect(blockIsGround(at(9, { isGround: false }), true)).toBe(false); // an air block parked at ground level
+    expect(blockIsGround(at(14, { isGround: true }), true)).toBe(false); // moved off the terrain in the editor
+    // Made in the editor: no flag to read.
+    expect(blockIsGround(at(9), true)).toBe(true);
+    expect(blockIsGround(at(8), true)).toBe(false);
+    expect(blockIsGround(at(9), false)).toBe(false);
+  });
+});
