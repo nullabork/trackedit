@@ -328,3 +328,59 @@ maps replace `Sun2 …`. Decoding a reported cell `n`:
 
 Wanted per map: the cell the sun is in, the lowest row of numbers visible
 at the real horizon, and which cell is straight ahead at the start.
+
+### Readings from the numbered grid (2026-09-19)
+
+Reported by the map owner from `Sun3 …`:
+
+| map | sun | ahead of the car at the start |
+| --- | --- | --- |
+| L00 stock Day (0.6, lat 45) | on the seam between 32 and mirrored 32 | mirrored 85/86 over 101/102 |
+| K85 (0.5, lat 85) | seam 96 / mirrored 96, centre of the cell | same as L00 → sun roughly ahead |
+| K0 (0.5, lat 0) | same seam, a little higher | same |
+| J25 (0.25) | same seam, bottom corner of the cell | same |
+| J75 (0.75) | same seam, on the horizon, **directly behind the car** | 111 and mirrored 111 |
+| L06 (map DayTime 06:00) | night, **no grid at all** | — |
+
+What this establishes:
+
+1. **The sky image covers half the sky and is mirrored for the other half.**
+   Every number appears twice, once mirrored. So one column is 11.25° of
+   heading, not 22.5°, and a custom sky is always left-right symmetric.
+2. **The seam is the sun.** The sun always sits where column 0 meets its
+   mirror image; column 15 and its mirror (111/111) are the point opposite
+   the sun. So **the whole sky dome turns with the sun's heading**, and
+   u = angle away from the sun (0..180°). A sun painted at the image's left
+   edge will always line up with the real light.
+3. **DayTime01 moves the sun's heading a lot.** Relative to the car's start
+   direction: 0.5 → ahead, 0.6 → about 67° to the side (the car faces the
+   column 5/6 boundary of the mirrored half), 0.75 → directly behind. About
+   720° of heading per unit, so the daylight arc runs roughly 0.5 → 0.75,
+   not 0.25 → 0.75.
+4. **0.5 is sunrise, not noon**, which is why the latitude test told nothing:
+   at sunrise the sun is on the horizon at any latitude (K0 and K85 differ by
+   a fraction of a cell). The stock moods agree: Sunrise 0.52, Day 0.6,
+   Sunset 0.73. Solar noon should be near 0.625.
+5. **Vertical mapping.** A sun on the true horizon shows just below the
+   image's middle line (in row 6), so the middle row of `SkyColor.dds` is a
+   few degrees ABOVE the real horizon, and the image continues below it.
+   The stock Day sun (0.6, lat 45) sits at the centre of row 2, i.e. 52.5°
+   up in image terms.
+6. **The map's own DayTime switches moods.** At 06:00 the game was in its
+   night look with the stock sky, because that mod only replaced the Day
+   folder. The map field drives a day cycle across the four mood sets
+   (`Default.MoodBlender.xml`), so a sky mod has to cover every mood it can
+   land on.
+
+### Fourth pass: `Sun4 …` (replaces `Sun3 …`)
+
+| map | change | question |
+| --- | --- | --- |
+| T55, T70 | DayTime01 0.55 / 0.70 | two more points on the heading and height curve |
+| N0, N85 | solar noon (0.625) at latitude 0 / 85 | does latitude set the noon height (overhead vs near the horizon) |
+| S45 | solar noon at latitude −45 | does a southern latitude put the sun on the other side |
+| D0600, D1200, D1800 | map DayTime, grid sky in ALL four moods | the sun's place through the map-driven day cycle |
+
+If time sets the heading and latitude sets the height, the two together reach
+most of the sky, which is what the sun tool needs: pick a point on the
+sphere, solve for (DayTime01, Latitude), write them into the map's mod.
