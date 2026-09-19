@@ -25,7 +25,18 @@ function fixture(aspect = 1) {
     update: () => {},
   };
   const view = { camera, rig, captureFrame: () => "data:image/png;base64,test" };
-  const ctx = { view, renderer: { getObject: (id: string) => objects.get(id) },
+  // Hiding goes through the renderer's isolation filter (drawing is batched).
+  let isolation: string[] | null = null;
+  const renderer = {
+    getObject: (id: string) => objects.get(id),
+    get isolation() { return isolation; },
+    setIsolation(ids: string[] | null) {
+      isolation = ids;
+      for (const [id, obj] of objects) obj.visible = !ids || ids.includes(id);
+    },
+    flushBatches() {},
+  };
+  const ctx = { view, renderer,
     selection: { list: [{ placementId: "block" }] },
     document: { layers: [{ placements: objects }] } } as unknown as EditorContext;
   return { ctx, view, other };

@@ -60,6 +60,8 @@ async function boot(): Promise<void> {
   };
   const tools = new ToolManager(document_, view, renderer);
   const selection = new SelectionModel();
+  // The selection is what tools drag around: drawn as ordinary objects, the rest batched.
+  selection.events.on("changed", () => renderer.setLive(selection.list.map((s) => s.placementId)));
   const ctx: EditorContext = {
     document: document_,
     history,

@@ -49,19 +49,16 @@ export function captureDebugSubject(ctx: EditorContext, target: string, options:
   const { rig, camera } = ctx.view;
   const saved = { rig: rig.getState(),
     cameraPos: camera.position.clone(), quaternion: camera.quaternion.clone() };
-  const hidden: Array<{ visible: boolean }> = [];
+  const savedIsolation = ctx.renderer.isolation;
   try {
     const subject = target === "view" ? undefined : frameDebugSubject(ctx, options);
-    if (options.isolate) {
-      const keep = new Set((subject ?? debugSubject(ctx, options)).ids);
-      for (const layer of ctx.document.layers) for (const id of layer.placements.keys()) {
-        const obj = ctx.renderer.getObject(id);
-        if (obj?.visible && !keep.has(id)) { hidden.push(obj); obj.visible = false; }
-      }
-    }
+    // Drawing is batched, so hiding goes through the renderer's own filter.
+    if (options.isolate) ctx.renderer.setIsolation([...(subject ?? debugSubject(ctx, options)).ids]);
+    ctx.renderer.flushBatches();
     return ctx.view.captureFrame();
   } finally {
-    for (const obj of hidden) obj.visible = true;
+    if (options.isolate) ctx.renderer.setIsolation(savedIsolation ? [...savedIsolation] : null);
+    ctx.renderer.flushBatches();
     rig.setState(saved.rig);
     camera.position.copy(saved.cameraPos); camera.quaternion.copy(saved.quaternion);
     ctx.view.captureFrame();

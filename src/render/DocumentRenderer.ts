@@ -1,3 +1,4 @@
+import { InstanceBatcher } from "./InstanceBatcher";
 import {
   BoxGeometry,
   BufferGeometry,
@@ -69,6 +70,39 @@ interface LayerXf {
   far2: number;
 }
 
+/**
+ * Where placement objects park: never rendered (invisible), and never walked
+ * by the per-frame matrix update — three.js recurses into every child every
+ * frame, and tens of thousands of parked objects cost more per frame than
+ * drawing the whole map. They only change when told to, so their world
+ * matrices are refreshed by hand: `refresh()` for all of them (the layer
+ * moved), or the object's own `updateMatrixWorld(true)` when it is parked.
+ */
+class ParkingGroup extends Group {
+  private refreshing = false;
+
+  constructor() {
+    super();
+    this.name = "proxies";
+    this.visible = false;
+  }
+
+  override updateMatrixWorld(force?: boolean): void {
+    if (this.refreshing) return super.updateMatrixWorld(force);
+    // Own matrix only (it has no transform of its own), children left alone.
+    if (this.parent) this.matrixWorld.copy(this.parent.matrixWorld);
+  }
+
+  refresh(): void {
+    this.refreshing = true;
+    try {
+      super.updateMatrixWorld(true);
+    } finally {
+      this.refreshing = false;
+    }
+  }
+}
+
 /** Maps beyond this many placements get the LOD treatment. */
 const LARGE_MAP = 3000;
 const CLASSIFY_EVERY_N_FRAMES = 15;
@@ -76,6 +110,13 @@ const CLASSIFY_EVERY_N_FRAMES = 15;
 /**
  * Mirrors the MapDocument into the three.js scene, one Group per layer so
  * layer transforms and visibility are a single group update.
+ *
+ * Drawing is batched: a placement's Object3D is parked in an invisible
+ * "proxies" group the renderer never walks (it stays for picking, bounds and
+ * tools), and its meshes are drawn as instances through an InstanceBatcher —
+ * one draw call per (mesh, materials, map chunk) instead of one per
+ * placement. Only "live" placements (the selection, which tools move around
+ * every frame) are drawn as ordinary objects.
  *
  * Large maps use two representations (LOD): placements near the camera are
  * individual objects with real meshes; far placements have NO Object3D at
@@ -91,6 +132,64 @@ export class DocumentRenderer {
   private byBlock = new Map<string, Set<string>>();
   private root = new Group();
   private isolatedIds: Set<string> | null = null;
+  private readonly batcher = new InstanceBatcher();
+  /** Layer id -> the invisible parking group of its placement objects. */
+  private proxyGroups = new Map<string, ParkingGroup>();
+  /** Placements drawn as ordinary objects: the selection. */
+  private live = new Set<string>();
+  private layerTransformSig = new Map<string, string>();
+
+  /** The current isolation filter (null = everything shows). */
+  get isolation(): readonly string[] | null {
+    return this.isolatedIds ? [...this.isolatedIds] : null;
+  }
+
+  /**
+   * Which placements tools are about to move around (the selection): those
+   * are drawn as ordinary objects so a drag shows live; the rest is batched.
+   */
+  setLive(ids: Iterable<string>): void {
+    const next = new Set(ids);
+    const changed = [...this.live].filter((id) => !next.has(id)).concat([...next].filter((id) => !this.live.has(id)));
+    this.live = next;
+    for (const id of changed) this.repark(id);
+  }
+
+  /** Apply pending batch changes now (a synchronous capture cannot wait for the next frame). */
+  flushBatches(): void {
+    this.batcher.flush();
+  }
+
+  get batchStats(): { batches: number; instances: number; objects: number } {
+    return this.batcher.stats;
+  }
+
+  private isLive(id: string): boolean {
+    return this.wireframeOn || this.live.has(id);
+  }
+
+  /** Put a placement's object where it belongs: drawn as itself (live) or parked and batched. */
+  private park(id: string, obj: Object3D, layerId: string): void {
+    const group = this.layerGroups.get(layerId);
+    const proxies = this.proxyGroups.get(layerId);
+    if (!group || !proxies) return;
+    if (this.isLive(id)) {
+      group.add(obj);
+      this.batcher.set(id, null);
+    } else {
+      proxies.add(obj);
+      // The parking group is outside the scene's matrix updates: picking and
+      // bounds read matrixWorld, so bring this object's up to date by hand.
+      obj.updateMatrixWorld(true);
+      this.batcher.set(id, obj, group);
+    }
+  }
+
+  private repark(id: string): void {
+    const obj = this.placementObjects.get(id);
+    const info = this.lodInfo.get(id);
+    if (obj && info) this.park(id, obj, info.layerId);
+  }
 
   get isIsolating(): boolean { return this.isolatedIds !== null; }
 
@@ -104,8 +203,16 @@ export class DocumentRenderer {
         if (layer) this.promote(id, info, this.worldOf(info, this.layerXf(layer), new Vector3()));
       }
     }
-    for (const [id, obj] of this.placementObjects) obj.visible = this.shouldShow(id);
+    for (const [id, obj] of this.placementObjects) this.setShown(id, obj);
     for (const pool of this.pools.values()) pool.visible = !this.isolatedIds;
+  }
+
+  /** Show or hide a built placement per the filters; its batch follows. */
+  private setShown(id: string, obj: Object3D): void {
+    const show = this.shouldShow(id);
+    if (obj.visible === show) return;
+    obj.visible = show;
+    this.repark(id);
   }
 
   /** Isolation filter and the placement's own/group visibility, together. */
@@ -159,12 +266,16 @@ export class DocumentRenderer {
       this.rebuild();
     });
     view.onFrame(() => this.lodTick());
+    view.onFrame(() => this.batcher.flush());
     view.onFrame(() => this.updateGridFade());
     this.rebuild();
   }
 
   rebuild(): void {
     this.root.clear();
+    this.batcher.clear();
+    this.proxyGroups.clear();
+    this.layerTransformSig.clear();
     this.layerGroups.clear();
     this.placementObjects.clear();
     this.byBlock.clear();
@@ -177,12 +288,33 @@ export class DocumentRenderer {
     let total = 0;
     for (const layer of this.doc.layers) total += layer.placements.size;
     this.largeMap = total > LARGE_MAP;
+    // Shadows make roofs shade their own walls like in-game; too heavy on large maps.
+    this.batcher.shadows = !this.largeMap;
     this.geometry.setLite?.(this.largeMap);
 
+    // Where a big map's load time goes, in the console (cheap: a few clock reads per placement).
+    const t0 = performance.now();
+    this.timing = { cells: 0, clips: 0, build: 0, park: 0 };
     for (const layer of this.doc.layers) {
       this.ensureLayerGroup(layer);
       for (const p of layer.placements.values()) this.addPlacement(layer, p);
     }
+    const t = this.timing;
+    this.timing = null;
+    if (total > LARGE_MAP)
+      console.log(`[renderer] rebuilt ${total} placements in ${Math.round(performance.now() - t0)} ms ` +
+        `(cells ${Math.round(t.cells)}, clips ${Math.round(t.clips)}, build ${Math.round(t.build)}, park ${Math.round(t.park)}; ` +
+        `${this.placementObjects.size} near, ${this.farSet.size} far)`);
+  }
+
+  private timing: { cells: number; clips: number; build: number; park: number } | null = null;
+
+  private timed<T>(key: "cells" | "clips" | "build" | "park", fn: () => T): T {
+    if (!this.timing) return fn();
+    const a = performance.now();
+    const out = fn();
+    this.timing[key] += performance.now() - a;
+    return out;
   }
 
   // --- layer groups & plane outlines ---
@@ -194,11 +326,17 @@ export class DocumentRenderer {
       g.name = `layer:${layer.id}`;
       this.layerGroups.set(layer.id, g);
       this.root.add(g);
+      const proxies = new ParkingGroup();
+      g.add(proxies);
+      this.proxyGroups.set(layer.id, proxies);
       this.addPlaneOutline(g);
       this.addLayerGrid(g, layer);
       this.refreshPlaneOutlines();
+      // Only a NEW group needs syncing here: layer changes arrive through
+      // layerChanged. Syncing on every call made adding a placement walk
+      // every placement — a 31,000-placement map took a minute to open.
+      this.syncLayerGroup(layer, g);
     }
-    this.syncLayerGroup(layer, g);
     return g;
   }
 
@@ -209,12 +347,19 @@ export class DocumentRenderer {
     for (const [id, info] of this.lodInfo) {
       if (info.layerId !== layer.id) continue;
       const obj = this.placementObjects.get(id);
-      if (obj) obj.visible = this.shouldShow(id);
+      if (obj) this.setShown(id, obj);
     }
     this.dirtyPools.add(layer.id);
     group.position.set(...layer.transform.translate);
     const [rx, ry, rz] = layer.transform.rotDeg;
     group.rotation.set(degToRad(rx), degToRad(ry), degToRad(rz), "YXZ");
+    // The parked objects' world matrices follow the layer only when told to.
+    const sig = JSON.stringify(layer.transform);
+    if (this.layerTransformSig.get(layer.id) !== sig) {
+      this.layerTransformSig.set(layer.id, sig);
+      group.updateMatrixWorld(true);
+      this.proxyGroups.get(layer.id)?.refresh();
+    }
     // Grid spacing changed? Rebuild this layer's grid lines.
     const grid = group.getObjectByName("layerGrid");
     const step = `${Math.max(layer.settings.gridStep[0], 1)}x${Math.max(layer.settings.gridStep[2], 1)}`;
@@ -390,6 +535,9 @@ export class DocumentRenderer {
       this.cellsOf.delete(id);
     }
     this.cellIndex.delete(layerId);
+    this.batcher.clearHost(g);
+    this.proxyGroups.delete(layerId);
+    this.layerTransformSig.delete(layerId);
     this.pools.get(layerId)?.dispose();
     this.pools.delete(layerId);
     this.dirtyPools.delete(layerId);
@@ -496,10 +644,10 @@ export class DocumentRenderer {
     return reg;
   }
 
-  /** Toggle a placed block's clip parts by what its neighbours join. */
-  private applyClips(layer: Layer, p: Placement, obj: Object3D): void {
+  /** Toggle a placed block's clip parts by what its neighbours join. True when anything flipped. */
+  private applyClips(layer: Layer, p: Placement, obj: Object3D): boolean {
     const s = this.clipSubject(layer, p);
-    if (!s || !s.info.clips.length) return;
+    if (!s || !s.info.clips.length) return false;
     const cells = this.cellIndex.get(layer.id);
     const hidden = hiddenClipParts(s, (cell) => {
       const out: ClipSubject[] = [];
@@ -511,9 +659,14 @@ export class DocumentRenderer {
       }
       return out;
     });
+    let changed = false;
     obj.traverse((o) => {
-      if (o.name.startsWith("clip:")) o.visible = !hidden.has(o.name);
+      if (!o.name.startsWith("clip:")) return;
+      const show = !hidden.has(o.name);
+      if (o.visible !== show) changed = true;
+      o.visible = show;
     });
+    return changed;
   }
 
   /** Re-evaluate the clips of every built block touching these cells. */
@@ -530,7 +683,7 @@ export class DocumentRenderer {
           seen.add(id);
           const q = layer.placements.get(id);
           const obj = this.placementObjects.get(id);
-          if (q && obj) this.applyClips(layer, q, obj);
+          if (q && obj && this.applyClips(layer, q, obj)) this.repark(id);
         }
       }
     }
@@ -541,9 +694,9 @@ export class DocumentRenderer {
     let ids = this.byBlock.get(p.block);
     if (!ids) this.byBlock.set(p.block, (ids = new Set()));
     ids.add(p.id);
-    this.registerCells(layer, p);
+    this.timed("cells", () => this.registerCells(layer, p));
     const reg = this.cellsOf.get(p.id);
-    if (reg) this.refreshClipsAround(layer.id, reg.keys);
+    if (reg) this.timed("clips", () => this.refreshClipsAround(layer.id, reg.keys));
 
     const [lx, ly, lz] = this.localPosition(p);
     const info: LodInfo = { layerId: layer.id, block: p.block, lx, ly, lz };
@@ -569,7 +722,7 @@ export class DocumentRenderer {
   private buildVisual(layer: Layer, p: Placement): void {
     const group = this.layerGroups.get(layer.id);
     if (!group) return;
-    const obj = this.buildObject(p, !this.largeMap, layer);
+    const obj = this.timed("build", () => this.buildObject(p, !this.largeMap, layer));
     if (this.wireframeOn) this.addWireframe(obj);
     obj.visible = (!this.isolatedIds || this.isolatedIds.has(p.id)) && isPlacementVisible(layer, p);
     obj.userData.placementId = p.id;
@@ -579,17 +732,23 @@ export class DocumentRenderer {
       child.userData.placementId = p.id;
       child.userData.layerId = layer.id;
     }
-    group.add(obj);
     this.placementObjects.set(p.id, obj);
-    this.applyClips(layer, p, obj);
+    this.timed("clips", () => this.applyClips(layer, p, obj));
+    this.timed("park", () => this.park(p.id, obj, layer.id));
+  }
+
+  /** Take a placement's object out of the scene and out of its batches. */
+  private dropVisual(placementId: string): void {
+    const obj = this.placementObjects.get(placementId);
+    if (!obj) return;
+    this.batcher.set(placementId, null);
+    obj.removeFromParent();
+    this.placementObjects.delete(placementId);
   }
 
   private removePlacement(placementId: string): void {
-    const obj = this.placementObjects.get(placementId);
-    if (obj) {
-      obj.removeFromParent();
-      this.placementObjects.delete(placementId);
-    }
+    this.dropVisual(placementId);
+    this.live.delete(placementId);
     const reg = this.unregisterCells(placementId);
     if (reg) this.refreshClipsAround(reg.layerId, reg.keys);
     if (this.isolatedIds?.delete(placementId) && this.isolatedIds.size === 0) this.setIsolation(null);
@@ -696,9 +855,11 @@ export class DocumentRenderer {
 
   setWireframe(on: boolean): void {
     this.wireframeOn = on;
-    for (const obj of this.placementObjects.values()) {
+    // The edge lines hang off the real meshes, so wireframe draws everything as itself.
+    for (const [id, obj] of this.placementObjects) {
       if (on) this.addWireframe(obj);
       else this.removeWireframe(obj);
+      this.repark(id);
     }
   }
 
@@ -737,11 +898,7 @@ export class DocumentRenderer {
       const p = layer?.placements.get(id);
       if (!layer || !p) continue;
       if (!(p.meta as { color?: string } | undefined)?.color) continue;
-      const obj = this.placementObjects.get(id);
-      if (obj) {
-        obj.removeFromParent();
-        this.placementObjects.delete(id);
-      }
+      this.dropVisual(id);
       this.buildVisual(layer, p);
     }
   }
@@ -757,11 +914,7 @@ export class DocumentRenderer {
       const layer = info ? this.doc.getLayer(info.layerId) : undefined;
       const p = layer?.placements.get(id);
       if (!layer || !p) continue;
-      const obj = this.placementObjects.get(id);
-      if (obj) {
-        obj.removeFromParent();
-        this.placementObjects.delete(id);
-      }
+      this.dropVisual(id);
       this.buildVisual(layer, p);
     }
   }
@@ -774,8 +927,9 @@ export class DocumentRenderer {
       while (o && !o.userData.placementId) o = o.parent;
       if (o?.userData.placementId) {
         let visible = true;
+        // The parking group is invisible by design; what it holds is not.
         for (let parent: Object3D | null = o; parent; parent = parent.parent)
-          if (!parent.visible) { visible = false; break; }
+          if (!parent.visible && parent.name !== "proxies") { visible = false; break; }
         if (!visible) continue;
         return {
           layerId: o.userData.layerId,
@@ -832,11 +986,7 @@ export class DocumentRenderer {
 
   /** Near -> far: drop the Object3D entirely; the pool box takes over. */
   private demote(id: string, info: LodInfo): void {
-    const obj = this.placementObjects.get(id);
-    if (obj) {
-      obj.removeFromParent();
-      this.placementObjects.delete(id);
-    }
+    this.dropVisual(id);
     this.farSet.add(id);
     this.dirtyPools.add(info.layerId);
   }
