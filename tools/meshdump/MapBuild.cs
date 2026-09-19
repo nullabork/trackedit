@@ -13,13 +13,20 @@ namespace Trackedit;
 /// the template: decoration, embedded items, palette, metadata and thumbnail
 /// all come from it.
 ///
-/// Placements that still match a block/item of the template (same name and
-/// pose) reuse the ORIGINAL object, so everything the editor does not model
-/// — skins, waypoint data, macroblock links, item snapping — survives
-/// untouched. Only new or moved placements are constructed.
+/// A save only applies CHANGES. Every placement that came from the template
+/// carries the index of its original object (`idx`, from `meshdump map`):
+/// - unchanged (same name and pose) -> the ORIGINAL object, untouched, so
+///   everything the editor does not model — skins, waypoint data, macroblock
+///   links, item snapping, variants — survives bit for bit;
+/// - moved or rotated -> the original object with only its pose patched;
+/// - gone from the editor -> removed; new in the editor -> constructed.
+/// Placements without an index (tracks imported before it existed, copies)
+/// fall back to matching an unused original by name and pose. Originals keep
+/// their order in the file; new objects are appended. The summary reports
+/// the four counts, so an unexpected "removed" or "moved" shows up at once.
 ///
-/// The template's lightmap (computed shadows) is dropped: it was baked for
-/// the old geometry. The game recomputes it (editor ▸ compute shadows, or the
+/// The template's lightmap (computed shadows) is kept when nothing changed
+/// and dropped otherwise: it was baked for the old geometry. The game recomputes it (editor ▸ compute shadows, or the
 /// Batch Compute Shadows Openplanet plugin for a whole folder).
 /// </summary>
 public static class MapBuild
@@ -60,7 +67,20 @@ public static class MapBuild
         // --- blocks -----------------------------------------------------------
         var outBlocks = new List<CGameCtnBlock>();
         var occupied = new HashSet<(int, int, int)>();
-        int reused = 0, built = 0;
+        int reused = 0, built = 0, moved = 0, recoloured = 0;
+        var usedBlocks = new HashSet<CGameCtnBlock>(ReferenceEqualityComparer.Instance);
+        var blockOrder = new Dictionary<CGameCtnBlock, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < originals.Count; i++) blockOrder[originals[i]] = i;
+        // The original a placement came from, if it still names the same block.
+        CGameCtnBlock? OriginalBlock(JsonElement p, string name) =>
+            p.TryGetProperty("idx", out var ix) && ix.ValueKind == JsonValueKind.Number && ix.GetInt32() is var n
+            && n >= 0 && n < originals.Count && originals[n] is { IsClip: false } o && o.Name == name && !usedBlocks.Contains(o) ? o : null;
+        CGameCtnBlock? TakeBlock(Dictionary<string, Queue<CGameCtnBlock>> pool, string key)
+        {
+            while (Take(pool, key) is { } candidate)
+                if (usedBlocks.Add(candidate)) return candidate;
+            return null;
+        }
         foreach (var p in doc.TryGetProperty("blocks", out var blocksEl) ? blocksEl.EnumerateArray() : default)
         {
             if (Bool(p, "isClip")) continue;
@@ -70,7 +90,17 @@ public static class MapBuild
             {
                 var pos = Vec(p, "absPos");
                 var rot = Vec(p, "yawPitchRoll");
-                block = Take(freePool, FreeKey(name, pos, rot));
+                var own = OriginalBlock(p, name);
+                if (own is { IsFree: true })
+                {
+                    // Its own original: untouched when the pose still matches, else only moved.
+                    block = own;
+                    usedBlocks.Add(own);
+                    if (FreeKey(name, own.AbsolutePositionInMap ?? default, own.YawPitchRoll ?? default) == FreeKey(name, pos, rot)) reused++;
+                    else { own.AbsolutePositionInMap = pos; own.YawPitchRoll = rot; moved++; }
+                }
+                else block = TakeBlock(freePool, FreeKey(name, pos, rot));
+                if (block is not null && own is null) reused++;
                 if (block is null)
                 {
                     block = NewBlock(name, p);
@@ -80,14 +110,22 @@ public static class MapBuild
                     block.YawPitchRoll = rot;
                     built++;
                 }
-                else reused++;
             }
             else
             {
                 var c = p.GetProperty("coord");
                 int x = c[0].GetInt32(), y = c[1].GetInt32(), z = c[2].GetInt32();
                 var dir = p.TryGetProperty("dir", out var d) && d.ValueKind == JsonValueKind.Number ? d.GetInt32() : 0;
-                block = Take(gridPool, GridKey(name, x, y, z, dir));
+                var own = OriginalBlock(p, name);
+                if (own is { IsFree: false })
+                {
+                    block = own;
+                    usedBlocks.Add(own);
+                    if (GridKey(name, own.Coord.X, own.Coord.Y, own.Coord.Z, (int)own.Direction) == GridKey(name, x, y, z, dir)) reused++;
+                    else { own.Coord = new Int3(x, y, z); own.Direction = (Direction)dir; moved++; }
+                }
+                else block = TakeBlock(gridPool, GridKey(name, x, y, z, dir));
+                if (block is not null && own is null) reused++;
                 if (block is null)
                 {
                     block = NewBlock(name, p);
@@ -97,11 +135,10 @@ public static class MapBuild
                         block.IsGround = g.GetBoolean();
                     built++;
                 }
-                else reused++;
                 occupied.Add((x, y, z));
             }
             // Repainting in the editor must stick on reused blocks too.
-            if (Enum_<DifficultyColor>(p, "color") is { } color) block.Color = color;
+            if (Enum_<DifficultyColor>(p, "color") is { } color && block.Color != color) { block.Color = color; recoloured++; }
             outBlocks.Add(block);
         }
 
@@ -119,16 +156,40 @@ public static class MapBuild
             outBlocks.Add(clip);
             clipsKept++;
         }
+        var blocksRemoved = originals.Count(o => !o.IsClip && !usedBlocks.Contains(o));
+        // Originals stay where they were in the file; new blocks follow.
+        outBlocks = outBlocks.OrderBy(b => blockOrder.TryGetValue(b, out var at) ? at : int.MaxValue).ToList();
 
         // --- items ------------------------------------------------------------
         var outItems = new List<CGameCtnAnchoredObject>();
-        int itemsReused = 0, itemsBuilt = 0, itemsSkipped = 0;
+        int itemsReused = 0, itemsBuilt = 0, itemsSkipped = 0, itemsMoved = 0;
+        var usedItems = new HashSet<CGameCtnAnchoredObject>(ReferenceEqualityComparer.Instance);
+        var itemOrder = new Dictionary<CGameCtnAnchoredObject, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < origItems.Count; i++) itemOrder[origItems[i]] = i;
         foreach (var p in doc.TryGetProperty("items", out var itemsEl) ? itemsEl.EnumerateArray() : default)
         {
             var name = p.GetProperty("name").GetString()!;
             var pos = Vec(p, "absPos");
             var rot = Vec(p, "yawPitchRoll");
-            var item = Take(itemPool, FreeKey(name, pos, rot));
+            CGameCtnAnchoredObject? item = null;
+            if (p.TryGetProperty("idx", out var ix) && ix.ValueKind == JsonValueKind.Number && ix.GetInt32() is var n
+                && n >= 0 && n < origItems.Count && origItems[n].ItemModel.Id == name && usedItems.Add(origItems[n]))
+            {
+                item = origItems[n];
+                if (FreeKey(name, item.AbsolutePositionInMap, item.YawPitchRoll) == FreeKey(name, pos, rot)) itemsReused++;
+                else
+                {
+                    item.AbsolutePositionInMap = pos;
+                    item.YawPitchRoll = rot;
+                    item.BlockUnitCoord = new Byte3((byte)Math.Clamp((int)(pos.X / 32f), 0, 255), (byte)Math.Clamp((int)(pos.Y / 8f), 0, 255), (byte)Math.Clamp((int)(pos.Z / 32f), 0, 255));
+                    itemsMoved++;
+                }
+            }
+            else
+            {
+                while (Take(itemPool, FreeKey(name, pos, rot)) is { } candidate)
+                    if (usedItems.Add(candidate)) { item = candidate; itemsReused++; break; }
+            }
             if (item is null)
             {
                 if (itemProto is null) { itemsSkipped++; continue; }
@@ -147,10 +208,12 @@ public static class MapBuild
                 foreach (var chunk in itemProto.Chunks) item.Chunks.Add(chunk);
                 itemsBuilt++;
             }
-            else itemsReused++;
-            if (Enum_<DifficultyColor>(p, "color") is { } color) item.Color = color;
+            if (Enum_<DifficultyColor>(p, "color") is { } color && item.Color != color) { item.Color = color; recoloured++; }
             outItems.Add(item);
         }
+        var itemsRemoved = origItems.Count(o => !usedItems.Contains(o));
+        outItems = outItems.OrderBy(it => itemOrder.TryGetValue(it, out var at) ? at : int.MaxValue).ToList();
+        var changed = built + moved + recoloured + blocksRemoved + itemsBuilt + itemsMoved + itemsRemoved > 0;
 
         // --- write ------------------------------------------------------------
         map.Blocks!.Clear();
@@ -172,7 +235,10 @@ public static class MapBuild
         {
             string? MoodOf(string id) => Moods.FirstOrDefault(m => id.EndsWith(m, StringComparison.Ordinal));
             if (MoodOf(wanted) is { } mood && MoodOf(deco.Id) is { } current && mood != current)
+            {
                 map.Decoration = new Ident(deco.Id[..^current.Length] + mood, deco.Collection, deco.Author);
+                changed = true; // another mood is another light: the baked shadows no longer fit
+            }
         }
 
         // A mood mod carrying the editor's sun (see MoodMod). A map has room
@@ -183,12 +249,17 @@ public static class MapBuild
             var own = map.ModPackDesc;
             var ownIsSun = own?.FilePath?.Contains("TrackeditSun", StringComparison.OrdinalIgnoreCase) ?? false;
             if (own is null || ownIsSun || (string.IsNullOrEmpty(own.FilePath) && string.IsNullOrEmpty(own.LocatorUrl)))
+            {
+                // A different sun than the one the shadows were baked under.
+                if (own?.FilePath != sunMod) changed = true;
                 map.ModPackDesc = new PackDesc(sunMod, null, doc.TryGetProperty("sunModUrl", out var urlEl) ? urlEl.GetString() ?? "" : "");
+            }
             else sunModSkipped = true;
         }
 
+        // Baked shadows are only valid for the geometry they were baked for.
         var hadLightmap = map.LightmapCache is not null;
-        DropLightmap(map);
+        if (changed) DropLightmap(map);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         gbx.Save(outPath);
@@ -203,12 +274,19 @@ public static class MapBuild
             blocks = check.Blocks?.Count ?? 0,
             blocksReused = reused,
             blocksBuilt = built,
+            blocksMoved = moved,
+            blocksRemoved,
+            itemsMoved,
+            itemsRemoved,
+            recoloured,
+            changed,
             clipsKept,
             items = check.AnchoredObjects?.Count ?? 0,
             itemsReused,
             itemsBuilt,
             itemsSkipped,
-            lightmapDropped = hadLightmap,
+            lightmapDropped = hadLightmap && changed,
+            lightmapKept = hadLightmap && !changed,
             decoration = check.Decoration?.Id,
             mod = check.ModPackDesc?.FilePath,
             modUrl = check.ModPackDesc?.LocatorUrl,
@@ -260,9 +338,11 @@ public static class MapBuild
 
     private static string GridKey(string name, int x, int y, int z, int dir) => $"{name}|{x},{y},{z}|{dir}";
 
+    // "+ 0f" folds the file's -0.0 into 0: JSON cannot carry the sign of a zero,
+    // and a pose that only differs by it has not moved.
     private static string FreeKey(string name, Vec3 pos, Vec3 rot) =>
         string.Create(CultureInfo.InvariantCulture,
-            $"{name}|{MathF.Round(pos.X, 2)},{MathF.Round(pos.Y, 2)},{MathF.Round(pos.Z, 2)}|{MathF.Round(rot.X, 3)},{MathF.Round(rot.Y, 3)},{MathF.Round(rot.Z, 3)}");
+            $"{name}|{MathF.Round(pos.X, 2) + 0f},{MathF.Round(pos.Y, 2) + 0f},{MathF.Round(pos.Z, 2) + 0f}|{MathF.Round(rot.X, 3) + 0f},{MathF.Round(rot.Y, 3) + 0f},{MathF.Round(rot.Z, 3) + 0f}");
 
     private static bool Bool(JsonElement p, string name) =>
         p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;

@@ -209,7 +209,13 @@ function entry(p: Placement): [string, Placement] {
  * layer can't stay on the game grid, so its blocks are baked to free blocks
  * (absPos + yaw) instead — gbxbuild supports both.
  */
-export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET, waypoints?: WaypointTypes): MapDump {
+export function exportDump(
+  doc: MapDocument,
+  yOffsetCells = DEFAULT_Y_OFFSET,
+  waypoints?: WaypointTypes,
+  /** Hidden layers are an editor view state. A real map save must not lose what they hold. */
+  includeHidden = false,
+): MapDump {
   const blocks: DumpBlock[] = [];
   const items: DumpItem[] = [];
   /**
@@ -225,7 +231,7 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET, wa
   };
 
   for (const layer of doc.layers) {
-    if (!layer.visible) continue;
+    if (!layer.visible && !includeHidden) continue;
     const identity = isIdentityTransform(layer.transform);
     // Layer rotation is a full Euler YXZ (layers can tilt on any axis);
     // conventions match DocumentRenderer / three.js.

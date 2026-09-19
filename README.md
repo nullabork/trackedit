@@ -432,16 +432,31 @@ For a track opened from TMX the template is the original file (cached under
 `maps/gbx` at import); other tracks need `templateMap` in the local config —
 any map with the base you want, e.g. an empty one saved from the game editor.
 
-- Placements that still match a block or item of the template (same name
-  and pose) reuse the original object, so skins, waypoints, macroblock links
-  and item snapping survive untouched. Only new or moved placements are
-  constructed (items are modelled on one of the template's items, so a
-  template without any item cannot take new ones).
+- **A save only applies changes.** Every imported placement carries the
+  index of its original object in the file (`idx`). Unchanged placements are
+  written as the ORIGINAL object, untouched — skins, waypoints, macroblock
+  links, item snapping, variants survive bit for bit and keep their order in
+  the file. A moved or rotated placement is the original object with only
+  its pose patched; deleted ones are removed; new ones are constructed and
+  appended (items are modelled on one of the template's items, so a template
+  without any item cannot take new ones). Tracks imported before the index
+  existed fall back to matching by name and pose. The status line reports
+  "added / moved / removed / recoloured", so anything unintended shows at once.
+- Hidden layers are saved too: hiding is a view state, not a deletion.
+- Light is only touched when you touch it: mood, time of day and the map's
+  mod stay the template's unless changed on the Sky & light page.
+- `npm run roundtrip` proves it on real maps (every map cached under
+  `maps/gbx`, or the ones named): an untouched save must report no change
+  and dump identically to the original, in order; three deliberate edits
+  must report exactly those three.
 - The map gets its own uid, derived from the editor document id: it never
   collides with the original's records, and re-saving overwrites the same map.
-- **Shadows are not computed.** The lightmap is the bulk of a map file (1.4
-  of Islander's 1.6 MB) and is baked by the game's lightmapper for exact
-  geometry; the template's is dropped because it no longer matches. The map
+- **Shadows**: an untouched save keeps the baked shadows. Any change to the
+  blocks, items, mood or sun drops them, because the lightmap is baked by the
+  game's lightmapper for exact geometry and light (it is the bulk of a map
+  file: 1.4 of Islander's 1.6 MB). The game can only rebake the whole map;
+  baking just the changed blocks would need our own baker
+  (`docs/NOTES-lightmap-baking.md`). The map
   loads and drives without it; compute shadows in the game editor, or run
   the [Batch Compute Shadows](https://openplanet.dev/plugin/batchcomputeshadows)
   Openplanet plugin over `Maps/Trackedit`, which drives the editor for you.

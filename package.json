@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:bridge": "tsc --noEmit --strict --module esnext --moduleResolution bundler --target es2022 --skipLibCheck tools/liveBridge.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "roundtrip": "tsx tools/roundtrip_check.ts"
   },
   "dependencies": {
     "three": "^0.168.0"

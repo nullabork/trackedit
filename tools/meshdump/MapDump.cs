@@ -56,8 +56,11 @@ public static class MapDump
         colorPalette = mapPath is null ? "Classic" : ColorPalette(mapPath),
         decoration = map.Decoration?.Id,
         mod = Pack(map.ModPackDesc),
-        blocks = (map.Blocks ?? []).Select(b => new
+        blocks = (map.Blocks ?? []).Select((b, index) => new
         {
+            // Position in the file's own list: lets a save find THIS object again
+            // (MapBuild), however many identical blocks share its pose.
+            idx = index,
             name = b.Name,
             coord = new[] { b.Coord.X, b.Coord.Y, b.Coord.Z },
             dir = (int)b.Direction,
@@ -80,8 +83,9 @@ public static class MapDump
                 foregroundPack = Pack(b.Skin.ForegroundPackDesc),
             },
         }),
-        items = (map.AnchoredObjects ?? []).Select(i => new
+        items = (map.AnchoredObjects ?? []).Select((i, index) => new
         {
+            idx = index,
             name = i.ItemModel.Id,
             itemAuthor = i.ItemModel.Author,
             absPos = Vector(i.AbsolutePositionInMap),
