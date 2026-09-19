@@ -309,6 +309,13 @@ def mood_xml_with_sun(path, daytime01, latitude):
     return xml
 
 
+def put(z, name, data):
+    """Fixed timestamp: the same look gives the same zip, byte for byte (it is named and shared by its hash)."""
+    info = zipfile.ZipInfo(name, date_time=(2020, 7, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_DEFLATED
+    z.writestr(info, data)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", required=True, help="mod name -> Skins/Stadium/Mod/<name>.zip")
@@ -350,13 +357,13 @@ def main():
     with zipfile.ZipFile(out, "a" if args.append and os.path.exists(out) else "w", zipfile.ZIP_DEFLATED) as z:
         for mood in args.moods:
             sky = sky_color_dds(linear, os.path.join(moods_dir, mood, "SkyColor.dds"))
-            z.writestr(f"Moods/{mood}/SkyColor.dds", sky)
+            put(z, f"Moods/{mood}/SkyColor.dds", sky)
             if args.clouds == "clear":
-                z.writestr(f"Moods/{mood}/SkyClouds.dds", clear_clouds_dds(os.path.join(moods_dir, mood, "SkyClouds.dds")))
+                put(z, f"Moods/{mood}/SkyClouds.dds", clear_clouds_dds(os.path.join(moods_dir, mood, "SkyClouds.dds")))
             if args.mood_xml:
                 z.write(args.mood_xml, f"Moods/{mood}/Mood.MoodSetting.xml")
             elif daytime01 is not None or latitude is not None:
-                z.writestr(f"Moods/{mood}/Mood.MoodSetting.xml", mood_xml_with_sun(os.path.join(moods_dir, mood, "Mood.MoodSetting.xml"), daytime01, latitude))
+                put(z, f"Moods/{mood}/Mood.MoodSetting.xml", mood_xml_with_sun(os.path.join(moods_dir, mood, "Mood.MoodSetting.xml"), daytime01, latitude))
     print(f"wrote {out} ({os.path.getsize(out)} bytes): moods {', '.join(args.moods)}, clouds {args.clouds}" +
           (", mood settings included" if args.mood_xml or daytime01 is not None or latitude is not None else ""))
     print("map reference: Skins\\Stadium\\Mod\\" + args.name + ".zip")

@@ -183,7 +183,7 @@ public static class MapBuild
             var own = map.ModPackDesc;
             var ownIsSun = own?.FilePath?.Contains("TrackeditSun", StringComparison.OrdinalIgnoreCase) ?? false;
             if (own is null || ownIsSun || (string.IsNullOrEmpty(own.FilePath) && string.IsNullOrEmpty(own.LocatorUrl)))
-                map.ModPackDesc = new PackDesc(sunMod, null, "");
+                map.ModPackDesc = new PackDesc(sunMod, null, doc.TryGetProperty("sunModUrl", out var urlEl) ? urlEl.GetString() ?? "" : "");
             else sunModSkipped = true;
         }
 
@@ -211,6 +211,7 @@ public static class MapBuild
             lightmapDropped = hadLightmap,
             decoration = check.Decoration?.Id,
             mod = check.ModPackDesc?.FilePath,
+            modUrl = check.ModPackDesc?.LocatorUrl,
             sunModSkipped,
         }));
         return 0;

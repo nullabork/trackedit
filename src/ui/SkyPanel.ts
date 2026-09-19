@@ -134,11 +134,20 @@ export function buildSkyPanel(ctx: EditorContext, shell: Shell): void {
       "It draws its own sun disc on top, so paint none. Needs Python with numpy and Pillow on this machine when saving."),
   );
 
+  const hosted = el("p", { class: "hint sky-hosted" });
+  syncers.push(() => {
+    const h = doc.atmosphere.hosted;
+    hosted.replaceChildren(...(h
+      ? ["Shared from ", el("a", { href: h.url, target: "_blank", rel: "noopener" }, h.url),
+        " — saves keep this link while the look is unchanged. ",
+        el("button", { class: "btn", onclick: () => doc.setAtmosphere({ hosted: null }) }, "Forget the link")]
+      : ["Not shared yet: after a save you can upload the mod and give the map its link."]));
+  });
   const saveNote = el("p", { class: "hint" },
     "Save to Trackmania writes all of this into the map: the sun and sky as a mod in the game's Skins/Stadium/Mod folder, the fog as a clip. " +
-    "Compute shadows in the game afterwards — the bake uses this sun. The mod is a local file, so for now the look only shows on this machine.");
+    "Compute shadows in the game afterwards — the bake uses this sun. The mod is a local file: the save then walks you through uploading it so other players get the look too.");
   root.append(sunSection, fogSection, skySection,
-    el("div", { class: "sky-buttons" }, el("button", { class: "btn primary", onclick: () => void saveToGameFlow(ctx) }, "Save to Trackmania…")), saveNote);
+    el("div", { class: "sky-buttons" }, el("button", { class: "btn primary", onclick: () => void saveToGameFlow(ctx) }, "Save to Trackmania…")), hosted, saveNote);
 
   const sync = () => {
     for (const s of syncers) s();

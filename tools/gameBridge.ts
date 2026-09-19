@@ -13,6 +13,10 @@ import { extname, join } from "node:path";
  *   POST /api/game/save   -> body { dump, docId, tmxId?, atmosphere? } ; { path, blocks, items, notes, … }
  *   POST /api/game/sky?name=&doc= -> body = image bytes ; { file }   (custom sky images, kept under maps/sky)
  *   GET  /api/game/sky/<file>     -> the image
+ *   GET  /api/game/mod/<name>.zip -> download a sun/sky mod this bridge wrote
+ *   POST /api/game/mod/reveal     -> body { name } ; shows the zip in the file manager
+ *   POST /api/game/mod/url        -> body { name, url, mapPath, force? } ; checks that the URL serves exactly
+ *                                    that zip, then writes it into the map ; { verified, reason, written }
  *
  * The file is written by `meshdump build` from a TEMPLATE map: decoration,
  * embedded items, palette and metadata come from it. For a track opened from
@@ -29,6 +33,9 @@ import { extname, join } from "node:path";
  *   the sky image. The zip's name carries a hash of its content, so the game
  *   never shows a stale copy. A map has room for ONE mod: a template that
  *   already has a texture pack keeps it and the sun is skipped (reported).
+ *   The zip is a local file, so only this machine sees the look — until the
+ *   author uploads it and gives the map its URL (the editor's share dialog
+ *   drives the /api/game/mod routes for that).
  * - fog becomes a MediaTracker clip (`meshdump atmosphere fog=…`). Its nodes
  *   are cloned from two donor maps fetched from TMX once and cached under
  *   maps/gbx (see FOG_DONORS).
@@ -46,7 +53,14 @@ interface AtmosphereBody {
   sun?: { dayTime01: number; latitude: number; color: string | null; intensity: number; moonColor: string | null; moonIntensity: number } | null;
   fog?: { color: string; intensity: number; skyIntensity: number; distance: number; cloudsOpacity: number } | null;
   sky?: { image: string; exposure: number; clouds: "keep" | "clear" } | null;
+  hosted?: { name: string; url: string } | null;
 }
+
+interface SunMod { name: string; ref: string; bytes: number }
+
+const MOD_NAME = /^TrackeditSun_[A-Za-z0-9_]+\.zip$/;
+const modFolder = (tm: string): string => join(tm, "Skins", "Stadium", "Mod");
+const modRef = (name: string): string => ["Skins", "Stadium", "Mod", name].join("\\");
 
 const skyDir = (): string => join(process.cwd(), "maps", "sky");
 const safeName = (name: string): string => name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-80);
@@ -74,11 +88,11 @@ async function tmxMapFile(tmxId: number): Promise<string> {
  * reference (relative to the game's user folder), or null when there is
  * nothing custom to write.
  */
-async function writeSunMod(meshdump: string, tm: string, uid: string, atmosphere: AtmosphereBody, notes: string[]): Promise<string | null> {
+async function writeSunMod(meshdump: string, tm: string, uid: string, atmosphere: AtmosphereBody, notes: string[]): Promise<SunMod | null> {
   const { sun, sky } = atmosphere;
   if (!sun && !sky) return null;
   const moods = join(localCfg().openplanetDir ?? join(homedir(), "OpenplanetNext"), "Extract", "GameData", "Stadium", "Media", "Moods");
-  const modDir = join(tm, "Skins", "Stadium", "Mod");
+  const modDir = modFolder(tm);
   await mkdir(modDir, { recursive: true });
   const stem = `TrackeditSun_${uid.replace(/[^A-Za-z0-9]/g, "").slice(0, 8)}`;
   const building = `${stem}_building.zip`;
@@ -110,8 +124,28 @@ async function writeSunMod(meshdump: string, tm: string, uid: string, atmosphere
     if (old.startsWith(`${stem}_`) && old !== building) await rm(join(modDir, old), { force: true });
   await writeFile(join(modDir, name), data);
   await rm(zip, { force: true });
-  return ["Skins", "Stadium", "Mod", name].join("\\");
+  return { name, ref: modRef(name), bytes: data.length };
 }
+
+/** Does the URL serve exactly this file? (Share pages that wrap the file in HTML do not.) */
+async function checkHosted(url: string, local: Buffer): Promise<{ verified: boolean; reason: string }> {
+  try {
+    const r = await fetch(url, { redirect: "follow", headers: { "User-Agent": "trackedit-dev" }, signal: AbortSignal.timeout(60_000) });
+    if (!r.ok) return { verified: false, reason: `The link answered ${r.status}.` };
+    const got = Buffer.from(await r.arrayBuffer());
+    if (got.equals(local)) return { verified: true, reason: "The link serves exactly this file." };
+    const html = got.subarray(0, 200).toString("utf-8").toLowerCase().includes("<html") || (r.headers.get("content-type") ?? "").includes("text/html");
+    return {
+      verified: false,
+      reason: html
+        ? "The link opens a web page, not the file itself. The game needs a direct download link."
+        : `The link serves a different file (${got.length} bytes, expected ${local.length}). Upload the zip this save wrote.`,
+    };
+  } catch (err) {
+    return { verified: false, reason: `The link could not be fetched (${err instanceof Error ? err.message : err}).` };
+  }
+}
+
 
 const localCfg = (): LocalCfg => {
   try {
@@ -190,6 +224,58 @@ export function gameBridge(meshdump: string): Plugin {
         }
       });
 
+      server.middlewares.use("/api/game/mod", async (req, res) => {
+        try {
+          const tm = trackmaniaDir();
+          if (!tm) return send(res, 404, { error: "Trackmania's Documents folder was not found" });
+          const route = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname.replace(/^\/+/, ""));
+          const zipOf = (name: unknown): string | null => {
+            if (typeof name !== "string" || !MOD_NAME.test(name)) return null;
+            const path = join(modFolder(tm), name);
+            return existsSync(path) ? path : null;
+          };
+          if (req.method === "GET") {
+            const path = zipOf(route);
+            if (!path) return send(res, 404, { error: "no such mod" });
+            res.statusCode = 200;
+            res.setHeader("content-type", "application/zip");
+            res.setHeader("content-disposition", `attachment; filename="${route}"`);
+            return res.end(await readFile(path));
+          }
+          if (req.method !== "POST") return send(res, 405, { error: "GET or POST" });
+          const chunks: Buffer[] = [];
+          for await (const c of req) chunks.push(c as Buffer);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}") as { name?: string; url?: string; mapPath?: string; force?: boolean };
+          const zip = zipOf(body.name);
+          if (!zip) return send(res, 404, { error: "no such mod" });
+
+          if (route === "reveal") {
+            // Select the file where the platform can; otherwise open its folder.
+            const [cmd, args] = process.platform === "win32" ? ["explorer.exe", [`/select,${zip}`]]
+              : process.platform === "darwin" ? ["open", ["-R", zip]]
+              : ["xdg-open", [modFolder(tm)]];
+            // explorer.exe exits 1 even on success, so the exit code says nothing.
+            execFile(cmd as string, args as string[], () => {});
+            return send(res, 200, { ok: true, folder: modFolder(tm) });
+          }
+          if (route === "url") {
+            const url = (body.url ?? "").trim();
+            if (!/^https?:\/\//i.test(url)) return send(res, 400, { error: "an http(s) link is required" });
+            const mapsDir = join(tm, "Maps", "Trackedit");
+            const mapPath = body.mapPath ?? "";
+            if (!mapPath.startsWith(mapsDir) || mapPath.includes("..") || !existsSync(mapPath))
+              return send(res, 400, { error: "the map has to be one this bridge saved" });
+            const check = await checkHosted(url, await readFile(zip));
+            if (!check.verified && !body.force) return send(res, 200, { ...check, written: false });
+            await run(meshdump, ["atmosphere", mapPath, mapPath, `mod=${modRef(body.name!)}`, `modUrl=${url}`]);
+            return send(res, 200, { ...check, written: true });
+          }
+          send(res, 404, { error: "unknown mod route" });
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
       server.middlewares.use("/api/game/save", async (req, res) => {
         let work: string | null = null;
         try {
@@ -220,13 +306,16 @@ export function gameBridge(meshdump: string): Plugin {
           const uid = mapUidFor(body.docId);
           const atmosphere = body.atmosphere ?? {};
           const sunMod = await writeSunMod(meshdump, tm, uid, atmosphere, notes);
-          await writeFile(placements, JSON.stringify({ ...body.dump, mapUid: uid, ...(sunMod ? { sunMod } : {}) }));
+          // An upload the author already confirmed for this exact zip rides along.
+          const hostedUrl = sunMod && atmosphere.hosted?.name === sunMod.name ? atmosphere.hosted.url : null;
+          await writeFile(placements, JSON.stringify({ ...body.dump, mapUid: uid, ...(sunMod ? { sunMod: sunMod.ref, sunModUrl: hostedUrl ?? "" } : {}) }));
           const outDir = join(tm, "Maps", "Trackedit");
           const out = join(outDir, `${fileStem(body.dump.mapName ?? "track")}.Map.Gbx`);
           const result = await run(meshdump, ["build", template!, placements, out]);
           const summary = JSON.parse(result.trim().split("\n").pop() ?? "{}") as Record<string, unknown>;
           if (summary.sunModSkipped) notes.push("This map already uses a texture pack, and a map has room for one mod only: the custom sun and sky were not written.");
           else if (sunMod) notes.push("Custom sun and sky written — compute shadows in the game to bake the light in.");
+          const written = sunMod && !summary.sunModSkipped ? { name: sunMod.name, bytes: sunMod.bytes, url: hostedUrl } : null;
 
           const fog = atmosphere.fog;
           if (fog && fog.intensity > 0) {
@@ -236,7 +325,7 @@ export function gameBridge(meshdump: string): Plugin {
               `groupDonor=${await tmxMapFile(FOG_DONORS.group)}`, `fogDonor=${await tmxMapFile(FOG_DONORS.fog)}`]);
             notes.push("Fog clip written.");
           }
-          send(res, 200, { ...summary, notes });
+          send(res, 200, { ...summary, notes, sunMod: written });
         } catch (err) {
           send(res, 502, { error: err instanceof Error ? err.message : String(err) });
         } finally {

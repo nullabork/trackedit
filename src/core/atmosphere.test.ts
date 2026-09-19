@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockOf, directionFrom, headingAltitude, lightDirection, sunFromHeading } from "./atmosphere";
+import { clockOf, directionFrom, headingAltitude, isDownloadUrl, lightDirection, sunFromHeading } from "./atmosphere";
 import { sunDirection } from "./sun";
 
 describe("compass", () => {
@@ -32,6 +32,17 @@ describe("lightDirection", () => {
     expect(day.altitude).toBeCloseTo(42.3, 0);
     const custom = lightDirection("Day", { dayTime01: 0.625, latitude: 0, color: null, intensity: 1, moonColor: null, moonIntensity: 1 });
     expect(custom[1]).toBeCloseTo(1, 6);
+  });
+});
+
+describe("isDownloadUrl", () => {
+  it("takes absolute web links only", () => {
+    expect(isDownloadUrl("https://example.com/mods/TrackeditSun_ab_12.zip")).toBe(true);
+    expect(isDownloadUrl("  http://files.example.org/x.zip ")).toBe(true);
+    expect(isDownloadUrl("C:\\mods\\x.zip")).toBe(false);
+    expect(isDownloadUrl("ftp://example.com/x.zip")).toBe(false);
+    expect(isDownloadUrl("https://localhost/x.zip")).toBe(false);
+    expect(isDownloadUrl("")).toBe(false);
   });
 });
 

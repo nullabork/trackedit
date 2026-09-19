@@ -531,6 +531,13 @@ for custom lighting — that **computing shadows in the game with the mod
 active bakes the custom sun** into the lightmap. If it does, custom baked
 lighting needs no baker of our own.
 
-Open: Night (where the moon really is), hosting the mod by URL, merging the
+Sharing (same day): the zip is reproducible (fixed entry timestamps) and
+named by its hash; after a save the editor walks the author through
+download / show in folder, upload, paste the link, and the bridge verifies
+the link serves exactly that zip before writing it into the map's mod
+reference (`/api/game/mod/*`). Not yet seen: the game downloading the mod
+from such a link on a machine that lacks the file.
+
+Open: Night (where the moon really is), merging the
 sun into a map's existing texture pack, ambient colour and colour grading
 (`Fx/ColorGrading`) as further controls.

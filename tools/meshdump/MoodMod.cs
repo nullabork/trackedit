@@ -46,6 +46,8 @@ public static class MoodMod
             xml = Recolour(xml, "LDirSun", Opt("sun"), Num("sunX") ?? 1);
             xml = Recolour(xml, "LDirMoon", Opt("moon"), Num("moonX") ?? 1);
             var entry = zip.CreateEntry($"Moods/{mood}/Mood.MoodSetting.xml");
+            // Same look, same bytes: the zip is named by its hash, and an uploaded copy has to keep matching.
+            entry.LastWriteTime = new DateTimeOffset(2020, 7, 1, 0, 0, 0, TimeSpan.Zero);
             using var w = new StreamWriter(entry.Open());
             w.Write(xml);
         }

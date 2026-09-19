@@ -860,3 +860,19 @@ input[type="number"] { font-family: Consolas, monospace; }
 .sky-panel .sky-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .sky-panel .sky-file { color: var(--ink-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sky-panel .btn:disabled { opacity: 0.4; cursor: default; }
+.sky-panel .sky-hosted a { color: var(--teal); word-break: break-all; }
+
+/* Share-the-mod dialog */
+.mod-share { display: flex; flex-direction: column; gap: 12px; font-size: 12px; }
+.mod-share .share-step { display: flex; gap: 10px; }
+.mod-share .share-step > b { flex: 0 0 22px; height: 22px; display: grid; place-items: center; background: var(--bg-3); color: var(--teal); }
+.mod-share .share-step > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mod-share .share-title { color: var(--ink-0); font-weight: 600; }
+.mod-share .share-file { color: var(--ink-1); word-break: break-all; }
+.mod-share .share-buttons { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mod-share .share-buttons .input { flex: 1 1 100%; }
+.mod-share a.btn { text-decoration: none; }
+.mod-share .share-result { margin: 0; min-height: 1.2em; color: var(--ink-1); }
+.mod-share .share-result.bad { color: var(--red); }
+.mod-share .share-result.ok { color: var(--green-ok); }
+.mod-share .hint { margin: 0; }

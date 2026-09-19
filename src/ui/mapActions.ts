@@ -1,3 +1,4 @@
+import { openModShareDialog, type SavedSunMod } from "./ModShareDialog";
 import type { EditorContext } from "@plugins/api";
 import { importDump, exportDump } from "@io/trackoJson";
 import type { MapDump } from "@io/trackoJson";
@@ -62,7 +63,7 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ dump: exportDump(ctx.document), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
     });
-    const json = (await res.json()) as { notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
+    const json = (await res.json()) as { sunMod?: SavedSunMod | null; notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
     if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
     const edited = (json.blocksBuilt ?? 0) + (json.itemsBuilt ?? 0);
     ctx.ui.setStatus(
@@ -71,6 +72,8 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
       (json.itemsSkipped ? `, ${json.itemsSkipped} items skipped (template has no item to model them on)` : "") +
       ". Shadows are not computed: open it in the game editor and compute them there." +
       (json.notes?.length ? ` ${json.notes.join(" ")}` : ""));
+    // A freshly written look is a local file: offer the upload-and-link step.
+    if (json.sunMod && !json.sunMod.url && json.path) openModShareDialog(ctx, json.sunMod, json.path);
   } catch (err) {
     ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
   }

@@ -494,8 +494,18 @@ latitude, so every direction above the horizon is one pair
   `maps/gbx`. The map's own in-game clips are kept.
 - the editor's **mood** (the decoration's Day/Sunset/Night/Sunrise suffix).
 
-Limits: the mod is a local file, so the look only shows on this machine
-until mods can be hosted by URL; static geometry only takes the new light
+**Sharing the look.** The mod zip is a local file, so right after a save
+only this machine sees the sun and sky. A save that wrote a new zip opens a
+three-step dialog: get the file (browser download, or shown in Explorer /
+the file manager), upload it anywhere that serves the file itself, paste the
+link. The dev server downloads the link and compares it byte for byte with
+the zip before it writes the link into the map — a share page or a stale
+upload is caught there ("Use it anyway" overrides). The zips are
+reproducible, so the same look keeps the same name and link across saves;
+change the sun or sky image and the next save asks again. The link is kept
+with the track and shown on the Sky & light page.
+
+Limits: static geometry only takes the new light
 after **computing shadows in the game**; the Night mood's own light (where
 its moon is) is not understood yet. Research log:
 `docs/NOTES-lightmap-baking.md`.

@@ -39,13 +39,34 @@ export interface CustomSky {
   clouds: "keep" | "clear";
 }
 
+/**
+ * Where the map's sun/sky mod can be downloaded from, once its author has
+ * uploaded it somewhere. Tied to the exact zip (its content-hashed name): a
+ * changed look is a new file and has to be uploaded again.
+ */
+export interface HostedMod {
+  name: string;
+  url: string;
+}
+
 export interface Atmosphere {
   sun: CustomSun | null;
   fog: CustomFog | null;
   sky: CustomSky | null;
+  hosted?: HostedMod | null;
 }
 
-export const EMPTY_ATMOSPHERE: Atmosphere = { sun: null, fog: null, sky: null };
+export const EMPTY_ATMOSPHERE: Atmosphere = { sun: null, fog: null, sky: null, hosted: null };
+
+/** A link the game could download from: absolute http(s). */
+export function isDownloadUrl(text: string): boolean {
+  try {
+    const url = new URL(text.trim());
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
 
 export const DEFAULT_FOG: CustomFog = { color: "#c8d4e0", intensity: 0.5, skyIntensity: 0.5, distance: 6000, cloudsOpacity: 1 };
 
@@ -115,5 +136,6 @@ export function cloneAtmosphere(a: Atmosphere | null | undefined): Atmosphere {
     sun: a?.sun ? { ...a.sun } : null,
     fog: a?.fog ? { ...a.fog } : null,
     sky: a?.sky ? { ...a.sky } : null,
+    hosted: a?.hosted ? { ...a.hosted } : null,
   };
 }
