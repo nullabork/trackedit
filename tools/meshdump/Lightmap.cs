@@ -45,6 +45,38 @@ public static class Lightmap
         return 0;
     }
 
+    /// <summary>
+    /// Give a map another map's baked shadows: `donor` is an earlier version of the same map (the
+    /// original a small edit started from). The game was seen to accept an old bake after small
+    /// edits (docs/NOTES-lightmap-baking.md, section 10), and a rebake can be much bigger than the
+    /// author's — enough to push a large map over a server's size limit.
+    /// </summary>
+    public static int Transplant(string donorPath, string targetPath, string outPath, string? name = null)
+    {
+        Gbx.LZO = new Lzo();
+        var donor = Gbx.ParseNode<CGameCtnChallenge>(donorPath);
+        var gbx = Gbx.Parse<CGameCtnChallenge>(targetPath);
+        var map = gbx.Node;
+        if (donor.LightmapFrames is null || !donor.LightmapFrames.Any()) { Console.Error.WriteLine("the donor has no baked shadows"); return 2; }
+        if (!string.IsNullOrEmpty(name))
+        {
+            map.MapName = name;
+            map.MapUid = Convert.ToBase64String(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes("trackedit-lm:" + name)))
+                .Replace('+', '-').Replace('/', '_')[..27];
+        }
+        foreach (var prop in new[] { "LightmapFrames", "LightmapCacheData", "LightmapCache", "LightmapVersion", "HasLightmaps" })
+        {
+            var p = typeof(CGameCtnChallenge).GetProperty(prop);
+            if (p is null || !p.CanWrite) { Console.WriteLine($"  (not writable: {prop})"); continue; }
+            p.SetValue(map, p.GetValue(donor));
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        gbx.Save(outPath);
+        var check = Gbx.ParseNode<CGameCtnChallenge>(outPath);
+        Console.WriteLine($"wrote {outPath}: {new FileInfo(outPath).Length} bytes (target was {new FileInfo(targetPath).Length}, donor {new FileInfo(donorPath).Length}), {check.LightmapFrames?.Count() ?? 0} frames, uid {check.MapUid}");
+        return 0;
+    }
+
     /// <summary>Replace frame images with the PNGs found in <paramref name="dir"/> (same names as extract writes).</summary>
     public static int Inject(string mapPath, string dir, string outPath, bool lossless, string? name = null)
     {

@@ -194,6 +194,13 @@ switch (args[0])
     case "lightmap-extract":
         if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump lightmap-extract <map.Gbx> <outDir>"); return 1; }
         return Trackedit.Lightmap.Extract(args[1], args[2]);
+    case "lightmap-transplant":
+        {
+            if (args.Length < 4) { Console.Error.WriteLine("usage: meshdump lightmap-transplant <donor.Map.Gbx> <target.Map.Gbx> <out.Map.Gbx> [name=New name]"); return 1; }
+            var newName = args.Skip(4).FirstOrDefault(a => a.StartsWith("name="))?[5..];
+            try { return Trackedit.Lightmap.Transplant(args[1], args[2], args[3], newName); }
+            catch (Exception ex) { Console.Error.WriteLine($"transplant failed: {ex.Message}"); return 1; }
+        }
     case "lightmap-inject":
         if (args.Length < 4) { Console.Error.WriteLine("usage: meshdump lightmap-inject <map.Gbx> <pngDir> <out.Map.Gbx> [lossless]"); return 1; }
         return Trackedit.Lightmap.Inject(args[1], args[2], args[3], args.Skip(4).Contains("lossless"),

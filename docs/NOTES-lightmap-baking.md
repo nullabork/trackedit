@@ -574,3 +574,18 @@ Consequences:
   or small items' lightmap contribution is too subtle to notice — not
   conclusive for the baker; the texel-chart map with one item deleted would
   settle it.
+
+## 11. A rebake can push a map over a server's size limit — transplant the old bake (2026-09-19)
+
+Real case: RHEVARA (TMX 357419) loads on a Nadeo club room at 7,191,902
+bytes; the owner's copy with three block edits, rebaked in the game editor,
+was 7,589,204 bytes and the room edit answered "error code 400". 97 % of the
+growth was the lightmap (2,050,858 -> 2,436,128 bytes of frame images): the
+author's bake (cache quality "5") is smaller than the game's "Default".
+
+`meshdump lightmap-transplant <donor> <target> <out> [name=]` copies the
+donor's baked shadows (frames, cache, version) into the target and gives the
+copy its own name and uid. With the TMX original as donor the edited map came
+out at 7,055,749 bytes, blocks and items identical to the edited file. Whether
+the room takes it, and how the three edited spots look under the old bake, is
+for the map owner to confirm in game.
