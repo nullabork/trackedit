@@ -558,3 +558,19 @@ in `Maps/Trackedit`, each one edit away from the original, old lightmap kept:
 
 B is the informative one for the baker: it says whether the cache maps
 objects by list position.
+
+### Result (2026-09-19): all three look fine in game
+
+Reported by the map owner: A, B and C "all seem fine" — the game takes the
+old bake after an add, a delete and a move, without asking to recompute.
+Consequences:
+
+- `meshdump build` now KEEPS the template's lightmap across block edits by
+  default and only drops it when the light changed (mood, sun) or on
+  `"dropLightmap": true`; the summary flags `lightmapStale` when objects
+  changed under a kept bake.
+- B looking fine means the items after the deleted one did not visibly get
+  the wrong shadows. Either the cache does not map by plain list position,
+  or small items' lightmap contribution is too subtle to notice — not
+  conclusive for the baker; the texel-chart map with one item deleted would
+  settle it.

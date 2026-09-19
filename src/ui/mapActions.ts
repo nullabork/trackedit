@@ -63,7 +63,7 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ dump: exportDump(ctx.document, undefined, ctx.waypoints, true), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
     });
-    const json = (await res.json()) as { sunMod?: SavedSunMod | null; notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; blocksMoved?: number; itemsMoved?: number; blocksRemoved?: number; itemsRemoved?: number; recoloured?: number; lightmapKept?: boolean; itemsSkipped?: number; error?: string };
+    const json = (await res.json()) as { sunMod?: SavedSunMod | null; notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; blocksMoved?: number; itemsMoved?: number; blocksRemoved?: number; itemsRemoved?: number; recoloured?: number; lightmapKept?: boolean; lightmapStale?: boolean; itemsSkipped?: number; error?: string };
     if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
     const added = (json.blocksBuilt ?? 0) + (json.itemsBuilt ?? 0);
     const moved = (json.blocksMoved ?? 0) + (json.itemsMoved ?? 0);
@@ -73,7 +73,9 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
       `Saved ${json.path} — ${json.blocks} blocks, ${json.items} items` +
       (edited ? ` — changes applied: ${added} added, ${moved} moved, ${removed} removed, ${json.recoloured ?? 0} recoloured; everything else is the original, untouched` : " — no changes: every block and item is the original") +
       (json.itemsSkipped ? `, ${json.itemsSkipped} items skipped (template has no item to model them on)` : "") +
-      (json.lightmapKept ? ". The baked shadows were kept." : ". Shadows are not computed: open it in the game editor and compute them there.") +
+      (json.lightmapStale ? ". The original baked shadows were kept: only what you changed lacks them — compute shadows in the game when you want it clean."
+        : json.lightmapKept ? ". The baked shadows were kept."
+        : ". Shadows are not computed (the light changed, or the original had none): compute them in the game editor.") +
       (json.notes?.length ? ` ${json.notes.join(" ")}` : ""));
     // A freshly written look is a local file: offer the upload-and-link step.
     if (json.sunMod && !json.sunMod.url && json.path) offerModShare(ctx, json.sunMod, json.path);

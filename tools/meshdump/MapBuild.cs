@@ -25,8 +25,13 @@ namespace Trackedit;
 /// their order in the file; new objects are appended. The summary reports
 /// the four counts, so an unexpected "removed" or "moved" shows up at once.
 ///
-/// The template's lightmap (computed shadows) is kept when nothing changed
-/// and dropped otherwise: it was baked for the old geometry. The game recomputes it (editor ▸ compute shadows, or the
+/// The template's lightmap (computed shadows) is KEPT across block edits:
+/// originals keep their place in the file, and the game was seen to accept
+/// the old bake with a block added, an item deleted and a block moved
+/// (docs/NOTES-lightmap-baking.md, section 10) — the untouched map keeps its
+/// shadows, only the edited objects lack theirs until shadows are computed
+/// again. It is dropped when the LIGHT changed (mood, sun), since every
+/// shadow would point the wrong way, or on request (`"dropLightmap": true`). The game recomputes it (editor ▸ compute shadows, or the
 /// Batch Compute Shadows Openplanet plugin for a whole folder).
 /// </summary>
 public static class MapBuild
@@ -214,6 +219,7 @@ public static class MapBuild
         var itemsRemoved = origItems.Count(o => !usedItems.Contains(o));
         outItems = outItems.OrderBy(it => itemOrder.TryGetValue(it, out var at) ? at : int.MaxValue).ToList();
         var changed = built + moved + recoloured + blocksRemoved + itemsBuilt + itemsMoved + itemsRemoved > 0;
+        var lightChanged = false;
 
         // --- write ------------------------------------------------------------
         map.Blocks!.Clear();
@@ -237,7 +243,7 @@ public static class MapBuild
             if (MoodOf(wanted) is { } mood && MoodOf(deco.Id) is { } current && mood != current)
             {
                 map.Decoration = new Ident(deco.Id[..^current.Length] + mood, deco.Collection, deco.Author);
-                changed = true; // another mood is another light: the baked shadows no longer fit
+                lightChanged = true; // another mood is another light: the baked shadows no longer fit
             }
         }
 
@@ -251,19 +257,16 @@ public static class MapBuild
             if (own is null || ownIsSun || (string.IsNullOrEmpty(own.FilePath) && string.IsNullOrEmpty(own.LocatorUrl)))
             {
                 // A different sun than the one the shadows were baked under.
-                if (own?.FilePath != sunMod) changed = true;
+                if (own?.FilePath != sunMod) lightChanged = true;
                 map.ModPackDesc = new PackDesc(sunMod, null, doc.TryGetProperty("sunModUrl", out var urlEl) ? urlEl.GetString() ?? "" : "");
             }
             else sunModSkipped = true;
         }
 
         // Baked shadows are only valid for the geometry they were baked for.
-        // `keepLightmap` keeps them anyway — an experiment: originals keep their
-        // order and new objects are appended, so the old bake may still fit them.
         var hadLightmap = map.LightmapCache is not null;
-        var keepLightmap = doc.TryGetProperty("keepLightmap", out var keepEl) && keepEl.ValueKind == JsonValueKind.True;
-        if (keepLightmap) changed = false;
-        if (changed) DropLightmap(map);
+        var dropLightmap = lightChanged || (doc.TryGetProperty("dropLightmap", out var dropEl) && dropEl.ValueKind == JsonValueKind.True);
+        if (dropLightmap) DropLightmap(map);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         gbx.Save(outPath);
@@ -289,8 +292,11 @@ public static class MapBuild
             itemsReused,
             itemsBuilt,
             itemsSkipped,
-            lightmapDropped = hadLightmap && changed,
-            lightmapKept = hadLightmap && !changed,
+            lightChanged,
+            lightmapDropped = hadLightmap && dropLightmap,
+            lightmapKept = hadLightmap && !dropLightmap,
+            // Kept, but some objects changed since it was baked.
+            lightmapStale = hadLightmap && !dropLightmap && changed,
             decoration = check.Decoration?.Id,
             mod = check.ModPackDesc?.FilePath,
             modUrl = check.ModPackDesc?.LocatorUrl,

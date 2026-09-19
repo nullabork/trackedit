@@ -451,12 +451,15 @@ any map with the base you want, e.g. an empty one saved from the game editor.
   must report exactly those three.
 - The map gets its own uid, derived from the editor document id: it never
   collides with the original's records, and re-saving overwrites the same map.
-- **Shadows**: an untouched save keeps the baked shadows. Any change to the
-  blocks, items, mood or sun drops them, because the lightmap is baked by the
-  game's lightmapper for exact geometry and light (it is the bulk of a map
-  file: 1.4 of Islander's 1.6 MB). The game can only rebake the whole map;
-  baking just the changed blocks would need our own baker
-  (`docs/NOTES-lightmap-baking.md`). The map
+- **Shadows**: the original's baked shadows are kept, also across block
+  edits — originals keep their place in the file, and the game was seen to
+  accept the old bake with a block added, an item deleted and a block moved.
+  So an edited map still looks baked; only what you changed lacks its own
+  shadows (and a deleted block may leave its shadow behind) until you compute
+  shadows in the game, which always redoes the whole map. The bake is dropped
+  when the LIGHT changes (mood or a custom sun: every shadow would point the
+  wrong way) and with `"dropLightmap": true`. Baking just the changed blocks
+  ourselves needs our own baker (`docs/NOTES-lightmap-baking.md`). The map
   loads and drives without it; compute shadows in the game editor, or run
   the [Batch Compute Shadows](https://openplanet.dev/plugin/batchcomputeshadows)
   Openplanet plugin over `Maps/Trackedit`, which drives the editor for you.
