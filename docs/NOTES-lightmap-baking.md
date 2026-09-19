@@ -267,3 +267,30 @@ What this gives us, natively and per map, through one small mod zip:
 
 Caveat for sharing: a local mod path only works on this machine. Other
 players need the zip hosted at a URL (`modUrl=`), which the game downloads.
+
+## 8. Experiment 4 — where can the sun go? (in `Maps/Trackedit`)
+
+The sun's picture can be painted into the panorama; what matters is where
+the LIGHT comes from (car lighting and shadows now, our bake later). Three
+controls exist: `DayTime01` and `Latitude` in a mod's mood settings, and the
+map file's own `DayTime` field (`meshdump atmosphere … daytime=HH:MM`; one of
+the RPG maps on TMX uses it). The game's moods sit at DayTime01 0.6 (Day),
+0.73 (Sunset), 0.15 (Night), 0.52 (Sunrise), all at latitude 45.
+
+All five use the chart sky with clouds cleared, so the sun's glow can be
+read against it: **1 / 2 / 3 / 4 white squares mark headings a quarter turn
+apart** (1 = the left edge of the panorama), elevation rings every 15°, the
+thick ring is 45°, yellow line = horizon.
+
+| map | change | question |
+| --- | --- | --- |
+| Sun test J25 | DayTime01 0.25 | where is the sun early in the day |
+| Sun test J75 | DayTime01 0.75 | and late: does it cross the sky, which way |
+| Sun test K0 | noon, latitude 0 | does latitude raise the arc (sun overhead?) |
+| Sun test K85 | noon, latitude 85 | and lower it (sun near the horizon?) |
+| Sun test L06 | map DayTime 06:00, stock settings | does the map field move the sun without any settings file |
+
+For each: which heading squares the sun/glow is nearest, how many rings up,
+and which way the car's shadow falls. Also worth noting from the settings
+file: `Fx/ColorGrading FileName` — a per-mood colour grading LUT, i.e. a
+native full-screen filter a mod can ship.

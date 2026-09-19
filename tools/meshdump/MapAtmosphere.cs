@@ -15,6 +15,7 @@ namespace Trackedit;
 ///   `distance=`) and cloud opacity (`clouds=`). The clip is triggered on the
 ///   start block and keeps playing, so it covers the whole run.
 ///
+/// - `daytime=HH:MM` sets the map's own time of day.
 /// - `mod=` points the map at a texture mod (see tools/sky_mod.py), which
 ///   can replace the sky panorama, clouds and mood settings.
 ///
@@ -31,7 +32,7 @@ public static class MapAtmosphere
     {
         if (args.Length < 3)
         {
-            Console.Error.WriteLine("usage: meshdump atmosphere <in.Map.Gbx> <out.Map.Gbx> [mood=Sunset] [mod=Skins/Stadium/Mod/X.zip modUrl=https://...] [fog=r,g,b groupDonor=<map> fogDonor=<map> sky=0.8 intensity=1 distance=6000 clouds=1] [name=New name]");
+            Console.Error.WriteLine("usage: meshdump atmosphere <in.Map.Gbx> <out.Map.Gbx> [mood=Sunset] [daytime=HH:MM] [mod=Skins/Stadium/Mod/X.zip modUrl=https://...] [fog=r,g,b groupDonor=<map> fogDonor=<map> sky=0.8 intensity=1 distance=6000 clouds=1] [name=New name]");
             return 1;
         }
         string? Opt(string key) => args.Skip(3).FirstOrDefault(a => a.StartsWith(key + "="))?[(key.Length + 1)..];
@@ -57,6 +58,13 @@ public static class MapAtmosphere
             var next = (current is null ? id : id[..^current.Length]) + mood;
             map.Decoration = new Ident(next, deco.Collection, deco.Author);
             Console.WriteLine($"mood: {id} -> {next}");
+        }
+
+        if (Opt("daytime") is { } dayTime)
+        {
+            // The map's own time of day (HH:MM), independent of any mod.
+            map.DayTime = TimeSpan.Parse(dayTime, System.Globalization.CultureInfo.InvariantCulture);
+            Console.WriteLine($"daytime: {map.DayTime}");
         }
 
         if (Opt("mod") is { } modPath)
@@ -133,7 +141,7 @@ public static class MapAtmosphere
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(args[2]))!);
         gbx.Save(args[2]);
         var check = Gbx.ParseNode<CGameCtnChallenge>(args[2]);
-        Console.WriteLine($"wrote {args[2]}: decoration {check.Decoration?.Id}, in-game clips {check.ClipGroupInGame?.Clips.Count ?? 0}, lightmap frames {check.LightmapFrames?.Count() ?? 0}");
+        Console.WriteLine($"wrote {args[2]}: decoration {check.Decoration?.Id}, dayTime {check.DayTime}, in-game clips {check.ClipGroupInGame?.Clips.Count ?? 0}, lightmap frames {check.LightmapFrames?.Count() ?? 0}");
         return 0;
     }
 
