@@ -24,6 +24,8 @@ namespace Trackedit;
 /// </summary>
 public static class MapBuild
 {
+    private static readonly string[] Moods = ["Day", "Sunset", "Night", "Sunrise"];
+
     public static int Run(string templatePath, string placementsPath, string outPath)
     {
         Gbx.LZO = new Lzo();
@@ -165,6 +167,26 @@ public static class MapBuild
         if (doc.TryGetProperty("mapUid", out var uidEl) && uidEl.ValueKind == JsonValueKind.String && uidEl.GetString() is { Length: > 0 } uid)
             map.MapUid = uid;
 
+        // The editor's mood (the decoration's suffix); the base stays the template's.
+        if (doc.TryGetProperty("decoration", out var decoEl) && decoEl.GetString() is { } wanted && map.Decoration is { } deco)
+        {
+            string? MoodOf(string id) => Moods.FirstOrDefault(m => id.EndsWith(m, StringComparison.Ordinal));
+            if (MoodOf(wanted) is { } mood && MoodOf(deco.Id) is { } current && mood != current)
+                map.Decoration = new Ident(deco.Id[..^current.Length] + mood, deco.Collection, deco.Author);
+        }
+
+        // A mood mod carrying the editor's sun (see MoodMod). A map has room
+        // for one mod only, so a template that already has a texture pack keeps it.
+        var sunModSkipped = false;
+        if (doc.TryGetProperty("sunMod", out var modEl) && modEl.GetString() is { Length: > 0 } sunMod)
+        {
+            var own = map.ModPackDesc;
+            var ownIsSun = own?.FilePath?.Contains("TrackeditSun", StringComparison.OrdinalIgnoreCase) ?? false;
+            if (own is null || ownIsSun || (string.IsNullOrEmpty(own.FilePath) && string.IsNullOrEmpty(own.LocatorUrl)))
+                map.ModPackDesc = new PackDesc(sunMod, null, "");
+            else sunModSkipped = true;
+        }
+
         var hadLightmap = map.LightmapCache is not null;
         DropLightmap(map);
 
@@ -187,6 +209,9 @@ public static class MapBuild
             itemsBuilt,
             itemsSkipped,
             lightmapDropped = hadLightmap,
+            decoration = check.Decoration?.Id,
+            mod = check.ModPackDesc?.FilePath,
+            sunModSkipped,
         }));
         return 0;
     }

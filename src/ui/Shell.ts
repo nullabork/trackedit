@@ -120,7 +120,19 @@ export class Shell implements UiHost {
     this.applyDrawer();
   }
 
+  isDrawerPageOpen(id: string): boolean {
+    return this.drawerOpen && this.activePage === id;
+  }
+
+  private readonly drawerListeners: Array<() => void> = [];
+
+  /** Called whenever the drawer opens, closes or switches page. */
+  onDrawerChanged(cb: () => void): void {
+    this.drawerListeners.push(cb);
+  }
+
   private applyDrawer(): void {
+    for (const cb of this.drawerListeners) cb();
     this.drawer.classList.toggle("open", this.drawerOpen);
     this.drawer.style.width = this.drawerOpen ? `${this.drawerWidth}px` : "0px";
     this.drawer.style.setProperty("--drawer-w", `${this.drawerWidth}px`);

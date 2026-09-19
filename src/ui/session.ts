@@ -35,6 +35,7 @@ export function applyStored(ctx: EditorContext, rec: StoredMap): void {
     modUrl: rec.modUrl,
     activeMod: rec.activeMod,
     colorPalette: rec.colorPalette,
+    atmosphere: rec.atmosphere,
   });
   session.ready = true;
   setCurrentId(rec.id);

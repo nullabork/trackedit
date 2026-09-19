@@ -3,6 +3,7 @@ import {
   BufferGeometry,
   Color,
   DirectionalLight,
+  Fog,
   GridHelper,
   LineBasicMaterial,
   LineLoop,
@@ -15,8 +16,10 @@ import {
   WebGLRenderer,
 } from "three";
 import { CELL, MAP_SIZE } from "@core/math";
+import type { Atmosphere } from "@core/atmosphere";
+import { EMPTY_ATMOSPHERE, lightDirection } from "@core/atmosphere";
 import { CameraRig } from "./CameraRig";
-import { applySky } from "./sky";
+import { applySky, customSky } from "./sky";
 
 /**
  * Owns the WebGL canvas, camera rig, lights and the base grid. Knows nothing
@@ -61,14 +64,17 @@ export const DEFAULT_RENDER_PREFS: RenderPrefs = {
   planeColor: "#ff8c1a",
 };
 
-/** Lighting presets per mood; the matching skybox is painted in sky.ts
- *  (its sun/moon glow uses these sunDir values, keep them in sync). */
-const MOODS_PRESETS: Record<string, { sun: number; sunIntensity: number; sunDir: [number, number, number]; ambient: number; ambientIntensity: number }> = {
-  Day: { sun: 0xffffff, sunIntensity: 2.2, sunDir: [0.6, 1, 0.35], ambient: 0x8fa3bd, ambientIntensity: 1.1 },
-  Sunrise: { sun: 0xffc9a0, sunIntensity: 1.9, sunDir: [1, 0.35, 0.2], ambient: 0x9a8fb0, ambientIntensity: 0.9 },
-  Sunset: { sun: 0xff9a66, sunIntensity: 1.8, sunDir: [-1, 0.3, -0.25], ambient: 0xb08f9a, ambientIntensity: 0.9 },
-  Night: { sun: 0x9fb8ff, sunIntensity: 1.0, sunDir: [0.3, 1, 0.5], ambient: 0x3a4a66, ambientIntensity: 0.8 },
+/** Light colours per mood. The direction is the game's own sun for the mood,
+ *  or the map's custom one (core/atmosphere.ts lightDirection). */
+const MOODS_PRESETS: Record<string, { sun: number; sunIntensity: number; ambient: number; ambientIntensity: number }> = {
+  Day: { sun: 0xffffff, sunIntensity: 2.2, ambient: 0x8fa3bd, ambientIntensity: 1.1 },
+  Sunrise: { sun: 0xffc9a0, sunIntensity: 1.9, ambient: 0x9a8fb0, ambientIntensity: 0.9 },
+  Sunset: { sun: 0xff9a66, sunIntensity: 1.8, ambient: 0xb08f9a, ambientIntensity: 0.9 },
+  Night: { sun: 0x9fb8ff, sunIntensity: 1.0, ambient: 0x3a4a66, ambientIntensity: 0.8 },
 };
+
+/** Where custom sky images are served from (tools/gameBridge.ts). */
+export const skyImageUrl = (file: string): string => `/api/game/sky/${encodeURIComponent(file)}`;
 
 export class SceneView {
   readonly scene = new Scene();
@@ -107,7 +113,7 @@ export class SceneView {
     this.sun.shadow.mapSize.set(4096, 4096);
     const cam = this.sun.shadow.camera;
     cam.near = 100;
-    cam.far = 6000;
+    cam.far = 8000;
     cam.left = cam.bottom = -1400;
     cam.right = cam.top = 1400;
     this.sun.shadow.bias = -0.0005;
@@ -162,6 +168,7 @@ export class SceneView {
    * rotates or translates with layers.
    */
   setMapSize(size: readonly [number, number, number]): void {
+    this.mapSize = size;
     this.grid?.removeFromParent();
     this.grid = null;
     this.baseBounds?.removeFromParent();
@@ -186,6 +193,31 @@ export class SceneView {
   private prefs: RenderPrefs = { ...DEFAULT_RENDER_PREFS };
   private lastMood = "Day";
   private lastBase: "stadium" | "void" = "stadium";
+  private atmosphere: Atmosphere = EMPTY_ATMOSPHERE;
+  private previewAtmosphere = false;
+
+  /** The map's custom sun, fog and sky (previewed per the render prefs). */
+  setAtmosphere(atmosphere: Atmosphere): void {
+    this.atmosphere = atmosphere;
+    this.setAmbience(this.lastMood, this.lastBase);
+  }
+
+  /**
+   * Show the map's light and sky as the game would, whatever the render
+   * prefs say (flat light, plain sky) — on while the sky is being edited.
+   */
+  setAtmospherePreview(on: boolean): void {
+    if (on === this.previewAtmosphere) return;
+    this.previewAtmosphere = on;
+    this.setAmbience(this.lastMood, this.lastBase);
+  }
+
+  /** Centre of the map footprint: what the sun lights and the sky dome surrounds. */
+  get mapCentre(): Vector3 {
+    return new Vector3((this.mapSize[0] * CELL[0]) / 2, 0, (this.mapSize[2] * CELL[2]) / 2);
+  }
+
+  private mapSize: readonly [number, number, number] = MAP_SIZE;
 
   getRenderPrefs(): RenderPrefs {
     return { ...this.prefs };
@@ -215,15 +247,29 @@ export class SceneView {
     // applySky calls back twice (procedural now, photo when loaded) — the
     // token drops the late photo if the mood/prefs changed again meanwhile.
     const token = ++this.skyToken;
-    if (this.prefs.sky === "color") {
-      this.scene.background = new Color(this.prefs.skyColor);
+    const { sun, fog, sky } = this.atmosphere;
+    const preview = this.previewAtmosphere;
+    const dir = lightDirection(mood, sun);
+    this.scene.backgroundRotation.set(0, 0, 0);
+    if (sky && (preview || this.prefs.sky === "image")) {
+      // The seam of the mirrored half-sky follows the sun's heading.
+      this.scene.backgroundRotation.set(0, Math.atan2(dir[2], -dir[0]), 0);
+      customSky(skyImageUrl(sky.image), (tex) => {
+        if (this.skyToken === token) this.scene.background = tex;
+      });
+    } else if (this.prefs.sky === "color") {
+      const bg = new Color(this.prefs.skyColor);
+      if (fog) bg.lerp(new Color(fog.color), fog.skyIntensity);
+      this.scene.background = bg;
     } else {
       applySky(mood, (tex) => {
         if (this.skyToken === token) this.scene.background = tex;
       });
     }
     this.scene.backgroundIntensity = baseType === "void" ? 0.45 : 1;
-    if (this.prefs.lighting === "flat") {
+    // Fog: full strength at `distance`, scaled by its intensity.
+    this.scene.fog = fog && fog.intensity > 0 ? new Fog(new Color(fog.color), 0, fog.distance / fog.intensity) : null;
+    if (this.prefs.lighting === "flat" && !preview) {
       // Even white studio light: no mood tint, no shadows.
       this.sun.color.set(0xffffff);
       this.sun.intensity = 1.0;
@@ -231,13 +277,15 @@ export class SceneView {
       this.ambient.color.set(0xffffff);
       this.ambient.intensity = 1.5;
     } else {
-      this.sun.color.set(p.sun);
-      this.sun.intensity = p.sunIntensity;
+      this.sun.color.set(sun?.color ?? p.sun);
+      this.sun.intensity = p.sunIntensity * (sun?.intensity ?? 1);
       this.sun.castShadow = true;
       this.ambient.color.set(p.ambient);
       this.ambient.intensity = p.ambientIntensity;
     }
-    this.sun.position.set(...p.sunDir).multiplyScalar(1200);
+    const centre = this.mapCentre;
+    this.sun.target.position.copy(centre);
+    this.sun.position.set(dir[0], dir[1], dir[2]).multiplyScalar(3000).add(centre);
   }
 
   /** Ray from a pointer event, in normalized device coords. */

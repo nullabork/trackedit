@@ -31,6 +31,7 @@ const TOOL_META: Record<string, { icon: string; shortcut: string | null }> = {
   select: { icon: "select", shortcut: "E" },
   erase: { icon: "erase", shortcut: null },
   paint: { icon: "brush", shortcut: null },
+  sun: { icon: "sun", shortcut: null },
 };
 
 /** Vertical tool rail + status-bar actions. Replaces the old top toolbar. */
@@ -60,6 +61,7 @@ export function buildToolRail(ctx: EditorContext, shell: Shell): void {
     // Arming for placement makes sure the drawer is up; other tools leave
     // it as the user set it (its own tab toggles it open/closed).
     if (tool?.id === "place") shell.openDrawerPage("bits");
+    if (tool?.id === "sun") shell.openDrawerPage("sky");
     if (tool?.hint) ctx.ui.setStatus(tool.hint);
   });
 

@@ -60,16 +60,17 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
     const res = await fetch("/api/game/save", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dump: exportDump(ctx.document), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null }),
+      body: JSON.stringify({ dump: exportDump(ctx.document), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
     });
-    const json = (await res.json()) as { path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
+    const json = (await res.json()) as { notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
     if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
     const edited = (json.blocksBuilt ?? 0) + (json.itemsBuilt ?? 0);
     ctx.ui.setStatus(
       `Saved ${json.path} — ${json.blocks} blocks, ${json.items} items` +
       (edited ? ` (${edited} new or moved)` : "") +
       (json.itemsSkipped ? `, ${json.itemsSkipped} items skipped (template has no item to model them on)` : "") +
-      ". Shadows are not computed: open it in the game editor and compute them there.");
+      ". Shadows are not computed: open it in the game editor and compute them there." +
+      (json.notes?.length ? ` ${json.notes.join(" ")}` : ""));
   } catch (err) {
     ctx.ui.setStatus(`Save to Trackmania failed: ${err instanceof Error ? err.message : err}`);
   }

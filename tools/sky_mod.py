@@ -143,6 +143,23 @@ def sky_color_dds(panorama_linear, template_path):
     return header + data
 
 
+# Where the game shows each row of SkyColor.dds, measured in game
+# (docs/NOTES-lightmap-baking.md, section 8): image latitude against real
+# height, in degrees. The horizon is below the image's middle row and the
+# rows near it are compressed. The bottom end is a guess (never visible).
+IMAGE_LATITUDE = [-90, -7.5, -1, 22, 37, 50, 66, 83, 90]
+REAL_HEIGHT = [-64, 0, 5, 20, 30, 45, 60, 75, 90]
+
+
+def true_horizon(pixels, rows=512):
+    """Re-row a plain panorama (top = straight up, middle = horizon) so the game shows every row at its real height."""
+    src = np.asarray(Image.fromarray(pixels).resize((1024, 2048), Image.LANCZOS))
+    latitude = 90 - (np.arange(rows) + 0.5) / rows * 180
+    real = np.interp(latitude, IMAGE_LATITUDE, REAL_HEIGHT)
+    pick = np.clip(((90 - real) / 180 * src.shape[0]).astype(int), 0, src.shape[0] - 1)
+    return src[pick]
+
+
 def clear_clouds_dds(template_path):
     header, w, h, mips, fourcc, _ = read_dds_header(template_path)
     if fourcc != b"DXT5":
@@ -309,6 +326,8 @@ def main():
     ap.add_argument("--latitude", type=float, help="Latitude for the mood settings")
     ap.add_argument("--moods", nargs="*", default=MOODS)
     ap.add_argument("--out", help="output zip (default: the game's Skins/Stadium/Mod folder)")
+    ap.add_argument("--append", action="store_true", help="add to an existing zip (e.g. one `meshdump moodmod` wrote) instead of replacing it")
+    ap.add_argument("--raw-rows", action="store_true", help="panorama only: use the image's rows as they are instead of moving them to their real height")
     args = ap.parse_args()
 
     daytime01, latitude = args.daytime01, args.latitude
@@ -322,11 +341,13 @@ def main():
         raise SystemExit("--mood-xml already carries the sun; drop it or --sun/--daytime01/--latitude")
 
     pixels = chart() if args.chart else grid_chart(tag=args.tag) if args.grid_chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
+    if args.panorama and not args.raw_rows:
+        pixels = true_horizon(pixels)
     linear = srgb_to_linear(pixels) * args.exposure
     moods_dir = game_moods_dir()
     out = args.out or os.path.join(trackmania_dir(), "Skins", "Stadium", "Mod", args.name + ".zip")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(out, "a" if args.append and os.path.exists(out) else "w", zipfile.ZIP_DEFLATED) as z:
         for mood in args.moods:
             sky = sky_color_dds(linear, os.path.join(moods_dir, mood, "SkyColor.dds"))
             z.writestr(f"Moods/{mood}/SkyColor.dds", sky)

@@ -4,6 +4,7 @@ import { DEFAULT_LOD_DISTANCE, DEFAULT_ROTATION_STEP, createLayer } from "@core/
 import type { MapDocument } from "@core/document";
 import type { GridCoord, Vec3 } from "@core/math";
 import type { Mood } from "@core/mapbase";
+import type { Atmosphere } from "@core/atmosphere";
 
 /**
  * Map persistence, backed by the dev server's file store (maps/*.json via
@@ -67,6 +68,8 @@ export interface StoredMap extends StoredMapMeta {
   activeMod?: string | null;
   /** Palette painted blocks resolve through (core/palettes.ts). */
   colorPalette?: string;
+  /** Custom sun, fog and sky (core/atmosphere.ts). */
+  atmosphere?: Atmosphere;
   /**
    * Last camera pose, so a map opened on another browser/machine starts
    * where you left it. Editor convenience only — never exported to Gbx.
@@ -111,6 +114,7 @@ export function serializeDoc(doc: MapDocument): StoredMap {
     modUrl: doc.modUrl,
     activeMod: doc.activeMod,
     colorPalette: doc.colorPalette,
+    atmosphere: doc.atmosphere,
     decorationBase: doc.decorationBase,
     mood: doc.mood,
     size: [...doc.size] as GridCoord,

@@ -453,6 +453,53 @@ ourselves would mean reproducing the game's lightmap UVs, atlas allocator,
 GI sampler and encoding with no way to check the result outside the game, so
 the editor leaves it to the game.
 
+### Sky and light: the sun tool and the "Sky & light" page
+
+The **sun tool** (sun icon in the tool rail) shows the sky as a dome around
+the map — height rings every 15°, compass letters, the sun's path for the
+day in orange — with the sun as a handle you drag anywhere above the
+horizon; the moon sits opposite. The **Sky & light** drawer page (third tab
+on the drawer's seam) holds the rest:
+
+- **Sun**: heading and height as numbers, sun colour and brightness, moon
+  colour and brightness, reset to the mood's own sun.
+- **Fog and tint**: colour, strength, how much of it washes over the sky,
+  distance, cloud opacity.
+- **Sky image**: any PNG/JPEG/WebP. The game stretches a sky image over
+  HALF the sky (left edge at the sun, right edge opposite it) and mirrors it
+  for the other half, and it draws its own sun disc on top.
+
+While the tool or the page is in use the viewport previews all of it (light
+direction and colour with shadows, fog, the sky image turned to follow the
+sun) whatever the render settings say. It is stored with the track
+(`atmosphere` in the map record, `src/core/atmosphere.ts`).
+
+How it reaches the game (**Save to Trackmania**): the game takes two numbers
+for the sun, `DayTime01` and `Latitude` in a mood's `Mood.MoodSetting.xml`.
+Measured in game, the sun runs along a great circle that rises due East
+(-X) at 0.5 and sets due West at 0.75, tilted from the zenith by the
+latitude, so every direction above the horizon is one pair
+(`src/core/sun.ts`: `sunDirection`, `solveSun`). Saving writes
+
+- a **mod zip** into the game's `Skins/Stadium/Mod` folder and points the
+  map at it: `meshdump moodmod` patches the game's own four mood settings
+  files (sun position; colours rescaled to each mood's own brightness, so
+  Night stays sunless), and `tools/sky_mod.py --append` adds the sky image
+  (BC6H, rows moved to where the game really shows them; needs Python with
+  numpy and Pillow). The zip is named after a hash of its content. A map has
+  room for ONE mod: a map that already uses a texture pack keeps it and the
+  save says the sun was skipped.
+- the fog as a **MediaTracker clip** on the start block
+  (`meshdump atmosphere fog=…`), cloned from two TMX maps fetched once into
+  `maps/gbx`. The map's own in-game clips are kept.
+- the editor's **mood** (the decoration's Day/Sunset/Night/Sunrise suffix).
+
+Limits: the mod is a local file, so the look only shows on this machine
+until mods can be hosted by URL; static geometry only takes the new light
+after **computing shadows in the game**; the Night mood's own light (where
+its moon is) is not understood yet. Research log:
+`docs/NOTES-lightmap-baking.md`.
+
 ### Block paint: palettes and colour tables
 
 A painted block stores only a slot (White/Green/Blue/Red/Black). The colour

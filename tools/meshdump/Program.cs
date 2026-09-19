@@ -138,6 +138,10 @@ switch (args[0])
     case "atmosphere":
         try { return Trackedit.MapAtmosphere.Run(args); }
         catch (Exception ex) { Console.Error.WriteLine($"atmosphere failed: {ex.Message}"); return 1; }
+    case "moodmod":
+        // A settings-only mood mod: the sun moved and recoloured (see MoodMod).
+        try { return Trackedit.MoodMod.Run(args); }
+        catch (Exception ex) { Console.Error.WriteLine($"moodmod failed: {ex.Message}"); return 1; }
     case "mediainfo":
         {
             // MediaTracker clips a map carries: clip -> tracks -> block types (+ fog keys).

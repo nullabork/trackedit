@@ -848,3 +848,15 @@ input[type="number"] { font-family: Consolas, monospace; }
 .axis-colors { display: flex; gap: 10px; }
 .axis-swatch { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-0); text-transform: none; letter-spacing: 0; }
 .axis-swatch input[type="color"] { width: 40px; height: 24px; padding: 0; }
+
+/* Sky & light drawer page */
+.sky-panel { padding: 10px 12px; overflow: auto; display: flex; flex-direction: column; gap: 14px; font-size: 12px; }
+.sky-panel section { display: flex; flex-direction: column; gap: 6px; }
+.sky-panel h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-1); border-bottom: 1px solid var(--stroke); padding-bottom: 4px; }
+.sky-panel .field { display: flex; align-items: center; gap: 8px; }
+.sky-panel .field label { flex: 0 0 42%; color: var(--ink-1); }
+.sky-panel .field input[type="range"], .sky-panel .field .input { flex: 1; min-width: 0; }
+.sky-panel .field input[type="color"] { width: 36px; height: 22px; padding: 0; border: 1px solid var(--stroke); background: none; }
+.sky-panel .sky-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.sky-panel .sky-file { color: var(--ink-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sky-panel .btn:disabled { opacity: 0.4; cursor: default; }

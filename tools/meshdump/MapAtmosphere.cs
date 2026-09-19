@@ -83,9 +83,9 @@ public static class MapAtmosphere
             var groupDonor = Gbx.ParseNode<CGameCtnChallenge>(Opt("groupDonor") ?? throw new Exception("groupDonor=<map with an in-game clip> required"));
             var fogDonor = Gbx.ParseNode<CGameCtnChallenge>(Opt("fogDonor") ?? throw new Exception("fogDonor=<map with a Fog block> required"));
 
-            var group = groupDonor.ClipGroupInGame ?? throw new Exception("group donor has no in-game clips");
-            if (group.Clips.Count == 0) throw new Exception("group donor has no in-game clips");
-            var slot = group.Clips[0];
+            var donorGroup = groupDonor.ClipGroupInGame ?? throw new Exception("group donor has no in-game clips");
+            if (donorGroup.Clips.Count == 0) throw new Exception("group donor has no in-game clips");
+            var slot = donorGroup.Clips[0];
             var fog = Clips(fogDonor).SelectMany(c => c.Tracks).SelectMany(t => t.Blocks).OfType<CGameCtnMediaBlockFog>().FirstOrDefault()
                 ?? throw new Exception("fog donor has no Fog block");
             var track = slot.Clip.Tracks.FirstOrDefault() ?? throw new Exception("group donor clip has no track");
@@ -132,7 +132,18 @@ public static class MapAtmosphere
             }
             if (slot.Trigger.Coords.Count == 0) throw new Exception("no grid start block found to trigger the clip on");
 
-            group.Clips.Clear();
+            // The map's own in-game clips stay; only an earlier atmosphere clip is replaced.
+            var group = map.ClipGroupInGame;
+            if (group is null)
+            {
+                group = donorGroup;
+                group.Clips.Clear();
+            }
+            else
+            {
+                for (var i = group.Clips.Count - 1; i >= 0; i--)
+                    if (group.Clips[i].Clip.Name == "Trackedit atmosphere") group.Clips.RemoveAt(i);
+            }
             group.Clips.Add(slot);
             map.ClipGroupInGame = group;
             Console.WriteLine($"fog: color {fogColor}, sky {Num("sky", 0.8f)}, {slot.Trigger.Coords.Count} trigger cells");

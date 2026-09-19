@@ -511,3 +511,26 @@ start), in the predicted cell:
    does not go through the sky image — a shadow cast by a block of known
    height, in a screenshot or a computed lightmap, would give the sun's
    height to a degree.
+
+## 9. The sun tool (built 2026-09-19)
+
+Section 5's wish, on top of section 8's model. In the editor: `SunTool` +
+`SunDome` (drag the sun over a dome, moon opposite), the "Sky & light"
+drawer page (sun numbers and colours, fog and tint, sky image), previewed
+live. On save (`tools/gameBridge.ts`): `meshdump moodmod` writes the four
+mood settings files with the sun moved and recoloured, `sky_mod.py --append`
+adds a sky image with its rows moved to their real height (the table above),
+`meshdump build` points the map at the zip and applies the mood, `meshdump
+atmosphere fog=` adds the fog clip next to the map's own clips.
+
+Checked here: a save with all three (`Maps/Trackedit/Sun tool test`: orange
+sun 30 degrees right of the start and 30 up, orange fog, a test sky) reads
+back with the mod reference, the patched settings and the fog clip. NOT yet
+checked in game: that the whole save looks as previewed, and — the big one
+for custom lighting — that **computing shadows in the game with the mod
+active bakes the custom sun** into the lightmap. If it does, custom baked
+lighting needs no baker of our own.
+
+Open: Night (where the moon really is), hosting the mod by URL, merging the
+sun into a map's existing texture pack, ambient colour and colour grading
+(`Fx/ColorGrading`) as further controls.
