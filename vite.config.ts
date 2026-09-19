@@ -544,6 +544,8 @@ function setupBridge(): Plugin {
       st.phase = "items";
       st.progress = null;
       await runOne("items");
+      // Which blocks/items are start, checkpoint, finish (meshes/waypoints.json).
+      await runOne("waypoints");
       st.phase = "done";
       st.progress = 1;
       st.done = true;

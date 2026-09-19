@@ -23,7 +23,11 @@ export const formatRaceTime = fmt;
 export function addGhost(ctx: EditorContext, layerId: string, ghost: GhostPath): void {
   const layer = ctx.document.getLayer(layerId);
   if (!layer) return;
-  const ghosts = [...layer.ghosts.filter((g) => g.key !== ghost.key), ghost];
+  // A reloaded line keeps its place (so its hue) and its editor settings.
+  const at = layer.ghosts.findIndex((g) => g.key === ghost.key);
+  const old = layer.ghosts[at];
+  const next = old ? { ...ghost, ...(old.visible !== undefined ? { visible: old.visible } : {}), ...(old.showNumbers !== undefined ? { showNumbers: old.showNumbers } : {}) } : ghost;
+  const ghosts = old ? layer.ghosts.map((g, i) => (i === at ? next : g)) : [...layer.ghosts, next];
   ctx.document.mutUpdateLayer(layerId, { ghosts });
   void persistNow(ctx);
 }
@@ -34,6 +38,29 @@ export function removeGhost(ctx: EditorContext, layerId: string, key: string): v
   if (!layer || !layer.ghosts.some((g) => g.key === key)) return;
   ctx.document.mutUpdateLayer(layerId, { ghosts: layer.ghosts.filter((g) => g.key !== key) });
   void persistNow(ctx);
+}
+
+/** Change a line's editor settings (visibility, checkpoint numbers). */
+export function updateGhost(ctx: EditorContext, layerId: string, key: string, patch: Partial<Pick<GhostPath, "visible" | "showNumbers">>): void {
+  const layer = ctx.document.getLayer(layerId);
+  if (!layer || !layer.ghosts.some((g) => g.key === key)) return;
+  ctx.document.mutUpdateLayer(layerId, { ghosts: layer.ghosts.map((g) => (g.key === key ? { ...g, ...patch } : g)) });
+  void persistNow(ctx);
+}
+
+/**
+ * Fetch a loaded line again from where it came from. Lines saved before the
+ * ghost's checkpoint times were kept get them this way. Resolves to status text.
+ */
+export async function reloadGhost(ctx: EditorContext, layerId: string, ghost: GhostPath): Promise<string> {
+  if (ghost.source === "nadeo") {
+    if (!ctx.document.mapUid || !ghost.accountId) return "This record cannot be fetched again: the map's uid is unknown.";
+    return fetchNadeoGhost(ctx, ctx.document.mapUid, layerId,
+      { accountId: ghost.accountId, name: ghost.driver ?? ghost.label.replace(/^.* by /, ""), position: 0, time: ghost.timeMs ?? 0, zone: "" });
+  }
+  const mapId = tmxIdOf(ctx);
+  if (mapId === null) return "This line cannot be fetched again: the map did not come from TMX.";
+  return fetchTmxGhost(ctx, mapId, layerId, ghost.source === "map" ? { source: "map" } : { replayId: ghost.replayId });
 }
 
 /** Remove every line on a layer. */
@@ -167,7 +194,7 @@ export async function fetchNadeoGhost(ctx: EditorContext, mapUid: string, layerI
     if (!res.ok || json.error) return `No Nadeo ghost for that record${json.error ? `: ${json.error}` : ""}`;
     if (!ctx.document.getLayer(layerId)) return "Layer gone before the ghost arrived";
     addGhost(ctx, layerId, ghostToLayer({ ...json, source: "nadeo", nickname: json.nickname || rec.name, accountId: rec.accountId }));
-    return `Ghost path: Nadeo record #${rec.position} by ${rec.name}` +
+    return `Ghost path: Nadeo record${rec.position ? ` #${rec.position}` : ""} by ${rec.name}` +
       `${json.raceTimeMs ? ` (${fmt(json.raceTimeMs)})` : ""}, ${json.path.length} samples`;
   } catch (err) {
     return `Ghost fetch failed: ${err instanceof Error ? err.message : err}`;

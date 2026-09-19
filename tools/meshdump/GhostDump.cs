@@ -70,6 +70,9 @@ public static class GhostDump
             nickname = ghost.GhostNickname,
             raceTimeMs = ghost.RaceTime?.TotalMilliseconds,
             numSamples = path.Count,
+            // The race time at which each checkpoint was taken, in driving order;
+            // the last one is the finish. Exact, unlike anything geometry can tell.
+            checkpoints = (ghost.Checkpoints ?? []).Where(c => c.Time is not null).Select(c => (int)c.Time!.Value.TotalMilliseconds).ToArray(),
             path,
             times,
         });

@@ -38,7 +38,7 @@ export function importJsonFlow(ctx: EditorContext): void {
 }
 
 export function exportJsonFlow(ctx: EditorContext): void {
-  const dump = exportDump(ctx.document);
+  const dump = exportDump(ctx.document, undefined, ctx.waypoints);
   const blob = new Blob([JSON.stringify(dump, null, 1)], { type: "application/json" });
   const a = el("a", {
     href: URL.createObjectURL(blob),
@@ -61,7 +61,7 @@ export async function saveToGameFlow(ctx: EditorContext): Promise<void> {
     const res = await fetch("/api/game/save", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dump: exportDump(ctx.document), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
+      body: JSON.stringify({ dump: exportDump(ctx.document, undefined, ctx.waypoints), docId: ctx.document.id, tmxId: tmx ? Number(tmx[1]) : null, atmosphere: ctx.document.atmosphere }),
     });
     const json = (await res.json()) as { sunMod?: SavedSunMod | null; notes?: string[]; path?: string; blocks?: number; items?: number; blocksBuilt?: number; itemsBuilt?: number; itemsSkipped?: number; error?: string };
     if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);

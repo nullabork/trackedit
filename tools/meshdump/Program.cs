@@ -138,6 +138,10 @@ switch (args[0])
     case "atmosphere":
         try { return Trackedit.MapAtmosphere.Run(args); }
         catch (Exception ex) { Console.Error.WriteLine($"atmosphere failed: {ex.Message}"); return 1; }
+    case "waypoints":
+        // Which blocks and items are start / finish / checkpoint (see Waypoints).
+        if (args.Length < 3) { Console.Error.WriteLine("usage: meshdump waypoints <GameDataRoot> <outDir>"); return 1; }
+        return Trackedit.Waypoints.Run(args[1], args[2]);
     case "moodmod":
         // A settings-only mood mod: the sun moved and recoloured (see MoodMod).
         try { return Trackedit.MoodMod.Run(args); }

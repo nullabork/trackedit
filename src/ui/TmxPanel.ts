@@ -1,4 +1,5 @@
 import type { EditorContext } from "@plugins/api";
+import { lineHue } from "@core/layer";
 import type { Shell } from "./Shell";
 import { clear, el } from "./dom";
 import {
@@ -9,8 +10,6 @@ import type { NadeoRecordInfo, TmxMapInfo, TmxReplayInfo } from "./ghostActions"
 
 const TMX = "https://trackmania.exchange";
 const SERVER_ACCOUNT_URL = "https://www.trackmania.com/player/dedicated-servers";
-/** Line hues, in the order render/ghostPath assigns them. */
-const LINE_COLORS = ["#2dd4bf", "#f97316", "#a78bfa", "#facc15", "#f472b6", "#38bdf8", "#a3e635", "#f87171"];
 
 /**
  * The "TM Exchange" drawer page: the open map's TMX card (name, links,
@@ -40,7 +39,7 @@ export function buildTmxPanel(ctx: EditorContext, shell: Shell): void {
       const on = keys.has(key);
       row.classList.toggle("active", on);
       const swatch = row.querySelector<HTMLElement>(".tmx-swatch");
-      if (swatch) swatch.style.background = on ? LINE_COLORS[order.indexOf(key) % LINE_COLORS.length] : "";
+      if (swatch) swatch.style.background = on ? lineHue(order.indexOf(key)) : "";
     }
   };
 

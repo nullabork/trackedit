@@ -77,7 +77,38 @@ export class Shell implements UiHost {
     } catch { /* storage unavailable */ }
     this.drawerWidth = Math.min(Math.max(this.drawerWidth, 220), 520);
     this.buildDrawerGrip();
+    this.buildDockGrip();
     this.applyDrawer();
+  }
+
+  /** Drag the right dock's left edge to resize it; width persists per browser. */
+  private buildDockGrip(): void {
+    const KEY = "trackedit.dockWidth";
+    const apply = (w: number) => (this.right.style.width = `${Math.min(Math.max(w, 220), 560)}px`);
+    try {
+      const saved = Number(localStorage.getItem(KEY));
+      if (Number.isFinite(saved) && saved > 0) apply(saved);
+    } catch { /* storage unavailable */ }
+    const grip = el("div", { class: "dock-grip" });
+    let dragging = false;
+    grip.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    grip.addEventListener("pointermove", (e) => {
+      if (dragging) apply(this.right.getBoundingClientRect().right - e.clientX);
+    });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      try {
+        localStorage.setItem(KEY, String(parseFloat(this.right.style.width)));
+      } catch { /* storage unavailable */ }
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    this.right.append(grip);
   }
 
   /** Slide the drawer in/out on whatever page is showing. */

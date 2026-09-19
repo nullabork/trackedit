@@ -4,6 +4,7 @@
  * makes edits land in a real .Map.Gbx via gbxbuild.
  */
 
+import { waypointTagFor, type WaypointTypes } from "@core/waypoints";
 import type { Dir, GridCoord, Vec3 } from "@core/math";
 import {
   CELL,
@@ -55,6 +56,8 @@ export interface DumpGhost {
   accountId?: string;
   path: [number, number, number][];
   times?: number[];
+  /** Race time (ms) of every checkpoint the run took, the finish last. */
+  checkpoints?: number[];
 }
 
 export interface MapDump {
@@ -108,6 +111,8 @@ export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): Gho
     timeMs: g.raceTimeMs ?? undefined,
     path: g.path.map((p) => freePosToEditor(p, yOffsetCells)),
     ...(g.times?.length === g.path.length ? { times: [...g.times] } : {}),
+    ...(g.checkpoints?.length ? { checkpoints: [...g.checkpoints] } : {}),
+    ...(g.nickname ? { driver: g.nickname } : {}),
   };
 }
 
@@ -204,9 +209,20 @@ function entry(p: Placement): [string, Placement] {
  * layer can't stay on the game grid, so its blocks are baked to free blocks
  * (absPos + yaw) instead — gbxbuild supports both.
  */
-export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): MapDump {
+export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET, waypoints?: WaypointTypes): MapDump {
   const blocks: DumpBlock[] = [];
   const items: DumpItem[] = [];
+  /**
+   * Placements made in the editor carry no waypoint data, and a checkpoint
+   * without it is plain scenery in the game: fill it in from the block's
+   * definition. Imported placements keep what they came with.
+   */
+  const metaOf = (p: Placement): Readonly<Record<string, unknown>> | undefined => {
+    if (p.meta?.waypoint) return p.meta;
+    const type = waypoints?.typeOf(p.block);
+    const tag = type ? waypointTagFor(type) : null;
+    return tag ? { ...p.meta, waypoint: { tag, order: 0 } } : p.meta;
+  };
 
   for (const layer of doc.layers) {
     if (!layer.visible) continue;
@@ -230,7 +246,7 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): M
     for (const p of layer.placements.values()) {
       if (p.kind === "block") {
         if (identity) {
-          blocks.push({ ...p.meta, name: p.block, coord: [...p.coord], dir: p.dir });
+          blocks.push({ ...metaOf(p), name: p.block, coord: [...p.coord], dir: p.dir });
         } else {
           // Bake to a free block. The renderer rotates blocks about their
           // footprint centre, but a free block's absPos is its min corner —
@@ -244,7 +260,7 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): M
           const corner = quatRotate(quatFromAxisAngle([0, 1, 0], dirYaw), [-CELL[0] / 2, 0, -CELL[2] / 2]);
           const pos = toWorld([centre[0] + corner[0], centre[1] + corner[1], centre[2] + corner[2]]);
           blocks.push({
-            ...p.meta,
+            ...metaOf(p),
             name: p.block,
             isFree: true,
             absPos: editorPosToFree(pos, yOffsetCells),
@@ -255,7 +271,7 @@ export function exportDump(doc: MapDocument, yOffsetCells = DEFAULT_Y_OFFSET): M
         const pos = identity ? p.pos : toWorld(p.pos);
         const rot = identity ? p.rot : composeRot(p.rot);
         const rec = {
-          ...p.meta,
+          ...metaOf(p),
           name: p.block,
           absPos: editorPosToFree(pos, yOffsetCells),
           yawPitchRoll: [rot[0], rot[1], rot[2]] satisfies number[] as [number, number, number],

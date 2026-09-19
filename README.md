@@ -453,6 +453,33 @@ ourselves would mean reproducing the game's lightmap UVs, atlas allocator,
 GI sampler and encoding with no way to check the result outside the game, so
 the editor leaves it to the game.
 
+### Driving lines in the layer list, and the checkpoints they take
+
+Every loaded line (validation ghost, TMX replay, Nadeo record) is a row under
+its layer in the Layers panel, in the line's own hue, with an eye (hide
+without unloading) and an ✕ (unload). Clicking a line turns the LAYER
+settings tab into **LINE**: "Show checkpoint numbers beside the line" puts a
+tag at the start (S), every checkpoint (1, 2, …) and the finish (F), drawn
+over the map geometry at a constant screen size so they can be found from
+anywhere. Expanding a line lists those waypoints in driving order with the
+time each was taken; double-click one to fly there (it also selects the
+block). The right dock is resizable (drag its left edge).
+
+How the list is made: a ghost records WHEN it took each checkpoint
+(`meshdump ghost` emits `checkpoints`, the finish last), so the count and the
+order are the game's own. Each time is a point on the line, and the waypoint
+nearest that point is the one taken — trigger zones are bigger than the
+models (gates, custom platform checkpoints), so "nearest", not "inside";
+linked checkpoints count once and the one actually driven is listed. Lines
+saved before those times were kept are fetched again, once, when their
+waypoints are first wanted; without times the fallback is geometry (segment
+against oriented box, once per lap, respawns ignored). What IS a waypoint
+comes from the game's definitions, not names: `meshdump waypoints <GameData>
+<meshes>` writes `waypoints.json` (run by setup; "DecoPlatformDirtSlope2Start"
+is a slope). The same table tags checkpoints, starts and finishes placed in
+the editor when saving to the game — without its waypoint property a
+checkpoint is plain scenery there.
+
 ### Sky and light: the sun tool and the "Sky & light" page
 
 The **sun tool** (sun icon in the tool rail) shows the sky as a dome around

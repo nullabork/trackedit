@@ -2,6 +2,7 @@ import type { MapDocument } from "@core/document";
 import type { History } from "@core/commands";
 import type { BlockCatalog } from "@core/catalog";
 import type { SelectionModel } from "@core/selection";
+import type { WaypointTypes } from "@core/waypoints";
 import type { Emitter } from "@core/events";
 import type { SceneView } from "@render/SceneView";
 import type { DocumentRenderer } from "@render/DocumentRenderer";
@@ -55,6 +56,8 @@ export interface EditorContext {
   readonly document: MapDocument;
   readonly history: History;
   readonly catalog: BlockCatalog;
+  /** Which blocks and items are start / checkpoint / finish (from the game's definitions). */
+  readonly waypoints: WaypointTypes;
   readonly selection: SelectionModel;
   readonly view: SceneView;
   readonly renderer: DocumentRenderer;

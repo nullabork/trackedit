@@ -1,8 +1,12 @@
 import type { EditorContext } from "@plugins/api";
 import { AddLayerCmd, RemoveLayerCmd, ReplacePlacementCmd, UpdateLayerCmd } from "@core/commands";
-import type { Layer, Placement } from "@core/layer";
-import { createLayer, isPlacementVisible } from "@core/layer";
+import { Vector3 } from "three";
+import type { GhostPath, Layer, Placement } from "@core/layer";
+import { createLayer, isPlacementVisible, lineHue } from "@core/layer";
+import type { WaypointPass } from "@core/waypoints";
+import { onPassesChanged, passesOf } from "@plugins/linePasses";
 import { frameDebugSubject } from "@render/debugView";
+import { formatRaceTime, reloadGhost, removeGhost, updateGhost } from "./ghostActions";
 import { clear, el } from "./dom";
 import { icon } from "./icons";
 import { confirmDialog } from "./dialog";
@@ -14,11 +18,19 @@ import { confirmDialog } from "./dialog";
  * - bottom half: always-visible settings with two tabs — GLOBAL (all-layer
  *   rules) and LAYER (the selected layer) — no gear buttons anywhere; the
  *   Layer tab simply follows the selection.
+ *
+ * Driving lines (ghosts) are rows of their layer too, in their own hue. A
+ * line expands into the waypoints it passes — start, the checkpoints in
+ * driving order, finish — and double-clicking one flies there. Clicking a
+ * line turns the LAYER tab into LINE: its settings.
  */
 export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; actions: HTMLElement } {
   const doc = ctx.document;
   let renamingId: string | null = null;
   let tab: "global" | "layer" = "layer";
+  /** The line whose settings show in place of the layer's (null = the active layer's). */
+  let selectedLine: { layerId: string; key: string } | null = null;
+  const expandedLines = new Set<string>(); // `${layerId}\n${key}`
 
   const list = el("div", { class: "layer-list" });
   const settingsBody = el("div", { class: "layer-settings-body" });
@@ -154,6 +166,7 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
     const row = el("div", {
       class: `layer-row tree-row tree-placement${on ? "" : " hidden-entry"}${selected ? " selected" : ""}`,
       "data-key": `p:${p.id}`,
+      "data-pid": p.id,
       title: "Click to select (Shift adds), double-click to frame in the viewport",
     },
       el("span", { class: "tree-spacer" }),
@@ -182,7 +195,7 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
       const shown = ps.filter((p) => isPlacementVisible(layer, p)).length;
       // A group reads as selected when every one of its placements is.
       const selected = ps.length > 0 && ps.every((p) => ctx.selection.has(p.id));
-      const row = el("div", { class: `layer-row tree-row tree-group${hidden ? " hidden-entry" : ""}${selected ? " selected" : ""}`, "data-key": `g:${key}` },
+      const row = el("div", { class: `layer-row tree-row tree-group${hidden ? " hidden-entry" : ""}${selected ? " selected" : ""}`, "data-key": `g:${key}`, "data-group": key },
         expander(open, open ? "Collapse" : "List every placement", () => { open ? expandedGroups.delete(key) : expandedGroups.add(key); renderList(); }),
         iconBtn(hidden ? "eye-off" : "eye", hidden ? "Show all of this block" : "Hide all of this block", () => setGroupVisible(layer, block, hidden)),
         el("span", { class: "layer-name", title: block }, shortName(block),
@@ -205,7 +218,95 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
     return rows;
   };
 
+  // --- driving lines: layer > line > the waypoints it passes ---
+
+  const lineOf = (sel: { layerId: string; key: string } | null): { layer: Layer; ghost: GhostPath; index: number } | null => {
+    const layer = sel && doc.getLayer(sel.layerId);
+    const index = layer ? layer.ghosts.findIndex((g) => g.key === sel!.key) : -1;
+    return layer && index >= 0 ? { layer, ghost: layer.ghosts[index], index } : null;
+  };
+
+  /** Fly to where the line passes the waypoint, keeping the view's angle, and select the waypoint. */
+  const focusPass = (pass: WaypointPass) => {
+    ctx.renderer.ensureNear(pass.placementId);
+    ctx.selection.set([{ layerId: pass.layerId, placementId: pass.placementId }]);
+    const { yaw, pitch } = ctx.view.rig.getState();
+    ctx.view.rig.lookAt(new Vector3(pass.pos[0], pass.pos[1], pass.pos[2]), 140, yaw, pitch);
+    ctx.ui.setStatus(`${pass.label}${pass.timeMs !== undefined ? ` at ${formatRaceTime(pass.timeMs)}` : ""} — ${shortName(pass.block)}`);
+  };
+
+  const passRow = (pass: WaypointPass) => {
+    const name = pass.kind === "checkpoint" ? `Checkpoint ${pass.number}` : pass.label;
+    const row = el("div", {
+      class: `layer-row tree-row line-pass${ctx.selection.has(pass.placementId) ? " selected" : ""}`,
+      "data-pid": pass.placementId,
+      title: `${name} — ${shortName(pass.block)}. Double-click to go there`,
+    },
+      el("span", { class: `pass-badge pass-${pass.kind}` }, pass.number === null ? pass.label[0] : String(pass.number)),
+      el("span", { class: "layer-name" }, name),
+      el("span", { class: "layer-count pass-time" }, pass.timeMs !== undefined ? formatRaceTime(pass.timeMs) : ""),
+    );
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      ctx.selection.set([{ layerId: pass.layerId, placementId: pass.placementId }]);
+    });
+    row.addEventListener("dblclick", (e) => { e.stopPropagation(); focusPass(pass); });
+    return row;
+  };
+
+  /**
+   * Lines loaded before ghosts' checkpoint times were kept only have geometry
+   * to go by (trigger zones are bigger than the models, so a few get missed):
+   * fetch such a line again, once, the first time its waypoints are wanted.
+   */
+  const upgraded = new Set<string>();
+  const upgradeLine = (layer: Layer, ghost: GhostPath) => {
+    const key = `${layer.id}
+${ghost.key}`;
+    if (ghost.checkpoints?.length || upgraded.has(key)) return;
+    upgraded.add(key);
+    void reloadGhost(ctx, layer.id, ghost).then((msg) => ctx.ui.setStatus(msg));
+  };
+
+  const lineRows = (layer: Layer) => {
+    const rows: HTMLElement[] = [];
+    layer.ghosts.forEach((ghost, gi) => {
+      const key = `${layer.id}\n${ghost.key}`;
+      const open = expandedLines.has(key);
+      const on = ghost.visible !== false;
+      const selected = selectedLine?.layerId === layer.id && selectedLine.key === ghost.key;
+      const swatch = el("span", { class: "line-swatch" });
+      swatch.style.background = lineHue(gi);
+      const row = el("div", { class: `layer-row tree-row line-row${on ? "" : " hidden-entry"}${selected ? " selected" : ""}`, "data-key": `l:${key}` },
+        expander(open, open ? "Collapse" : "List the start, checkpoints and finish this line passes", () => { open ? expandedLines.delete(key) : expandedLines.add(key); renderList(); }),
+        iconBtn(on ? "eye" : "eye-off", on ? "Hide line" : "Show line", () => updateGhost(ctx, layer.id, ghost.key, { visible: !on })),
+        swatch,
+        el("span", { class: "layer-name", title: ghost.label }, ghost.driver ?? ghost.label,
+          el("span", { class: "layer-count" }, ghost.timeMs ? ` ${formatRaceTime(ghost.timeMs)}` : "")),
+        iconBtn("x", "Unload line", () => removeGhost(ctx, layer.id, ghost.key)),
+      );
+      row.style.setProperty("--line-hue", lineHue(gi));
+      row.addEventListener("click", () => {
+        selectedLine = { layerId: layer.id, key: ghost.key };
+        tab = "layer";
+        renderAll();
+      });
+      rows.push(row);
+      if (open || selected) upgradeLine(layer, ghost);
+      if (!open) return;
+      const passes = passesOf(ctx, layer, ghost);
+      if (passes.length) rows.push(...passes.map(passRow));
+      else rows.push(el("div", { class: "layer-row tree-row tree-placement hidden-entry" },
+        el("span", { class: "tree-spacer" }), el("span", { class: "layer-name" }, "passes no start, checkpoint or finish")));
+    });
+    return rows;
+  };
+
   const renderList = () => {
+    // The rows are rebuilt (a click re-renders for its selection state):
+    // keep the scroll where it was, or the second click of a double-click
+    // lands on whatever row slid under the pointer.
+    const scrollTop = list.scrollTop;
     clear(list);
     for (const layer of doc.layers) {
       const active = layer.id === doc.activeLayer.id;
@@ -221,10 +322,16 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
         ),
         iconBtn("x", "Delete layer", () => deleteLayer(layer)),
       );
-      row.addEventListener("click", () => doc.setActiveLayer(layer.id));
+      row.addEventListener("click", () => {
+        selectedLine = null;
+        doc.setActiveLayer(layer.id);
+        renderAll();
+      });
       list.append(row);
+      list.append(...lineRows(layer));
       if (open) list.append(...groupRows(layer));
     }
+    list.scrollTop = scrollTop;
     if (revealKey) {
       const target = list.querySelector<HTMLElement>(`[data-key="${CSS.escape(revealKey)}"]`);
       revealKey = null;
@@ -293,8 +400,36 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
     return el("label", { class: `check${disabled ? " disabled" : ""}`, title: title ?? "" }, input, el("span", {}, label));
   };
 
+  /** Settings of the selected driving line. */
+  const renderLineSettings = (layer: Layer, ghost: GhostPath, index: number) => {
+    const passes = passesOf(ctx, layer, ghost);
+    const checkpoints = passes.filter((p) => p.number !== null).length;
+    const swatch = el("span", { class: "line-swatch" });
+    swatch.style.background = lineHue(index);
+    settingsBody.append(
+      el("h4", {}, swatch, ` ${ghost.label}`),
+      el("p", { class: "hint" },
+        `${ghost.source === "map" ? "The map's validation ghost" : ghost.source === "tmx" ? "TMX replay" : "Nadeo record"}` +
+        `${ghost.timeMs ? ` · ${formatRaceTime(ghost.timeMs)}` : ""} · on layer ${layer.name}. ` +
+        `Passes ${checkpoints} checkpoint${checkpoints === 1 ? "" : "s"}` +
+        `${passes.some((p) => p.label === "Finish") ? " and the finish" : ", never reaches a finish"}.`),
+      checkbox("Show checkpoint numbers beside the line", !!ghost.showNumbers, false,
+        (v) => updateGhost(ctx, layer.id, ghost.key, { showNumbers: v }),
+        "A tag at every start, checkpoint and finish the line passes, counted in driving order and drawn over the map so it can be found from anywhere"),
+      checkbox("Show the line", ghost.visible !== false, false, (v) => updateGhost(ctx, layer.id, ghost.key, { visible: v })),
+      el("p", { class: "hint" },
+        "Expand the line in the list for the waypoints it passes, in order; double-click one to go there. " +
+        "A respawn onto a checkpoint is not counted again."),
+      el("div", { class: "layer-actions" },
+        el("button", { onclick: () => removeGhost(ctx, layer.id, ghost.key) }, "Unload line")),
+    );
+  };
+
   const renderSettings = () => {
     clear(settingsBody);
+    const line = lineOf(selectedLine);
+    if (!line) selectedLine = null;
+    tabLayer.textContent = line ? "Line" : "Layer";
 
     if (tab === "global") {
       settingsBody.append(
@@ -314,6 +449,8 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
       );
       return;
     }
+
+    if (line) return renderLineSettings(line.layer, line.ghost, line.index);
 
     const layer = doc.activeLayer;
     const patchTransform = (t: Partial<Layer["transform"]>) =>
@@ -405,9 +542,21 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
   doc.events.on("activeLayerChanged", renderAll);
   doc.events.on("placementAdded", renderList);
   doc.events.on("placementRemoved", renderList);
-  ctx.selection.events.on("changed", () => { if (expandedLayers.size) renderList(); });
+  // Selection only changes how rows LOOK. Rebuilding them here would swap the
+  // row under the pointer between the two clicks of a double-click.
+  ctx.selection.events.on("changed", () => {
+    for (const row of list.querySelectorAll<HTMLElement>("[data-pid]"))
+      row.classList.toggle("selected", ctx.selection.has(row.dataset.pid!));
+    for (const row of list.querySelectorAll<HTMLElement>("[data-group]")) {
+      const [layerId, block] = row.dataset.group!.split("\n");
+      const ps = [...(doc.getLayer(layerId)?.placements.values() ?? [])].filter((p) => p.block === block);
+      row.classList.toggle("selected", ps.length > 0 && ps.every((p) => ctx.selection.has(p.id)));
+    }
+  });
   doc.events.on("mapChanged", renderSettings);
   doc.events.on("reset", renderAll);
+  // Waypoint lists follow the map as it loads and changes — no collapsing and re-opening.
+  onPassesChanged(ctx, () => { if (expandedLines.size || selectedLine) renderAll(); });
   renderAll();
 
   const element = el("div", { class: "layers split" },

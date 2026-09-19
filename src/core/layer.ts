@@ -100,7 +100,22 @@ export interface GhostPath {
   path: Vec3[];
   /** Sample times in ms, parallel to `path`, when the source had them. */
   times?: number[];
+  /**
+   * Race times (ms) at which the run took each checkpoint, in order; the last
+   * is the finish. From the ghost itself, so exact.
+   */
+  checkpoints?: number[];
+  /** Who drove it, when the source said. */
+  driver?: string;
+  /** Editor only: false hides the line without unloading it. */
+  visible?: boolean;
+  /** Editor only: number the checkpoints along the line in the viewport. */
+  showNumbers?: boolean;
 }
+
+/** One hue per line on a layer, by its position in `Layer.ghosts`. */
+export const LINE_HUES = ["#2dd4bf", "#f97316", "#a78bfa", "#facc15", "#f472b6", "#38bdf8", "#a3e635", "#f87171"];
+export const lineHue = (index: number): string => LINE_HUES[((index % LINE_HUES.length) + LINE_HUES.length) % LINE_HUES.length];
 
 /** The toggle identity of a line: where it came from. */
 export function ghostKeyOf(g: { source: "map" | "tmx" | "nadeo"; replayId?: number; accountId?: string }): string {

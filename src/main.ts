@@ -9,6 +9,7 @@ import { History } from "@core/commands";
 import { BlockCatalog } from "@core/catalog";
 import type { CatalogJson } from "@core/catalog";
 import { SelectionModel } from "@core/selection";
+import { WaypointTypes } from "@core/waypoints";
 import { Emitter } from "@core/events";
 import { InputEngine } from "@input/InputEngine";
 import { SceneView } from "@render/SceneView";
@@ -38,6 +39,11 @@ async function boot(): Promise<void> {
   const catalogJson = (await (await fetch("catalog.json")).json()) as CatalogJson;
   const catalog = BlockCatalog.fromJson(catalogJson);
 
+  // Written by `meshdump waypoints` during setup; absent on older imports.
+  const waypoints = new WaypointTypes(
+    await fetch("meshes/waypoints.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})) as Record<string, string>,
+  );
+
   const document_ = new MapDocument();
   const history = new History(document_);
   const events = new Emitter<AppEvents>();
@@ -58,6 +64,7 @@ async function boot(): Promise<void> {
     document: document_,
     history,
     catalog,
+    waypoints,
     selection,
     view,
     renderer,
