@@ -192,3 +192,41 @@ All three carry test A's sunset-graded lightmap:
 Natural fit with the sun/moon tool (section 5): sun colour and position
 drive the bake, fog colour and sky intensity drive the sky, and both are
 stored per map.
+
+### Result of experiment 2 (2026-09-19): all three work
+
+D, E and F all look right when played, and the game did not ask to recompute
+shadows: **a mood switch keeps our lightmap, and an in-game fog clip tints
+the sky for the run.** (Played only; not opened in the editor.)
+
+## 7. Experiment 3 — a sky from a texture mod (in `Maps/Trackedit`)
+
+`tools/sky_mod.py` builds a mod zip into `Skins/Stadium/Mod/`: a panorama
+(or its built-in test chart) becomes `Moods/<Mood>/SkyColor.dds` for every
+mood. Facts it relies on, read from the game's extracted files:
+
+- `SkyColor.dds` is 1024×512, **BC6H_UF16** (HDR), 11 mips. The tool encodes
+  BC6H itself (mode 11: one region, 10-bit endpoints, 4-bit indices) and
+  copies the DDS header from the game's file, so only pixel data differs —
+  the output is byte-for-byte the game file's size. Verified by decoding it
+  back with Pillow.
+- `SkyClouds.dds` is DXT5; an all-zero DXT5 block is transparent, which is
+  how `--clouds clear` removes the cloud layer.
+- A map references a local mod as `Skins\Stadium\Mod\<name>.zip`
+  (`meshdump atmosphere … mod=…`, optional `modUrl=` for a hosted copy).
+
+Test maps (Simple 25 with the game's own lightmap):
+
+- **Sky test G - chart sky** — magenta-to-orange sky with elevation rings and
+  0/90/180/270 labels at the horizon. Shows whether the mod's sky loads, which
+  way the panorama faces, and how clouds sit over it.
+- **Sky test H - chart sky no clouds** — same with the cloud layer cleared.
+- **Sky test I - green sun settings** — also ships an edited
+  `Mood.MoodSetting.xml` (green sun and ambient, green atmosphere, earlier
+  time of day). If the car or sky turns green, **the game reads mood
+  settings from a mod**, which makes sun colour and position native features.
+
+Unknowns this settles: whether the zip layout is `Moods/<Mood>/…`, whether
+the game accepts our BC6H, and whether settings files are honoured. If G
+shows the normal sky, check the game's log and try the ModWork folder
+(`Skins/Stadium/ModWork/Moods/<Mood>/`) with the same files.

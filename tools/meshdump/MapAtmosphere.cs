@@ -15,6 +15,9 @@ namespace Trackedit;
 ///   `distance=`) and cloud opacity (`clouds=`). The clip is triggered on the
 ///   start block and keeps playing, so it covers the whole run.
 ///
+/// - `mod=` points the map at a texture mod (see tools/sky_mod.py), which
+///   can replace the sky panorama, clouds and mood settings.
+///
 /// MediaTracker nodes are cloned from donor maps rather than built from
 /// nothing, so every chunk version is one the game wrote itself: a clip
 /// group donor (any map with an in-game clip) and a fog donor (any map with
@@ -28,7 +31,7 @@ public static class MapAtmosphere
     {
         if (args.Length < 3)
         {
-            Console.Error.WriteLine("usage: meshdump atmosphere <in.Map.Gbx> <out.Map.Gbx> [mood=Sunset] [fog=r,g,b groupDonor=<map> fogDonor=<map> sky=0.8 intensity=1 distance=6000 clouds=1] [name=New name]");
+            Console.Error.WriteLine("usage: meshdump atmosphere <in.Map.Gbx> <out.Map.Gbx> [mood=Sunset] [mod=Skins/Stadium/Mod/X.zip modUrl=https://...] [fog=r,g,b groupDonor=<map> fogDonor=<map> sky=0.8 intensity=1 distance=6000 clouds=1] [name=New name]");
             return 1;
         }
         string? Opt(string key) => args.Skip(3).FirstOrDefault(a => a.StartsWith(key + "="))?[(key.Length + 1)..];
@@ -54,6 +57,15 @@ public static class MapAtmosphere
             var next = (current is null ? id : id[..^current.Length]) + mood;
             map.Decoration = new Ident(next, deco.Collection, deco.Author);
             Console.WriteLine($"mood: {id} -> {next}");
+        }
+
+        if (Opt("mod") is { } modPath)
+        {
+            // A texture mod: a zip under the game's user folder (path relative
+            // to it, e.g. Skins\Stadium\Mod\MySky.zip) and/or a URL players
+            // download it from. Its Moods/ folder can replace the sky.
+            map.ModPackDesc = new PackDesc(modPath, null, Opt("modUrl") ?? "");
+            Console.WriteLine($"mod: {modPath} {Opt("modUrl")}");
         }
 
         if (Opt("fog") is { } fogColor)
