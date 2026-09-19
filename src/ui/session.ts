@@ -40,7 +40,14 @@ export function applyStored(ctx: EditorContext, rec: StoredMap): void {
   session.ready = true;
   setCurrentId(rec.id);
   restoreCamera(ctx, rec.camera);
-  ctx.ui.setStatus(`Opened ${rec.name} (${rec.placementCount} placements)`);
+  // Tracks converted by an outdated dump carry no per-object index — and then
+  // no item pivots or variants either, so pieces sit and look wrong. Say so
+  // instead of showing a subtly broken map.
+  const tmx = /^tmx-(\d+)$/.exec(rec.id);
+  const stale = !!tmx && rec.layers.some((l) => l.placements.length > 0 && !l.placements.some((p) => (p.meta as { idx?: number } | undefined)?.idx !== undefined));
+  ctx.ui.setStatus(stale
+    ? `Opened ${rec.name} — imported with an outdated converter (items lack their pivots, blocks their variants): open it again from TMX (#${tmx![1]}) to fix the placement.`
+    : `Opened ${rec.name} (${rec.placementCount} placements)`);
 }
 
 // --- camera persistence (per map, survives reloads) ---

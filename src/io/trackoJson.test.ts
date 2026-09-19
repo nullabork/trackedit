@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { exportDump, ghostToLayer, importDump } from "./trackoJson";
+import type { MapDump } from "./trackoJson";
 import { serializeDoc, toLayers } from "./mapStore";
 import { MapDocument } from "@core/document";
 
@@ -95,5 +96,36 @@ describe("item pivots", () => {
     expect(out.items).toHaveLength(1);
     expect(out.items?.[0].pivotPos).toEqual([-16, -6, -16]);
     expect(out.items?.[0].absPos?.[1]).toBe(48);
+  });
+});
+
+describe("nothing a map dump says is dropped on the way through the editor", () => {
+  it("returns every field of every record, known or not, on export", () => {
+    const dump = {
+      mapName: "Fields", mapUid: "uid", decoration: "48x48Screen155Day", colorPalette: "Orange",
+      blocks: [
+        { idx: 0, name: "RoadTechStraight", coord: [10, 12, 10], dir: 3, isGround: false, isClip: false, isFree: false, absPos: null, yawPitchRoll: null,
+          flags: 0x10400000, variant: 2, subVariant: 5, color: "Red", lightmapQuality: "High", waypoint: { tag: "Checkpoint", order: 3, spawn: 0 },
+          skin: { text: "!4", pack: { file: "Skins/Any/x.dds", url: "" }, parentPack: null, foregroundPack: null }, somethingNew: { a: 1 } },
+        { idx: 1, name: "PlatformBase", coord: [-1, 0, -1], dir: 0, isGround: false, isClip: false, isFree: true, absPos: [100.5, 40.25, 300], yawPitchRoll: [0.5, -0.25, 1.5],
+          flags: 0x20000000, variant: 0, subVariant: 0, color: "Default", lightmapQuality: "Normal", waypoint: null, skin: null },
+      ],
+      items: [
+        { idx: 0, name: "InflatableTubeStraightX4", itemAuthor: "Nadeo", absPos: [780, 159, 880], yawPitchRoll: [1.5707964, 0, -1.5707964], pivotPos: [0, 0, -16],
+          scale: 1.5, flags: 1, color: "Red", lightmapQuality: "Normal", waypoint: null, somethingNew: true },
+      ],
+    };
+    const doc = new MapDocument();
+    const imported = importDump(dump as unknown as MapDump);
+    doc.reset(imported.layers, { name: imported.name, decoration: imported.decoration });
+    const out = exportDump(doc, undefined, undefined, true);
+    const sorted = (r: unknown) => JSON.stringify(r, (_k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
+    // The editor owns the POSE and says it its own way: no null free-pose on a grid block, no
+    // placeholder coord/dir on a free one, and "is a clip / is free" only when true. Everything
+    // else has to come back exactly — flags, variant, skin, waypoint, and fields it has never heard of.
+    const dropNulls = (r: Record<string, unknown>) => Object.fromEntries(Object.entries(r).filter(([k, v]) =>
+      v !== null && v !== false || k === "isGround").filter(([k]) => !(r.isFree && (k === "coord" || k === "dir"))));
+    expect(out.blocks!.map((b) => sorted(dropNulls(b)))).toEqual(dump.blocks.map((b) => sorted(dropNulls(b))));
+    expect(out.items!.map((i) => sorted(dropNulls(i)))).toEqual(dump.items.map((i) => sorted(dropNulls(i))));
   });
 });

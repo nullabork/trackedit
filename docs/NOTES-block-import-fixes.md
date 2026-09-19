@@ -212,6 +212,39 @@ Still unread on a placed block: `Variant` / `SubVariant` (flags' low bits),
 which choose among a variant's `Mobils[variant][subVariant]` — the extractor
 always takes `[0][0]`.
 
+## 5d. "Why do we keep placing things wrong?" — a silent fallback converter (RHEVARA again)
+
+Report: 13 inflatable tube pieces that should form one run sat apart, each
+half a piece off. Measured instead of eyeballed: a tube piece has two ends,
+and ends of neighbours must meet. Over the map's 73 tube pieces, 192
+combinations of Euler order, angle signs, axis assignment and pivot sign
+were scored by how many of the 146 ends land within 0.75 m of another:
+
+| rule | ends that meet |
+| --- | --- |
+| the editor's rule (yaw→roll→pitch = three.js "YZX", `pos + R·pivot`) | **88** — the best of all 192 |
+| next best (YXZ) | 80 |
+| the same rule, pivots ignored | 20 |
+
+So the placement maths was right (and is now confirmed from an independent
+direction — the rest are open chain ends). The pivots were MISSING: the map
+file stores one per item (exactly minus one tube end), `meshdump map` writes
+it, the importer keeps it — but the stored track had none, on all 6,691
+items, and no block indices either. It had been converted by the old
+EXTERNAL `gbxdump` fallback: `dotnet build` of the bundled converter failed
+because its files were locked by a running extraction, and the fallback took
+over without a word. Every "this family is misplaced" report from a track
+imported in such a moment has this one cause.
+
+Fix, generic (tools/mapConverter.ts): a failed rebuild uses the build that
+is already there; any converter's output is checked against the full field
+list the editor places by (`DUMP_FIELDS`, `dumpProblems`) and a lossy dump is
+REFUSED with the reason; the editor says so when it opens a track imported
+that way ("open it again from TMX"). And two tests pin the dialect from both
+ends: every field `meshdump map` writes must be present, and every field of
+every record — unknown ones included — must come back out of the editor's
+import/export.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
@@ -222,3 +255,7 @@ always takes `[0][0]`.
   The full export is for confirmation, not iteration.
 - Check calibration on chiral objects. A symmetric block cannot tell you
   which way the camera faces or whether an image is flipped.
+- A fallback that degrades silently is worse than a failure. If the good
+  path cannot run, fail loudly or verify what the fallback produced.
+- Measure placement, do not eyeball it: things that must connect give a
+  number (ends that meet), and a number can rank every convention at once.
