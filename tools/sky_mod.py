@@ -181,6 +181,43 @@ def dark_chart(w=1024, h=512):
     return np.asarray(im)
 
 
+# 3x5 bitmap digits (Pillow's text layout is unreliable on some installs).
+DIGITS = {
+    "0": "111101101101111", "1": "010110010010111", "2": "111001111100111", "3": "111001111001111",
+    "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001001001001",
+    "8": "111101111101111", "9": "111101111001111",
+}
+
+
+def draw_number(d, x, y, text, scale, fill):
+    for ch in text:
+        bits = DIGITS[ch]
+        for i, bit in enumerate(bits):
+            if bit == "1":
+                cx, cy = x + (i % 3) * scale, y + (i // 3) * scale
+                d.rectangle([cx, cy, cx + scale - 1, cy + scale - 1], fill=fill)
+        x += 4 * scale
+
+
+def grid_chart(w=1024, h=512, cols=16, rows=12):
+    """A near-black sky cut into numbered cells, so a position can be reported
+    as one number. Cell n sits at column n % 16 (each 22.5 degrees of heading,
+    0 = the image's left edge) and row n // 16 (each 15 degrees of image
+    latitude, row 0 = the top). Rows 0-5 are the upper half of the image,
+    rows 6-11 the lower half (numbers in blue there)."""
+    im = Image.new("RGB", (w, h), (3, 4, 8))
+    d = ImageDraw.Draw(im)
+    cw, ch = w / cols, h / rows
+    for r in range(rows):
+        for c in range(cols):
+            x0, y0 = int(c * cw), int(r * ch)
+            color = (150, 150, 150) if r < rows // 2 else (70, 110, 190)
+            d.rectangle([x0, y0, int((c + 1) * cw) - 1, int((r + 1) * ch) - 1], outline=(60, 60, 60))
+            draw_number(d, x0 + 8, y0 + 10, str(r * cols + c), 4, color)
+    d.line([(0, h // 2), (w, h // 2)], fill=(130, 130, 0), width=3)
+    return np.asarray(im)
+
+
 def chart(w=1024, h=512):
     """A sky you cannot mistake for the game's: magenta zenith to orange horizon,
     counted heading marks at the horizon, elevation rings every 15 degrees."""
@@ -211,6 +248,7 @@ def main():
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--panorama", help="equirectangular image (top = zenith)")
     src.add_argument("--chart", action="store_true", help="built-in test chart (bright)")
+    src.add_argument("--grid-chart", action="store_true", help="near-black sky cut into numbered cells (report a position as one number)")
     src.add_argument("--dark-chart", action="store_true", help="near-black test chart: the game's sun stays visible against it")
     ap.add_argument("--exposure", type=float, default=2.0, help="HDR scale applied to the linear image (default 2)")
     ap.add_argument("--clouds", choices=["keep", "clear"], default="keep")
@@ -219,7 +257,7 @@ def main():
     ap.add_argument("--out", help="output zip (default: the game's Skins/Stadium/Mod folder)")
     args = ap.parse_args()
 
-    pixels = chart() if args.chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
+    pixels = chart() if args.chart else grid_chart() if args.grid_chart else dark_chart() if args.dark_chart else np.asarray(Image.open(args.panorama).convert("RGB"))
     linear = srgb_to_linear(pixels) * args.exposure
     moods_dir = game_moods_dir()
     out = args.out or os.path.join(trackmania_dir(), "Skins", "Stadium", "Mod", args.name + ".zip")

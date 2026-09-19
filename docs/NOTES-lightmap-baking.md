@@ -314,3 +314,17 @@ sky, dim grid, the same counted heading squares, rings mirrored in blue below
 the middle row to measure how far down the visible sky reaches), plus
 **Sun2 L00**, a stock-Day baseline. K0 (sun near overhead) and K85 (sun about
 5 degrees up) give two known heights to calibrate the rings against.
+
+Third pass (the map owner's idea): **numbered cells**. `--grid-chart` cuts the
+near-black sky into 16 x 12 cells, each showing its number (digits are drawn
+as 3x5 bitmaps; Pillow's text layout is broken on this install). `Sun3 …`
+maps replace `Sun2 …`. Decoding a reported cell `n`:
+
+- column `n % 16`: heading, 22.5 degrees per column, column 0 = the image's
+  left edge;
+- row `n // 16`: 15 degrees of image latitude per row, row 0 = the top of
+  the image. Rows 0-5 (grey numbers, 0-95) are the upper half, rows 6-11
+  (blue numbers, 96-191) the lower half; the dim yellow line is the middle.
+
+Wanted per map: the cell the sun is in, the lowest row of numbers visible
+at the real horizon, and which cell is straight ahead at the start.
