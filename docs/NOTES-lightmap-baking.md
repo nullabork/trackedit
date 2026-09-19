@@ -541,3 +541,20 @@ from such a link on a machine that lacks the file.
 Open: Night (where the moon really is), merging the
 sun into a map's existing texture pack, ambient colour and colour grading
 (`Fx/ColorGrading`) as further controls.
+
+## 10. Experiment — does the old bake survive a small edit? (2026-09-19, awaiting the in-game look)
+
+A save now keeps every original object in its original file order and appends
+new ones, so in theory the old lightmap still lines up with everything that
+was not touched. `meshdump build` takes `"keepLightmap": true` in the
+placements JSON to keep the bake despite changes. Three copies of Simple 25
+in `Maps/Trackedit`, each one edit away from the original, old lightmap kept:
+
+| map | edit | what to look for |
+| --- | --- | --- |
+| LM keep A - one start added | a second RoadTechStart, appended last | is only the new block unlit/odd, or does the game reject the whole bake / ask to recompute? |
+| LM keep B - one item deleted | the third item removed (every later item shifts up one in the list) | do the items after it show the WRONG shadows (mapping is by index), or all fine (mapping is by something else)? |
+| LM keep C - one checkpoint moved | GateCheckpoint two cells over, same list position | does it carry its old shadows to the new place, leaving a ghost shadow behind? |
+
+B is the informative one for the baker: it says whether the cache maps
+objects by list position.

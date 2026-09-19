@@ -258,7 +258,11 @@ public static class MapBuild
         }
 
         // Baked shadows are only valid for the geometry they were baked for.
+        // `keepLightmap` keeps them anyway — an experiment: originals keep their
+        // order and new objects are appended, so the old bake may still fit them.
         var hadLightmap = map.LightmapCache is not null;
+        var keepLightmap = doc.TryGetProperty("keepLightmap", out var keepEl) && keepEl.ValueKind == JsonValueKind.True;
+        if (keepLightmap) changed = false;
         if (changed) DropLightmap(map);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
