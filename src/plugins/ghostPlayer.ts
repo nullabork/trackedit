@@ -175,6 +175,10 @@ export const ghostPlayerPlugin: EditorPlugin = {
         const t = c.layer.transform;
         const plain = t.rotDeg[0] === 0 && t.rotDeg[1] === 0 && t.rotDeg[2] === 0;
         ctx.view.rig.follow(new Vector3(p[0], p[1] + CAR_LIFT, p[2]), heading, pitch, firstPerson, plain ? turn : null);
+        // The frame loop moves the camera BEFORE it calls us, so without this the camera aims
+        // at where the car was a frame ago: about a metre at 200 km/h, and several whenever a
+        // frame runs long (moving the mouse did it) — the car seemed to jump ahead and back.
+        ctx.view.rig.update(0);
       }
 
       bar.element.hidden = false;

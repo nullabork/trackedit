@@ -99,8 +99,17 @@ export class SelectTool implements Tool {
       ev.ray.camera = this.ctx.view.camera;
       overHandle = this.outlines.some((o) => o.hitRing(ev.ray) || o.hitTag(ev.ray));
     }
+    // `ev.pick` raycasts the whole scene: on a big map that is a long frame for EVERY mouse
+    // move, all to choose a cursor. A few times a second is plenty for that.
+    const now = performance.now();
+    if (!overHandle && now - this.hoverPickAt < 120) {
+      if (canvas.style.cursor === "grab") canvas.style.cursor = ""; // just left a handle
+      return;
+    }
+    this.hoverPickAt = now;
     canvas.style.cursor = overHandle ? "grab" : ev.pick ? "pointer" : "";
   }
+  private hoverPickAt = 0;
 
   onPointerUp(): void {
     this.endDrag(true);
