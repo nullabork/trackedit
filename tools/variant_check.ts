@@ -20,11 +20,11 @@
  * usage: npx tsx tools/variant_check.ts [map.Map.Gbx ...]     (npm run variantcheck)
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { MapDocument } from "../src/core/document";
-import { placementMobil, placementVariant } from "../src/core/layer";
+import { placementMobil, placementSkin, placementVariant } from "../src/core/layer";
 import { baseTypeOf } from "../src/core/mapbase";
 import { importDump, type MapDump } from "../src/io/trackoJson";
 
@@ -52,7 +52,8 @@ interface Report {
 }
 
 /** Placement by placement: what the editor draws against what the file says. */
-type MobilReport = { named: number; noTable: number; wrong: Map<string, number> };
+type MobilReport = { named: number; noTable: number; skinned: number; wrong: Map<string, number> };
+const skinTable = (existsSync(join(meshes, "skins.json")) ? JSON.parse(readFileSync(join(meshes, "skins.json"), "utf-8")) : {}) as Record<string, unknown>;
 const meshIndex = (JSON.parse(readFileSync(join(meshes, "index.json"), "utf-8")) as { blocks: Record<string, { mobils?: Record<string, number[]> }> }).blocks;
 
 function compareWithEditor(map: string, work: string): { checked: number; wrong: Map<string, number>; examples: string[]; mobils: MobilReport } {
@@ -64,7 +65,7 @@ function compareWithEditor(map: string, work: string): { checked: number; wrong:
   doc.reset(imported.layers, { name: imported.name, decoration: imported.decoration });
   const stadium = baseTypeOf(doc.decorationBase) === "stadium";
   const wrong = new Map<string, number>();
-  const mobils = { named: 0, noTable: 0, wrong: new Map<string, number>() };
+  const mobils = { named: 0, noTable: 0, skinned: 0, wrong: new Map<string, number>() };
   const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
   const examples: string[] = [];
   let checked = 0;
@@ -77,6 +78,12 @@ function compareWithEditor(map: string, work: string): { checked: number; wrong:
     const index = (Number(original.flags ?? 0) >>> 21) & 0x3f;
     const file = (original.isGround ? "ground" : "air") + (index || "");
     const editor = placementVariant(p, stadium);
+    // The surface skin it carries must be one the extraction has a swap table for.
+    const skin = placementSkin(p);
+    if (skin) {
+      mobils.skinned++;
+      if (!skinTable[skin]) bump(mobils.wrong, `${p.block}: skin "${skin}" is not in skins.json`);
+    }
     // The mobil it names (Variant = row, SubVariant = column) must exist in that variant's table.
     const row = Number(original.variant ?? 0), col = Number(original.subVariant ?? 0);
     if (row || col) {
@@ -118,7 +125,7 @@ try {
     console.log(`     editor vs file: ${editor.checked} blocks (grid and free) compared, ${mismatches} drawn with another variant than the file names`);
     for (const [what, n] of [...editor.wrong].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`       ${n} x ${what}`);
     const m = editor.mobils;
-    console.log(`     mobils: ${m.named} blocks name one other than [0][0]; ${[...m.wrong.values()].reduce((a, b) => a + b, 0)} wrong or outside their table` +
+    console.log(`     skins: ${m.skinned} blocks carry a surface skin; mobils: ${m.named} blocks name one other than [0][0]; ${[...m.wrong.values()].reduce((a, b) => a + b, 0)} wrong or outside their table` +
       (m.noTable ? `; ${m.noTable} of blocks extracted before mobil tables existed (re-extract blocks)` : ""));
     for (const [what, n] of [...m.wrong].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`       ${n} x ${what}`);
     if (r.outOfRange) console.log(`     ${r.outOfRange} name a variant their definition does not have`);

@@ -78,6 +78,17 @@ describe("blockIsGround", () => {
     expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true, true)).toBe("air2"); // its layer is tilted
   });
 
+  it("a pillar carries the surface of the platform above it as a skin", async () => {
+    const { placementSkin } = await import("./layer");
+    const pillar = (skin: unknown) => ({ id: "b", kind: "block" as const, block: "DecoWallBasePillar", coord: [1, 12, 1] as [number, number, number], dir: 0 as const, meta: { flags: 0xc000, skin } });
+    const none = { file: "", url: "" };
+    expect(placementSkin(pillar({ text: "PlatformIce\\", pack: none, parentPack: none, foregroundPack: none }))).toBe("PlatformIce");
+    expect(placementSkin(pillar(undefined))).toBe("");
+    expect(placementSkin(pillar({ text: "", pack: none }))).toBe("");
+    // A sign: the skin names an image, not a surface.
+    expect(placementSkin(pillar({ text: "!4", pack: { file: "Skins\\Any\\Advertisement4x1\\Off.tga", url: "" } }))).toBe("");
+  });
+
   it("a block names a mobil of its variant: Variant = row, SubVariant = column", async () => {
     const { placementMobil } = await import("./layer");
     const block = (flags: number) => ({ id: "b", kind: "block" as const, block: "StructurePillar", coord: [1, 12, 1] as [number, number, number], dir: 0 as const, meta: { flags } });

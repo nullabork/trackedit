@@ -503,6 +503,30 @@ walls and pillars — `Skin.Text` like `PlatformIce\`), item `PackDesc` / `Foreg
 (item skins), item `Scale` (1 on every item seen). And from 5j: a baked clip block's own
 `Variant` picks the bottom / middle / top piece of a post.
 
+## 5l. Block skins: a pillar's surface comes from the platform above it
+
+The audit's biggest "not drawn" field: 8,865 blocks on the cached maps carry a `Skin`. All
+but one are PILLAR blocks (`DecoWallBasePillar` 8,136 on RHEVARA, `DecoWall*Pillar`,
+`WaterWall*Pillar`) with `Skin.Text` = `PlatformGrass\`, `PlatformIce\`, `PlatformDirt\` or
+`PlatformPlastic\` and no image pack: the name of a TERRAIN MODIFIER. It is the mechanism the
+extractor already applies for blocks that have a modifier of their own (`DecoWallBaseGrass`
+is `DecoWallBase` + `PlatformGrass`): a game-skin maps base materials to slots, the modifier's
+folder holds the replacements. A pillar has no modifier of its own — the game stores, per
+placed pillar, which one the platform above it uses.
+
+- `meshdump skins` (also part of every block extraction) writes `skins.json`: per modifier,
+  base material -> replacement (`TrackWall -> PlatformIce.TrackWall`, 11 swaps for ice and
+  dirt, 5 for grass, 2 for plastic; the gameplay modifiers — Boost, Turbo, Reset… — come along),
+  and registers every replacement so its texture is converted.
+- `placementSkin` reads the text (grid and free blocks); the renderer asks for
+  `<variant>[@<row>_<col>]#<skin>`; the provider loads the same mesh with the swaps applied, as
+  a template of its own.
+- `npm run variantcheck` fails on a skin that `skins.json` does not know.
+
+Seen in the editor: pillars skinned ice / grass / dirt load `PlatformIce.TrackWall`,
+`PlatformGrass.TrackWall`, `PlatformDirt.TrackWall`. Not drawn yet: a skin that names an
+image pack (one `TechnicsScreen4x1` on RHEVARA), and item skins.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

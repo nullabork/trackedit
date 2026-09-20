@@ -117,6 +117,10 @@ switch (args[0])
             foreach (var g in baked.GroupBy(b => (string)b["name"]!).OrderByDescending(g => g.Count()).Take(15)) Console.WriteLine($"  {g.Count(),6} x {g.Key}");
             return 0;
         }
+    case "skins":
+        // meshdump skins <GameDataRoot> <meshesDir> — (re)write skins.json and the materials it
+        // names alone; a block extraction writes them too.
+        return new Dumper(args[1], args[2], null).DumpSkins();
     case "clipdefs":
         // meshdump clipdefs <GameDataRoot> <meshesDir> — (re)write clipdefs.json alone; a
         // block extraction writes it too.
@@ -1702,6 +1706,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         }
         File.WriteAllText(Path.Combine(outDir, "index.json"), current.ToJsonString());
         WriteClipDefs(root, outDir);
+        WriteSkins();
         WriteMaterials();
         Console.WriteLine($"done: {ok} exported, {skipped} skipped, {failed} failed -> {outDir}");
     }
@@ -2587,6 +2592,51 @@ sealed class Dumper(string root, string outDir, string? filter)
     /// SLOTS (slot name -> the material file it normally uses) and a folder
     /// holds replacements named after those slots.</summary>
     private sealed record TerrainModifier(string Tag, string Folder, Dictionary<string, List<string>> SlotsByStem);
+
+    public int DumpSkins()
+    {
+        WriteSkins();
+        WriteMaterials();
+        return 0;
+    }
+
+    /// <summary>
+    /// skins.json: the material swaps a PLACED block's skin applies. A pillar under a grass
+    /// platform is stored with Skin.Text "PlatformGrass\": the terrain modifier of that name,
+    /// the same mechanism a block's own MaterialModifier uses at extraction (DecoWallBaseGrass
+    /// is DecoWallBase + PlatformGrass). Per modifier: base material -> the material that
+    /// replaces it, each registered so its texture is converted even if no block's own
+    /// modifier ever used it.
+    /// </summary>
+    private void WriteSkins()
+    {
+        var dir = Fs.Fix(Path.Combine(root, "Media", "Modifier"));
+        if (!Directory.Exists(dir)) return;
+        var skins = new JsonObject();
+        foreach (var file in Directory.EnumerateFiles(dir, "*.TerrainModifier*.Gbx").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            try
+            {
+                SetModifiers(Path.GetRelativePath(root, file));
+                if (activeModifiers.Count == 0) continue;
+                var mod = activeModifiers[0];
+                var swaps = new JsonObject();
+                foreach (var stem in mod.SlotsByStem.Keys.OrderBy(k => k, StringComparer.Ordinal))
+                {
+                    var plain = Sanitize(stem);
+                    var swapped = RegisterMaterial($"Media\\Material\\{stem}.Material.Gbx", null);
+                    if (swapped != plain) swaps[plain] = swapped;
+                }
+                if (swaps.Count > 0) skins[mod.Tag] = swaps;
+            }
+            finally
+            {
+                activeModifiers.Clear();
+            }
+        }
+        File.WriteAllText(Path.Combine(outDir, "skins.json"), skins.ToJsonString());
+        Console.WriteLine($"skins.json: {skins.Count} placement skins ({string.Join(", ", skins.Select(kv => $"{kv.Key} {kv.Value!.AsObject().Count}"))})");
+    }
 
     private void SetModifiers(params string?[] modifierFiles)
     {

@@ -128,6 +128,20 @@ export function placementMobil(p: Placement): string {
   return row || col ? `${row}_${col}` : "";
 }
 
+/**
+ * The surface skin a placed block carries, as the name of a terrain modifier ("PlatformGrass",
+ * "PlatformIce", …), or "". The game stores it on pillar blocks under a platform
+ * (`Skin.Text = "PlatformGrass\"`) and swaps their materials for that modifier's — the same
+ * swap a block with a modifier of its own gets at extraction. A skin that names an image pack
+ * (a sign) is something else and not handled here.
+ */
+export function placementSkin(p: Placement): string {
+  if (p.kind !== "block" && !(p.kind === "free" && !p.isItem)) return "";
+  const skin = (p.meta as { skin?: { text?: string; pack?: { file?: string; url?: string } } } | undefined)?.skin;
+  if (!skin?.text || skin.pack?.file || skin.pack?.url) return "";
+  return skin.text.replace(/[\\/]+$/, "");
+}
+
 export function blockVariantIndex(p: { readonly meta?: Readonly<Record<string, unknown>> }): number {
   return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
 }

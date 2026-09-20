@@ -74,8 +74,18 @@ interface MeshIndexEntry {
   emptyMobils?: string[] | null;
 }
 
+/** "air1@2_0#PlatformIce" -> ["air1@2_0", "PlatformIce"]: the surface skin rides at the end. */
+const splitSkin = (variant: string): [string, string] => {
+  const at = variant.indexOf("#");
+  return at < 0 ? [variant, ""] : [variant.slice(0, at), variant.slice(at + 1)];
+};
 /** "air1@2_0" -> "air1": the variant a mobil belongs to (units, clips and fallback mesh are per variant). */
-const variantOfMobil = (variant: string): string => (variant.includes("@") ? variant.slice(0, variant.indexOf("@")) : variant);
+const variantOfMobil = (variant: string): string => {
+  const plain = splitSkin(variant)[0];
+  return plain.includes("@") ? plain.slice(0, plain.indexOf("@")) : plain;
+};
+/** skins.json: placement skin -> base material -> the material that replaces it. */
+type SkinTable = Record<string, Record<string, string> | undefined>;
 
 /** Additional variants that differ from their base ride along as air1, air2, ground1, … -> OBJ path. */
 const variantPath = (entry: MeshIndexEntry | undefined, variant: string): string | null =>
@@ -136,6 +146,7 @@ export function canonicalMaterialName(name: string): string {
 export class MeshProvider implements GeometryProvider {
   private index: MeshIndex | null = null;
   private clipDefs: ClipDefs = {};
+  private skins: SkinTable = {};
   private readonly clipInfos = new Map<string, BlockClipInfo>();
   private materialIndex: MaterialIndex = {};
   private cache = new Map<string, Object3D>();
@@ -451,6 +462,8 @@ export class MeshProvider implements GeometryProvider {
       const defs = await fetch(this.baseUrl + "clipdefs.json");
       if (defs.ok) this.clipDefs = (await defs.json()) as ClipDefs;
       else console.warn("meshes/clipdefs.json is missing — clip pieces cannot be hidden correctly; run `meshdump clipdefs` or re-extract the blocks");
+      const skins = await fetch(this.baseUrl + "skins.json");
+      if (skins.ok) this.skins = (await skins.json()) as SkinTable;
       const tables = await fetch(this.baseUrl + "colortables.json");
       if (tables.ok) setColorTables((await tables.json()) as ColorTables);
       return true;
@@ -487,6 +500,13 @@ export class MeshProvider implements GeometryProvider {
   /** Cache key for a block+variant. Ground requests fall back to the air key
    * when no ground OBJ exists (and vice versa), so nothing loads twice. */
   private variantKey(base: string, variant: MeshVariant): string {
+    // A surface skin this extraction knows makes a template of its own (same mesh, other materials).
+    const [plain, skin] = splitSkin(variant);
+    if (skin) return this.plainKey(base, plain) + (this.skins[skin] ? `#${skin}` : "");
+    return this.plainKey(base, plain);
+  }
+
+  private plainKey(base: string, variant: MeshVariant): string {
     const entry = this.index?.blocks[base];
     // A mobil with a mesh of its own (or with none at all); otherwise whatever its variant shows.
     if (variant.includes("@")) {
@@ -509,7 +529,7 @@ export class MeshProvider implements GeometryProvider {
     const key = this.variantKey(base, variant);
     const cached = this.cache.get(key);
     if (cached) return cached;
-    if (this.index?.blocks[base]?.emptyMobils?.includes(variant)) {
+    if (this.index?.blocks[base]?.emptyMobils?.includes(splitSkin(variant)[0])) {
       // e.g. the empty row of a pillar: the game draws nothing, and so do we.
       const nothing = new Group();
       this.cache.set(key, nothing);
@@ -527,7 +547,8 @@ export class MeshProvider implements GeometryProvider {
     const entry = this.index?.blocks[base] ?? this.index?.items?.[base];
     // In-game, elevated blocks use the air variant (with underside geometry);
     // only terrain-seated blocks show the underside-less ground variant.
-    const own = key.includes(KEY_SEP) ? key.slice(key.indexOf(KEY_SEP) + 1) : null;
+    const [meshKey, skin] = splitSkin(key);
+    const own = meshKey.includes(KEY_SEP) ? meshKey.slice(meshKey.indexOf(KEY_SEP) + 1) : null;
     const objPath = own === null ? (entry?.air ?? entry?.obj ?? entry?.ground)
       : own === "ground" ? entry?.ground
       : variantPath(entry, own);
@@ -535,7 +556,7 @@ export class MeshProvider implements GeometryProvider {
     this.pending.add(key);
     this.loadQueue.push({
       pos: this.positions.get(base) ?? null,
-      run: () => this.loadNow(key, base, objPath, entry, def?.category),
+      run: () => this.loadNow(key, base, objPath, entry, def?.category, this.skins[skin]),
     });
     this.pump();
   }
@@ -546,7 +567,10 @@ export class MeshProvider implements GeometryProvider {
     objPath: string,
     entry: MeshIndexEntry,
     category?: string,
+    /** A placement skin's swaps: base material name -> replacement. */
+    swaps?: Record<string, string>,
   ): void {
+    const material = (name: string) => this.materialFor(swaps?.[name] ?? name, category);
     const finish = (obj: Object3D) => {
         // Extracted meshes are modelled from the block's min corner. Tag the
         // template so DocumentRenderer can anchor it correctly per placement
@@ -567,7 +591,7 @@ export class MeshProvider implements GeometryProvider {
     // Fetching, parsing and shading happen in a worker pool: every core at
     // once, nothing on the page's thread (see objWorker.ts).
     if (this.workers) {
-      void this.workers.load(this.baseUrl + objPath, (name) => this.materialFor(name, category)).then((obj) => {
+      void this.workers.load(this.baseUrl + objPath, material).then((obj) => {
         this.loadDone();
         finish(obj);
       }, failed);
@@ -583,7 +607,7 @@ export class MeshProvider implements GeometryProvider {
             // OBJLoader names materials after their usemtl group; a mesh with
             // several groups carries an array of them.
             const replace = (m: { name?: string }) =>
-              this.materialFor(m.name || "default", category);
+              material(m.name || "default");
             o.material = Array.isArray(o.material)
               ? o.material.map(replace)
               : replace(o.material as { name?: string });

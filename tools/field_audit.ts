@@ -49,7 +49,7 @@ const REVIEW: Record<string, Record<string, [Verdict, string]>> = {
     WaypointSpecialProperty: ["draws", "start/checkpoint/finish lists, linked checkpoints"],
     SubVariant: ["draws", "bits 6-11: the COLUMN of the variant's Mobils table, an alternative build (\"B\" shape, \"v2\" materials); variantcheck, NOTES 5k"],
     Variant: ["draws", "bits 0-5: the ROW of the variant's Mobils table, e.g. a pillar's height piece or its empty row; variantcheck, NOTES 5k"],
-    Skin: ["todo", "sign images and the surface of deco walls/pillars (Skin.Text such as \"PlatformIce\\\\\"): not drawn"],
+    Skin: ["draws", "the surface a pillar takes from the platform above it (Skin.Text \"PlatformIce\\\\\" = that terrain modifier's material swaps; skins.json, variantcheck, NOTES 5l). A skin naming an IMAGE pack (signs, screens) is not drawn yet"],
     IsPillar: ["kept", "bit 14: the block stands in for an auto pillar; drawn as the named block"],
     IsReplacement: ["kept", "bit 16: replaced a pillar; drawn as the named block"],
     LightmapQuality: ["kept", "shadow baking hint"], MacroblockReference: ["kept", "which macroblock placed it"],
