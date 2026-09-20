@@ -591,6 +591,47 @@ of 16; `WaterHFCRight`: 0..3) — not read yet.
   itself; `POST /api/setup/gamedir`), passes it to the import, rebuilds a converter that is
   older than its source, and tells an existing install which data its import predates.
 
+## 5o. Wall copings turned across the wall, walls with no outside: two heuristics replaced (tmx-33114)
+
+**Report.** `PlatformTechWallStraight`, `...4`, `PlatformIce/PlasticWallStraight`: "the end cap
+textures are wrong, or have the wrong pivot, or are placed wrong — there should be a standard
+way of rendering any block".
+
+**What was wrong, from the mesh alone.** The wall runs along z at x = 30..32. Its top coping
+lay along it; its BOTTOM coping lay across it (x 0..32, z 0..2) — a strip sticking out
+sideways from every wall. And the wall's outer face (`PlatformWallStraightFC`, a full 32 x 8
+panel) was not in the mesh at all.
+
+**1. Cap direction: the game's, not a fit.** Looked for a stored direction once more, properly:
+`TopClipDir` / `BottomClipDir` exist on a block unit but are empty in all 89,946 units (an
+older format), and the unit `Dir` is North even in blocks whose caps the game turns by 90, 180
+and 270 degrees. The definitions as GBX.NET reads them carry no cap direction. The result,
+though, is in every map: the baked clip blocks have a direction, and
+`npm run cliptruth -- --harvest` reads, per exact cap (`block|variant|clip|face|unit`), the
+quarter turn relative to its block — kept when seen at least twice and in four of five
+sightings — into `tools/meshdump/cap_turns.json` (761 caps from 8 maps, 244 of them turned),
+which ships beside the converter. A game direction of k is the extractor's turn -k (checked
+where the fit is unambiguous: wall copings, loop-start and slope tops). The extractor places
+a known cap by it — body-less blocks included, which the fit could not do at all — and fits
+shapes only for caps no map has shown yet. For these walls the game says 90 for top AND
+bottom; the fit had scored that turn lowest for the bottom too (12.9 against 28.6) and was
+held back by its own "must be 75% better than no turn" threshold.
+`MESHDUMP_CAP_REPORT` now records the fit's turn next to the game's, and `npm run capfit`
+says how often the fit agrees where the game is known — i.e. what to expect of it elsewhere.
+
+**2. The placement gate: "touches the body" -> "sits on its own unit's cell".** Every clip is
+built into a scratch buffer and committed only if it seats; the test was a gap of at most
+1.5 m to the block's BODY. That fails every thin-walled block: a wall's body is one plane 2 m
+inside its outer face, a loop start's deck is 2 m above its underside plate. `npm run
+clipgeom` (clips listed in index.json without a part in the mesh) counted 5,299 of 146,031:
+234 outer wall faces, 258 + 108 deco-wall back panels of loop starts, 2,932 `PlatformBaseFCB`
+underside plates (cliffs, loop starts — all baked by the game), stage and cliff side pieces.
+What the gate exists to reject is a block-space clip re-attached to several units, whose
+copies land a cell off. So a clip now also passes when it sits on ITS OWN unit's cell and
+inside the block's box — a side panel on its unit's face, a cap that fits within its unit's
+cell; anything wider than a cell still has to meet the body. `MESHDUMP_GATE_LOG=1` says which
+clips a block loses and why.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

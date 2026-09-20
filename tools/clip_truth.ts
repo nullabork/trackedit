@@ -18,12 +18,15 @@
  * Maps saved by trackedit have no baked blocks (the game rebuilds them): use
  * files from the game or TMX.
  *
- * usage: npx tsx tools/clip_truth.ts [map.Map.Gbx ...] [--explain]   (npm run cliptruth)
+ * usage: npx tsx tools/clip_truth.ts [map.Map.Gbx ...] [--explain] [--harvest]   (npm run cliptruth)
+ *        --harvest also writes tools/meshdump/cap_turns.json: the quarter turn the game gives
+ *        each top/bottom cap relative to its block, read off the baked clips of every map —
+ *        the extractor places caps by it (the definitions store no direction; NOTES 5o).
  *        no map = every map cached under maps/gbx, with totals; --explain tabulates what the
  *        game did per situation (what the clip faces), which is how the rule was derived.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MapDocument } from "../src/core/document";
@@ -64,13 +67,41 @@ if (mapArgs.length !== 1) {
   // No map, or several: every one (default: all cached under maps/gbx) in its own run, then the totals.
   const maps = mapArgs.length ? mapArgs : readdirSync(join(process.cwd(), "maps", "gbx")).filter((f) => f.endsWith(".Map.Gbx")).map((f) => join("maps", "gbx", f));
   let wrong = 0, total = 0;
-  for (const map of maps) {
-    const run = spawnSync(process.execPath, [...process.execArgv, process.argv[1], map, "--brief"], { encoding: "utf-8" });
+  // --harvest: also collect, from every map, the direction the game gave each top/bottom cap
+  // relative to its block, and write tools/meshdump/cap_turns.json for the extractor.
+  const harvest = process.argv.includes("--harvest");
+  const harvestDir = harvest ? mkdtempSync(join(tmpdir(), "trackedit-capturns-")) : null;
+  const observed: Record<string, number[]> = {};
+  for (const [n, map] of maps.entries()) {
+    const capFile = harvestDir ? join(harvestDir, `${n}.json`) : null;
+    const run = spawnSync(process.execPath, [...process.execArgv, process.argv[1], map, "--brief", ...(capFile ? [`--capturns=${capFile}`] : [])], { encoding: "utf-8" });
+    if (capFile) {
+      try {
+        for (const [k, counts] of Object.entries(JSON.parse(readFileSync(capFile, "utf-8")) as Record<string, number[]>))
+          (observed[k] ??= [0, 0, 0, 0]).forEach((_, i, a) => { a[i] += counts[i]; });
+      } catch { /* that map had no baked clips */ }
+    }
     const m = /clips: (\d+) ours, (\d+) agree/.exec(run.stdout ?? "");
     if (m) { total += Number(m[1]); wrong += Number(m[1]) - Number(m[2]); }
     console.log([map, (run.stdout ?? "").trimEnd(), (run.stderr ?? "").trimEnd()].filter(Boolean).join("\n"));
   }
   console.log(`TOTAL: ${total} clips on ${maps.length} maps, ${wrong} differ from the game (${total ? ((100 * (total - wrong)) / total).toFixed(2) : "-"}% agree)`);
+  if (harvestDir) {
+    // A cap's turn is kept when the game was seen to use it at least twice and at least four
+    // times in five: a cap in a cell shared with another block's can be attributed to the wrong one.
+    const turns: Record<string, number> = {};
+    let unsure = 0;
+    for (const [k, counts] of Object.entries(observed).sort(([a], [b]) => a.localeCompare(b))) {
+      const n = counts.reduce((a, b) => a + b, 0), best = counts.indexOf(Math.max(...counts));
+      if (counts[best] >= 2 && counts[best] / n >= 0.8) turns[k] = best;
+      else unsure++;
+    }
+    const out = join(process.cwd(), "tools", "meshdump", "cap_turns.json");
+    writeFileSync(out, "{\n" + Object.entries(turns).map(([k, t]) => `${JSON.stringify(k)}: ${t}`).join(",\n") + "\n}\n");
+    rmSync(harvestDir, { recursive: true, force: true });
+    const n = Object.keys(turns).length;
+    console.log(`cap turns: ${n} caps with a known direction (${Object.values(turns).filter((t) => t !== 0).length} turned), ${unsure} seen too rarely or inconsistently -> ${out}`);
+  }
   process.exit(wrong ? 1 : 0);
 }
 const mapPath = mapArgs[0];
@@ -99,12 +130,13 @@ const stadium = baseTypeOf(doc.decorationBase) === "stadium";
 
 /** Placed in ghost mode (flag bit 28): outside the editor's grid, which is how such blocks can overlap others. */
 const isGhost = (meta: unknown): boolean => ((((meta as { flags?: number } | undefined)?.flags ?? 0) >>> 28) & 1) === 1;
-type Subject = ClipSubject & { block: string; ghost: boolean };
+type Subject = ClipSubject & { block: string; variant: string; ghost: boolean };
 const subjects: Subject[] = [];
 for (const layer of doc.layers) for (const p of layer.placements.values()) {
   if (p.kind !== "block") continue;
-  const info = clipInfo(p.block, placementVariant(p, stadium));
-  if (info) subjects.push({ pose: { coord: p.coord, dir: p.dir }, info, block: p.block, ghost: isGhost(p.meta) });
+  const variant = placementVariant(p, stadium);
+  const info = clipInfo(p.block, variant);
+  if (info) subjects.push({ pose: { coord: p.coord, dir: p.dir }, info, block: p.block, variant, ghost: isGhost(p.meta) });
 }
 
 const yShift = 0;
@@ -200,6 +232,7 @@ let agree = 0;
 const extra = new Map<string, number>(), missing = new Map<string, number>(), dirs = new Map<string, Map<number, number>>();
 const claimed = new Set<TruthBlock>();
 const sideDirs = new Map<number, number>();
+const capObservations: Record<string, number[]> = {};
 // Wall panels: the segment (Middle/Top/Bottom/TopBottom) we would show vs the variant the game baked.
 const SEGMENT = ["Middle", "Top", "Bottom", "TopBottom"];
 const walls = { n: 0, agree: 0, alwaysTopBottom: 0, confusion: new Map<string, number>() };
@@ -251,6 +284,9 @@ for (const c of all) {
     const key = `${c.clip.id} in ${c.subject.block}`;
     const m = dirs.get(key) ?? dirs.set(key, new Map()).get(key)!;
     m.set(rel, (m.get(rel) ?? 0) + 1);
+    // The same, per exact cap, for the extractor (--harvest): block | variant | clip | face | unit.
+    const exact = `${c.subject.block}|${c.subject.variant}|${c.clip.id}|${c.clip.face}|${c.clip.u.join(",")}`;
+    (capObservations[exact] ??= [0, 0, 0, 0])[rel]++;
   }
 }
 // --- free blocks: no cell to compare by, so per clip name, how many the game baked vs how many we show ---
@@ -319,6 +355,8 @@ console.log(`  game clip blocks no block of ours accounts for: ${total(unclaimed
 for (const [k, n] of top(unclaimed, 10)) console.log(`     ${n} x ${k}`);
 
 console.log(`  side clips: game direction minus the direction the face looks: ${[...sideDirs].sort((a, b) => b[1] - a[1]).map(([d, n]) => `${d * 90}deg x${n}`).join(", ")}`);
+const capOut = process.argv.find((a) => a.startsWith("--capturns="))?.slice("--capturns=".length);
+if (capOut) writeFileSync(capOut, JSON.stringify(capObservations));
 if (brief) process.exit(total(missing) + total(extra) ? 1 : 0);
 // Cap direction: a clip whose direction relative to its block is not always 0
 // is one the game turns — the table the extractor's shape fit has to reproduce.

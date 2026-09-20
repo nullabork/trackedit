@@ -1357,7 +1357,12 @@ sealed class Dumper(string root, string outDir, string? filter)
     private static readonly JsonArray? CapReport = Environment.GetEnvironmentVariable("MESHDUMP_CAP_REPORT") is null ? null : new JsonArray();
 
     /// <summary>Block (or item) currently being exported, for diagnostics.</summary>
+    /// <summary>MESHDUMP_GATE_LOG=1: say which clips a block lost, and why.</summary>
+    private static readonly bool GateLogOn = Environment.GetEnvironmentVariable("MESHDUMP_GATE_LOG") == "1";
+    private void GateLog(string what) { if (GateLogOn) Console.WriteLine($"  gate {currentBlock} [{currentVariantTag}] {what}"); }
     private string currentBlock = "";
+    /// <summary>"air", "ground1", … — the variant being exported (cap_turns.json is keyed by it).</summary>
+    private string currentVariantTag = "air";
     private int ok, failed, skipped;
 
     public int DumpBlocks()
@@ -1835,6 +1840,7 @@ sealed class Dumper(string root, string outDir, string? filter)
     {
         if (variant?.Mobils is null || variant.Mobils.Length == 0) return null;
         var builder = new ObjBuilder();
+        currentVariantTag = tag.Contains('@') ? tag[..tag.IndexOf('@')] : tag;
 
         // Mobils[row][col] are alternative appearances, not parts — exporting them all
         // into one mesh overlays duplicate geometry. One mesh per mobil; the base look is
@@ -2242,10 +2248,10 @@ sealed class Dumper(string root, string outDir, string? filter)
                     {
                         emitRaw = b => AddMobil(b, cm, Quaternion.Identity, Vector3.Zero);
                     }
-                    if (emitRaw is null) continue;
+                    if (emitRaw is null) { GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} has no geometry in the variant it needs"); continue; }
                     var (rawMin, rawMax) = ProbeBounds(
                         $"{clip.Ident.Id}|{preferGround}|{(isWall ? $"w{(above ? 1 : 0)}{(below ? 1 : 0)}{(unit.RelativeOffset.Y == 0 ? "g" : "a")}" : "m")}", emitRaw);
-                    if (rawMin.X > rawMax.X) continue; // empty
+                    if (rawMin.X > rawMax.X) { GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} is empty"); continue; }
 
                     // Vertical caps: shift only when the clip follows the
                     // "flat cap at the opposite face" convention.
@@ -2261,7 +2267,22 @@ sealed class Dumper(string root, string outDir, string? filter)
                     // orient them so their height profile TRACKS the block's
                     // own profile over this unit (a mirrored shell would rise
                     // where the body falls, covering the ride surface).
-                    if (face is "bottom" or "top" && cm is not null && !builder.IsEmpty)
+                    // The game's own answer first: the quarter turn it gives this very cap relative
+                    // to its block, read off the clips baked into map files (cap_turns.json,
+                    // `npm run cliptruth -- --harvest`). The definitions store no direction — unit
+                    // Dir is North throughout, TopClipDir / BottomClipDir are never set — so for a
+                    // cap no map has shown yet, the shape fit below still has to do.
+                    // A game direction of k quarter turns is the fit's turn -k: checked on every
+                    // family where the fit is unambiguous (wall copings, loop-start and slope tops).
+                    int? gameTurn = face is "bottom" or "top" && cm is not null
+                        ? CapTurns.Find(currentBlock, currentVariantTag, clip.Ident.Id, face, unit.RelativeOffset.X, unit.RelativeOffset.Y, unit.RelativeOffset.Z)
+                        : null;
+                    var unfitted = q;
+                    int? fitTurn = null;
+                    // The fit runs for caps without a known direction — and, when a report is
+                    // being written, for the known ones too, so the report can say how often the
+                    // fit would have been right (tools/cap_fit_check.py).
+                    if (face is "bottom" or "top" && cm is not null && !builder.IsEmpty && (gameTurn is null || CapReport is not null))
                     {
                         var zLo = off.Z; var zHi = off.Z + 32f;
                         var xLo = off.X; var xHi = off.X + 32f;
@@ -2339,6 +2360,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                             if (e < bestErr) { bestErr = e; best = cand; bestTurn = (int)(deg / 90f); }
                         }
                         q = best;
+                        fitTurn = bestTurn;
                         // Developer report (tools/cap_check.ts): the quarter turn the shape fit chose for
                         // this cap, next to what the game data says about its direction.
                         CapReport?.Add(new JsonObject
@@ -2348,9 +2370,22 @@ sealed class Dumper(string root, string outDir, string? filter)
                             ["unitDir"] = unit.Dir.ToString(), ["unitMultiDir"] = unit.MultiDir.ToString(),
                             ["face"] = face, ["clip"] = clip.Ident.Id,
                             ["multiDir"] = (clip as CGameCtnBlockInfoClip)?.TopBottomMultiDir.ToString(),
-                            ["hasBody"] = hasBody, ["tall"] = tall, ["turn"] = bestTurn,
+                            ["hasBody"] = hasBody, ["tall"] = tall, ["turn"] = bestTurn, ["tag"] = currentVariantTag,
+                            ["gameTurn"] = gameTurn is { } gt ? (4 - gt) % 4 : null,
                             ["errs"] = new JsonArray(errs.Select(e => (JsonNode)MathF.Round(e, 2)).ToArray()),
                         });
+                    }
+                    if (gameTurn is { } known)
+                    {
+                        var turn = (4 - known) % 4;
+                        q = Quaternion.Concatenate(Quaternion.CreateFromAxisAngle(Vector3.UnitY, turn * MathF.PI / 2f), unfitted);
+                        if (fitTurn is null)
+                            CapReport?.Add(new JsonObject
+                            {
+                                ["block"] = currentBlock, ["ground"] = preferGround, ["variant"] = variant.Name, ["tag"] = currentVariantTag,
+                                ["unit"] = $"{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}",
+                                ["face"] = face, ["clip"] = clip.Ident.Id, ["turn"] = null, ["gameTurn"] = turn,
+                            });
                     }
                     var t = off + extraEff + center - Vector3.Transform(center, q);
 
@@ -2430,11 +2465,36 @@ sealed class Dumper(string root, string outDir, string? filter)
                     // texture in the wrong place" reports.
                     var scratch = new ObjBuilder();
                     emit(scratch);
-                    if (scratch.IsEmpty) continue;
+                    if (scratch.IsEmpty) { GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} is empty once trimmed to the footprint"); continue; }
                     // Bodied blocks: the clip must touch the body. Mesh-less
                     // blocks: it must at least reach the block's own cells.
-                    if (hasBody ? scratch.GapTo(bodyMin, bodyMax) > 1.5f
-                                : scratch.GapTo(blockBox.Item1, blockBox.Item2) > 8f) continue;
+                    // SIDE panels get a second chance, because "touches the body" fails every
+                    // thin-walled block: a wall block's body is one plane 2 m inside its outer
+                    // face, a loop start's deck is metres from its back wall — and 234 outer wall
+                    // faces and 258 loop-start back panels were thrown away, leaving walls with
+                    // no outside and holes behind loops. What the gate is there to reject is a
+                    // block-space panel re-attached to several units, whose copies land a cell
+                    // off: those stick out of the block or miss their unit. So a side panel also
+                    // passes when it sits ON ITS OWN UNIT'S CELL and INSIDE THE BLOCK'S BOX.
+                    // Caps the same, held tighter: a cap that fits WITHIN its own unit's cell is
+                    // that unit's cap (a loop start's underside plate lies on the cell floor, 2 m
+                    // under the deck: 2,932 such plates were lost, all of them baked by the game);
+                    // a block-space cap is wider than one cell and still has to meet the body.
+                    var side = face is "north" or "south" or "east" or "west";
+                    var withinOwnCell = scratch.Min.X >= off.X - 0.6f && scratch.Max.X <= off.X + 32.6f
+                        && scratch.Min.Z >= off.Z - 0.6f && scratch.Max.Z <= off.Z + 32.6f
+                        && scratch.Min.Y >= off.Y - 1.5f && scratch.Max.Y <= off.Y + 9.5f;
+                    var onOwnUnit = (side || withinOwnCell)
+                        && scratch.GapTo(off, off + new Vector3(32f, 8f, 32f)) <= 0.1f
+                        && scratch.Min.X >= blockBox.Item1.X - 1.5f && scratch.Max.X <= blockBox.Item2.X + 1.5f
+                        && scratch.Min.Y >= blockBox.Item1.Y - 1.5f && scratch.Max.Y <= blockBox.Item2.Y + 1.5f
+                        && scratch.Min.Z >= blockBox.Item1.Z - 1.5f && scratch.Max.Z <= blockBox.Item2.Z + 1.5f;
+                    if (!onOwnUnit && (hasBody ? scratch.GapTo(bodyMin, bodyMax) > 1.5f
+                                               : scratch.GapTo(blockBox.Item1, blockBox.Item2) > 8f))
+                    {
+                        GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} rejected: {scratch.GapTo(bodyMin, bodyMax):0.#} m from the body, bounds {scratch.Min}..{scratch.Max}, unit cell at {off}");
+                        continue;
+                    }
 
                     var partName = $"clip:{clip.Ident.Id}:{face}:{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}";
                     builder.SetSource(partName);

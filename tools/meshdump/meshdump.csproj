@@ -16,4 +16,7 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="cap_turns.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
