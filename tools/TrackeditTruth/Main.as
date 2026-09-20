@@ -9,6 +9,8 @@
 // against it (npm run cliptruth).
 //
 // Output: OpenplanetNext/PluginStorage/TrackeditTruth/clips-<mapUid>.json
+//
+// A second menu entry sweeps EVERY block of the game in an empty map: Sweep.as.
 
 string g_status;
 
@@ -17,6 +19,12 @@ void RenderMenu()
     if (UI::MenuItem("\\$9cfTrackedit Truth\\$z (dump clip blocks)" + (g_status.Length > 0 ? "  " + g_status : ""))) {
         g_status = Dump();
         print("Trackedit Truth: " + g_status);
+    }
+    // Every block of the game, one at a time, in an empty scratch map (Sweep.as).
+    if (g_sweeping) {
+        if (UI::MenuItem("\\$9cfTrackedit Truth\\$z (stop sweep)  " + g_sweepStatus)) g_stopSweep = true;
+    } else if (UI::MenuItem("\\$9cfTrackedit Truth\\$z (sweep every block — EMPTY map only)" + (g_sweepStatus.Length > 0 ? "  " + g_sweepStatus : ""))) {
+        startnew(RunSweep);
     }
 }
 
