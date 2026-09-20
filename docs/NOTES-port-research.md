@@ -143,3 +143,21 @@ whole-map views still cannot hold 60 fps. If so, the order to try is
 **Godot 4 + C#** (prototype: 60 k instances of 2 k meshes through
 RenderingServer, and a virtualised 30 k-row tree) and then a custom
 Silk.NET/Vortice + ImGui renderer.
+
+## 5. Mesh loading moved to workers (2026-09-20)
+
+Measured for RHEVARA with everything loaded (what a LOD distance of 20,000
+amounts to): 967 distinct mesh files, 325 MB of OBJ text, 12.1 M vertices.
+
+| | wall time | page thread blocked |
+| --- | --- | --- |
+| before: OBJLoader on the page, 4 loads in flight | ~19 s (extrapolated from a 97-file sample: 2.0 s) | ~16 s |
+| now: a pool of 12 workers fetches, parses and shades; buffers are transferred | **4.7 s** | ~0 |
+| 20 workers | 5.4 s | — past a dozen the server and the largest files set the pace |
+
+`src/render/objWorker.ts` + `objWorkerPool.ts`; MeshProvider falls back to
+its own OBJLoader where workers are unavailable. Same files, same object
+tree as before (a Group of named meshes, materials by name), so nothing else
+changed. Left on the table: a binary mesh cache (the text is 325 MB to say
+what 12 M vertices say — indexed and quantised it is a fraction), which would
+cut the remaining seconds and the 11 GB on disk.

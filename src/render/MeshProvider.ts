@@ -21,6 +21,7 @@ import { baseVariant } from "./GeometryProvider";
 /** Separates a block name from its variant in cache keys (no block name contains it). */
 const KEY_SEP = "|";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
+import { ObjWorkerPool } from "./objWorkerPool";
 
 async function loadBitmap(url: string): Promise<ImageBitmap> {
   const res = await fetch(url);
@@ -141,7 +142,11 @@ export class MeshProvider implements GeometryProvider {
    * the main thread never freezes on an OBJ-parse storm. */
   private loadQueue: Array<{ pos: [number, number, number] | null; run: () => void }> = [];
   private inFlight = 0;
-  private static readonly MAX_IN_FLIGHT = 4;
+  private readonly workers = ObjWorkerPool.create();
+  /** With workers a load costs the page nothing, so keep every one of them fed. */
+  private get maxInFlight(): number {
+    return this.workers ? this.workers.size * 2 : 4;
+  }
   /** Representative world position per block, for nearest-first loading. */
   private positions = new Map<string, [number, number, number]>();
   /** Injected by main: current camera position, used to prioritise the queue. */
@@ -162,7 +167,7 @@ export class MeshProvider implements GeometryProvider {
 
   /** Nearest-to-camera first: the world materialises around the player. */
   private pump(): void {
-    while (this.inFlight < MeshProvider.MAX_IN_FLIGHT && this.loadQueue.length > 0) {
+    while (this.inFlight < this.maxInFlight && this.loadQueue.length > 0) {
       let idx = 0;
       const cam = this.cameraPos?.();
       if (cam && this.loadQueue.length > 1) {
@@ -514,6 +519,32 @@ export class MeshProvider implements GeometryProvider {
     entry: MeshIndexEntry,
     category?: string,
   ): void {
+    const finish = (obj: Object3D) => {
+        // Extracted meshes are modelled from the block's min corner. Tag the
+        // template so DocumentRenderer can anchor it correctly per placement
+        // kind (grid blocks pivot around the footprint centre, free blocks
+        // use the raw origin).
+        obj.name = base;
+        obj.userData.anchor = "corner";
+        obj.userData.sizeCells = entry.size ?? [1, 1, 1];
+        this.cache.set(key, obj);
+        this.pending.delete(key);
+        this.onLoaded(base);
+    };
+    const failed = () => {
+      this.loadDone();
+      this.pending.delete(key);
+    };
+
+    // Fetching, parsing and shading happen in a worker pool: every core at
+    // once, nothing on the page's thread (see objWorker.ts).
+    if (this.workers) {
+      void this.workers.load(this.baseUrl + objPath, (name) => this.materialFor(name, category)).then((obj) => {
+        this.loadDone();
+        finish(obj);
+      }, failed);
+      return;
+    }
     this.loader.load(
       this.baseUrl + objPath,
       (obj) => {
@@ -530,22 +561,10 @@ export class MeshProvider implements GeometryProvider {
               : replace(o.material as { name?: string });
           }
         });
-        // Extracted meshes are modelled from the block's min corner. Tag the
-        // template so DocumentRenderer can anchor it correctly per placement
-        // kind (grid blocks pivot around the footprint centre, free blocks
-        // use the raw origin).
-        obj.name = base;
-        obj.userData.anchor = "corner";
-        obj.userData.sizeCells = entry.size ?? [1, 1, 1];
-        this.cache.set(key, obj);
-        this.pending.delete(key);
-        this.onLoaded(base);
+        finish(obj);
       },
       undefined,
-      () => {
-        this.loadDone();
-        this.pending.delete(key);
-      },
+      failed,
     );
   }
 }
