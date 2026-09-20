@@ -24,6 +24,16 @@ export class CameraRig {
   private orbiting = false;
   /** Fly entered via a keyboard toggle; a click lands it. */
   private toggledFly = false;
+  /**
+   * Following a moving target (a driving line's car, see plugins/ghostPlayer): the camera
+   * sits relative to the target's HEADING, so it turns with the car. Dragging orbits around
+   * the target and the wheel zooms — both keep following. Anything that moves the camera
+   * AWAY (pan, fly, WASD) ends it and calls `onFollowEnded`.
+   */
+  private following: { target: Vector3; heading: number; firstPerson: boolean } | null = null;
+  /** Camera yaw relative to the target's heading; 0 = straight behind it. */
+  private relYaw = 0;
+  onFollowEnded: (() => void) | null = null;
   /** RMB is down but fly hasn't engaged yet (waits for actual movement). */
   private rmbPending: { x: number; y: number } | null = null;
 
@@ -60,6 +70,7 @@ export class CameraRig {
       if (this.rmbPending && !this.isFlying && !this.suspended) {
         const moved = Math.hypot(e.clientX - this.rmbPending.x, e.clientY - this.rmbPending.y);
         if (moved > 4) {
+          this.endFollow();
           this.isFlying = true;
           dom.requestPointerLock();
         }
@@ -68,6 +79,10 @@ export class CameraRig {
         // Rotate in place. Mouse up = look up (standard FPS, not inverted).
         this.yaw -= e.movementX * 0.0024;
         this.addPitch(-e.movementY * 0.0024);
+      } else if (this.orbiting && this.following) {
+        // Around the car: the angle is kept relative to where it is heading.
+        this.relYaw -= e.movementX * 0.005;
+        this.addPitch(-e.movementY * 0.005);
       } else if (this.orbiting) {
         // Rotate around the focus point.
         const focus = this.focusPoint();
@@ -77,6 +92,7 @@ export class CameraRig {
       } else if (this.zooming) {
         this.zoom(e.movementY * 0.01);
       } else if (this.panning) {
+        this.endFollow();
         const scale = this.distance * 0.0012;
         this.pos.addScaledVector(this.rightVec(), -e.movementX * scale);
         this.pos.addScaledVector(this.upVec(), e.movementY * scale);
@@ -116,7 +132,8 @@ export class CameraRig {
         const action = wheelAction(this.controls.id, e);
         if (action === "height") return;
         e.preventDefault();
-        if (action === "zoom") {
+        if (action === "zoom" || this.following) {
+          // While following, every wheel gesture is distance to the car.
           this.zoom(Math.sign(e.deltaY) * 0.15);
           return;
         }
@@ -156,9 +173,41 @@ export class CameraRig {
     if (document.pointerLockElement === this.dom) document.exitPointerLock();
   }
 
+  /**
+   * Follow `target`, which is heading `heading` (the yaw of its direction of travel). Call
+   * every frame while following; the first call snaps the camera behind the target.
+   */
+  follow(target: Vector3, heading: number, firstPerson: boolean): void {
+    if (!this.following) {
+      // Chase-camera close: the editor's own distance is usually hundreds of metres.
+      this.relYaw = 0;
+      this.pitch = -0.28;
+      this.distance = 18;
+      this.following = { target: target.clone(), heading, firstPerson };
+    } else {
+      if (firstPerson !== this.following.firstPerson) { this.relYaw = 0; this.pitch = firstPerson ? -0.05 : -0.35; }
+      this.following.target.copy(target);
+      // The heading eases in: a 20 Hz path turned into a direction is never quite steady.
+      let d = heading - this.following.heading;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      this.following.heading += d * 0.2;
+      this.following.firstPerson = firstPerson;
+    }
+  }
+
+  endFollow(): void {
+    if (!this.following) return;
+    this.following = null;
+    this.onFollowEnded?.();
+  }
+
+  get isFollowing(): boolean {
+    return this.following !== null;
+  }
+
   /** Dolly towards a fixed orbit pivot, without passing through it. */
   private zoom(amount: number): void {
-    const next = Math.min(100000, Math.max(1, this.distance * Math.exp(amount)));
+    const next = Math.min(100000, Math.max(this.following ? 4 : 1, this.distance * Math.exp(amount)));
     this.pos.addScaledVector(this.forwardVec(), this.distance - next);
     this.distance = next;
   }
@@ -233,7 +282,21 @@ export class CameraRig {
       if (this.keys.has("KeyA")) move.sub(this.rightVec());
       if (this.keys.has("Space")) move.y += 1;
       if (this.keys.has("KeyC")) move.y -= 1;
-      if (move.lengthSq() > 0) this.pos.addScaledVector(move.normalize(), speed);
+      if (move.lengthSq() > 0) {
+        this.endFollow();
+        this.pos.addScaledVector(move.normalize(), speed);
+      }
+    }
+
+    if (this.following) {
+      const { target, heading, firstPerson } = this.following;
+      this.yaw = heading + this.relYaw;
+      if (firstPerson) {
+        // From the driver's seat: a little above the path, looking where the car goes.
+        this.pos.set(target.x, target.y + 1.1, target.z);
+      } else {
+        this.pos.copy(target).addScaledVector(this.forwardVec(), -this.distance);
+      }
     }
 
     this.camera.position.copy(this.pos);

@@ -217,6 +217,14 @@ export interface GhostPath {
    * is the finish. From the ghost itself, so exact.
    */
   checkpoints?: number[];
+  /**
+   * The driver's inputs and the speed per sample, parallel to `path`, when the ghost had
+   * them: steer -100..100 (left negative), gas and brake 0..100, speed in km/h.
+   */
+  steer?: number[];
+  gas?: number[];
+  brake?: number[];
+  speed?: number[];
   /** Who drove it, when the source said. */
   driver?: string;
   /** Editor only: false hides the line without unloading it. */

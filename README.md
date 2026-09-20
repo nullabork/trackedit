@@ -321,7 +321,21 @@ next checkpoint or the finish — a piece that ends in a respawn counts up to
 the last checkpoint it took (`src/core/ghostRuns.ts`, from the ghost's sample
 and checkpoint times). **Show attempts** in the line's settings draws the
 rest as well — thinner, in a shifted hue, one merged mesh however many there
-are — with an opacity slider (default 50%). There is no URL to open a map in
+are — with an opacity slider (default 50%).
+
+**Playback.** Selecting a line in the Layers list puts a car marker at its start — a box
+lying along the direction of travel — and a floating bar at the bottom of the viewport:
+play / pause, speed (0.1× to 32×), step buttons (hold one: it repeats, faster and in
+bigger strides the longer it is held), previous / next checkpoint, and a scrubber with a
+tick per checkpoint. Only the LINE plays (`src/core/ghostPlayback.ts`): tries that ended
+in a respawn are cut, so a 1h49 run with 489 of them plays as its 22 driven minutes, the
+race clock jumping where tries were removed. **Follow** snaps the camera behind the car,
+relative to its heading: drag orbits around it, the wheel zooms, and moving away (pan,
+fly, WASD) switches it off; **1st person** rides in the car. The arrow keys beside the
+scrubber are the driver's inputs from the ghost (steer, gas, brake, plus km/h): each key
+fills by how far the input is pressed, with the percentage on it in two inks so it reads
+over the lit and the unlit part alike. Lines loaded before inputs were kept reload
+themselves the first time they are selected. There is no URL to open a map in
 the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from

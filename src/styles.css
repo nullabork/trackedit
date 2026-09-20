@@ -905,3 +905,64 @@ input[type="number"] { font-family: Consolas, monospace; }
 .line-pass .pass-time { margin-left: auto; padding-right: 6px; }
 .dock-grip { position: absolute; top: 0; left: 0; width: 5px; height: 100%; cursor: ew-resize; z-index: 6; }
 .dock-grip:hover { background: var(--teal-dim); }
+
+/* Driving line playback: a floating bar at the bottom middle of the viewport. */
+.playback-bar {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
+  display: flex; align-items: stretch; gap: 12px; padding: 8px 12px;
+  width: min(860px, calc(100% - 32px));
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent); backdrop-filter: blur(6px);
+  border: 1px solid var(--stroke); border-radius: 14px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  font-size: 12px; color: var(--ink-0); user-select: none;
+}
+.playback-bar[hidden] { display: none; }
+.pb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pb-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pb-row .grow { flex: 1; }
+.pb-swatch { flex: 0 0 10px; height: 10px; border-radius: 50%; background: var(--line-hue, var(--teal)); }
+.pb-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.pb-time { font-family: Consolas, monospace; color: var(--ink-1); white-space: nowrap; }
+.pb-cp { font-family: Consolas, monospace; color: var(--line-hue, var(--teal)); white-space: nowrap; }
+.pb-btn {
+  flex: none; height: 26px; min-width: 28px; padding: 0 8px; border-radius: 8px;
+  background: var(--bg-2); color: var(--ink-0); border: 1px solid var(--stroke); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.pb-btn:hover { background: var(--bg-3); }
+.pb-btn:active { transform: translateY(1px); }
+.pb-play { min-width: 40px; background: var(--line-hue, var(--teal)); border-color: transparent; color: #06231b; font-size: 14px; }
+.pb-play:hover { background: var(--line-hue, var(--teal)); filter: brightness(1.12); }
+.pb-toggle[aria-pressed="true"] { background: var(--line-hue, var(--teal)); border-color: transparent; color: #06231b; font-weight: 600; }
+.pb-close { background: transparent; border-color: transparent; color: var(--ink-2); }
+.pb-speed { height: 26px; border-radius: 8px; background: var(--bg-2); color: var(--ink-0); border: 1px solid var(--stroke); padding: 0 4px; font-size: 12px; }
+.pb-scrub { position: relative; flex: 1; min-width: 80px; height: 26px; display: flex; align-items: center; }
+.pb-range { width: 100%; margin: 0; accent-color: var(--line-hue, var(--teal)); cursor: pointer; }
+.pb-ticks { position: absolute; left: 8px; right: 8px; top: 3px; height: 5px; pointer-events: none; }
+.pb-tick { position: absolute; top: 0; width: 1px; height: 5px; background: var(--ink-2); }
+
+/* The driver's inputs as arrow keys. Each key fills by how far the input is pressed. */
+.pb-inputs { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.pb-pad { display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(2, 26px); gap: 3px; }
+.pb-pad.no-inputs { opacity: 0.35; }
+.pb-key {
+  position: relative; overflow: hidden; border-radius: 7px; border: 1px solid var(--stroke); background: var(--bg-0);
+  --fill: 0%; --lit: var(--line-hue, var(--teal));
+}
+.pb-key.on { border-color: var(--lit); }
+.pb-key-up { grid-column: 2; grid-row: 1; }
+.pb-key-left { grid-column: 1; grid-row: 2; }
+.pb-key-down { grid-column: 2; grid-row: 2; --lit: #ff5a4d; }
+.pb-key-right { grid-column: 3; grid-row: 2; }
+.pb-key-fill { position: absolute; background: var(--lit); }
+.pb-key-label { position: absolute; inset: 0; display: grid; place-items: center; font: 700 10px Consolas, monospace; color: var(--ink-0); }
+/* The same text in a dark ink, visible only over the lit part. */
+.pb-key-label-lit { color: #07110e; }
+/* Gas fills upward, brake downward, steering outward from the middle of the pad. */
+.pb-key-up .pb-key-fill { left: 0; right: 0; bottom: 0; height: var(--fill); }
+.pb-key-up .pb-key-label-lit { clip-path: inset(calc(100% - var(--fill)) 0 0 0); }
+.pb-key-down .pb-key-fill { left: 0; right: 0; top: 0; height: var(--fill); }
+.pb-key-down .pb-key-label-lit { clip-path: inset(0 0 calc(100% - var(--fill)) 0); }
+.pb-key-left .pb-key-fill { top: 0; bottom: 0; right: 0; width: var(--fill); }
+.pb-key-left .pb-key-label-lit { clip-path: inset(0 0 0 calc(100% - var(--fill))); }
+.pb-key-right .pb-key-fill { top: 0; bottom: 0; left: 0; width: var(--fill); }
+.pb-key-right .pb-key-label-lit { clip-path: inset(0 calc(100% - var(--fill)) 0 0); }
+.pb-kmh { font: 600 11px Consolas, monospace; color: var(--ink-1); min-height: 13px; }

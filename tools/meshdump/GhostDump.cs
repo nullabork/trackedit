@@ -31,6 +31,10 @@ public static class GhostDump
 
         var path = new List<float[]>();
         var times = new List<int>();
+        // The driver's inputs and the speed per sample, where the ghost has them (TM2020):
+        // steer -100..100 (left negative), gas and brake 0..100, speed in km/h. Whole numbers:
+        // a two-hour RPG run is 130,000 samples and rides along in the saved map.
+        var steer = new List<int>(); var gas = new List<int>(); var brake = new List<int>(); var speed = new List<int>();
 
         // Older format: decoded samples with a position per record.
         var data = ghost.SampleData;
@@ -61,8 +65,16 @@ public static class GhostDump
                     BitConverter.ToSingle(d, 55),
                 ]);
                 times.Add((int)s.Time.TotalMilliseconds);
+                if (s is GBX.NET.Engines.Scene.CSceneVehicleVis.EntRecordDelta v)
+                {
+                    steer.Add((int)MathF.Round(Math.Clamp(v.Steer, -1f, 1f) * 100f));
+                    gas.Add((int)MathF.Round(Math.Clamp(v.Gas, 0f, 1f) * 100f));
+                    brake.Add((int)MathF.Round(Math.Clamp(v.Brake, 0f, 1f) * 100f));
+                    speed.Add((int)MathF.Round(MathF.Abs(v.Speed)));
+                }
             }
         }
+        var hasInputs = steer.Count == path.Count && path.Count > 0;
 
         Console.WriteLine($"ghost: {ghost.GhostNickname}, time {ghost.RaceTime}, samples {path.Count}");
         var json = JsonSerializer.Serialize(new
@@ -75,6 +87,10 @@ public static class GhostDump
             checkpoints = (ghost.Checkpoints ?? []).Where(c => c.Time is not null).Select(c => (int)c.Time!.Value.TotalMilliseconds).ToArray(),
             path,
             times,
+            steer = hasInputs ? steer : null,
+            gas = hasInputs ? gas : null,
+            brake = hasInputs ? brake : null,
+            speed = hasInputs ? speed : null,
         });
         if (output is not null) File.WriteAllText(output, json);
         return path.Count > 0 ? 0 : 2;

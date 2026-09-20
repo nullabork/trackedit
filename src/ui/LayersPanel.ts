@@ -264,10 +264,29 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
   const upgradeLine = (layer: Layer, ghost: GhostPath) => {
     const key = `${layer.id}
 ${ghost.key}`;
-    if (ghost.checkpoints?.length || upgraded.has(key)) return;
+    // …and lines loaded before the driver's inputs were kept: the playback bar shows them.
+    if ((ghost.checkpoints?.length && ghost.steer?.length) || upgraded.has(key)) return;
     upgraded.add(key);
     void reloadGhost(ctx, layer.id, ghost).then((msg) => ctx.ui.setStatus(msg));
   };
+
+  /** Tell the rest of the app (the playback bar) which line is selected, when that changes. */
+  let announced = "";
+  const announceLine = () => {
+    const now = selectedLine ? `${selectedLine.layerId}|${selectedLine.key}` : "";
+    if (now === announced) return;
+    announced = now;
+    ctx.events.emit("lineSelected", { line: selectedLine ? { ...selectedLine } : null });
+  };
+  // Someone else changed it: the playback bar's close button deselects, the debug bridge selects.
+  ctx.events.on("lineSelected", ({ line }) => {
+    const now = line ? `${line.layerId}|${line.key}` : "";
+    if (now === announced) return;
+    announced = now;
+    selectedLine = line ? { ...line } : null;
+    if (line) tab = "layer";
+    renderAll();
+  });
 
   const lineRows = (layer: Layer) => {
     const rows: HTMLElement[] = [];
@@ -450,6 +469,7 @@ ${ghost.key}`;
     clear(settingsBody);
     const line = lineOf(selectedLine);
     if (!line) selectedLine = null;
+    announceLine();
     tabLayer.textContent = line ? "Line" : "Layer";
 
     if (tab === "global") {

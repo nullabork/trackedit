@@ -21,6 +21,8 @@ export interface AppEvents extends Record<string, unknown> {
   geometryLoaded: { name: string };
   /** The paint tool's active color changed. */
   paintColorChanged: { color: string };
+  /** A driving line was selected in the Layers list (null: none) — the playback bar follows it. */
+  lineSelected: { line: { layerId: string; key: string } | null };
   /** The attempt-opacity slider of a driving line is being dragged (not saved yet). */
   attemptOpacityPreview: { layerId: string; key: string; opacity: number };
   status: { text: string };

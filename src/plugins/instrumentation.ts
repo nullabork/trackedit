@@ -237,7 +237,9 @@ export const instrumentationPlugin: EditorPlugin = {
         const layer = ctx.document.activeLayer;
         const ghost = layer.ghosts[0];
         if (!ghost) return { ok: false, error: "the active layer has no driving line" };
-        if (uid) updateGhost(ctx, layer.id, ghost.key, JSON.parse(uid));
+        // uid=select picks it, as clicking its row in the Layers list does (opens the playback bar).
+        if (uid === "select") ctx.events.emit("lineSelected", { line: { layerId: layer.id, key: ghost.key } });
+        else if (uid) updateGhost(ctx, layer.id, ghost.key, JSON.parse(uid));
         const now = ctx.document.activeLayer.ghosts[0];
         return { ok: true, line: now.label, samples: now.path.length, visible: now.visible !== false,
           showNumbers: !!now.showNumbers, showAttempts: !!now.showAttempts, attemptOpacity: now.attemptOpacity ?? null };

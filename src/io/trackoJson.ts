@@ -58,6 +58,11 @@ export interface DumpGhost {
   times?: number[];
   /** Race time (ms) of every checkpoint the run took, the finish last. */
   checkpoints?: number[];
+  /** Inputs and speed per sample (see GhostPath). */
+  steer?: number[] | null;
+  gas?: number[] | null;
+  brake?: number[] | null;
+  speed?: number[] | null;
 }
 
 export interface MapDump {
@@ -112,6 +117,9 @@ export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): Gho
     path: g.path.map((p) => freePosToEditor(p, yOffsetCells)),
     ...(g.times?.length === g.path.length ? { times: [...g.times] } : {}),
     ...(g.checkpoints?.length ? { checkpoints: [...g.checkpoints] } : {}),
+    ...(g.steer?.length === g.path.length && g.gas?.length === g.path.length && g.brake?.length === g.path.length
+      ? { steer: [...g.steer], gas: [...g.gas], brake: [...g.brake] } : {}),
+    ...(g.speed?.length === g.path.length ? { speed: [...g.speed] } : {}),
     ...(g.nickname ? { driver: g.nickname } : {}),
   };
 }
