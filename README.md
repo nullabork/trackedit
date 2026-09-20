@@ -622,6 +622,26 @@ the header of each, `meshdump ghostname`). An OAuth app from
 the game's map uid, which TMX import stores on the document (older stored
 maps resolve it through TMX when the dialog opens).
 
+**Refresh, search, cache.** Beside the section title: ⟳ fetches the list again
+(after a reload it comes from the browser cache, with its age shown), and 🔍
+opens a player search — `GET /api/nadeo/search/:mapUid?name=` returns the
+records of players whose name STARTS with the text, with time, world position
+and zone, so a run outside the top 10 (yours, a friend's) can be loaded as a
+line. Nadeo has no name search at all: its OAuth API only resolves an exact
+display name, so the partial-name lookup goes through
+[trackmania.io](https://trackmania.io)'s player search (a community API),
+plus any name already seen this session (those match anywhere in the name)
+and, with an OAuth app, the exact name. Up to 50 matching players are checked
+for a record in one request. A position comes from the top 100 (one request)
+or, beyond it, a binary search by offset — the leaderboard's "surround"
+endpoint answers nothing to a server account.
+
+Record lists and converted driving lines are cached in the browser
+(IndexedDB `trackedit-ghosts`, `src/io/ghostCache.ts`): a Nadeo line by map,
+account and TIME (a new personal best is a new entry), a TMX replay by its
+replay id; the newest 300 lines are kept. It is only a cache — lines shown on a
+layer are saved with the map as before, and "reload line" always fetches.
+
 Embedded items GBX.NET cannot parse get two rescue attempts: Mesh Modeler
 items whose crystal carries chunks or modifier layers the reader stumbles on
 are repaired by dropping the lightmap chunk and, if needed, trailing

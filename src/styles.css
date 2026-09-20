@@ -244,6 +244,9 @@ input[type="number"] { font-family: Consolas, monospace; }
 .tmx-panel .tmx-row.active { border-left-color: var(--teal); background: var(--bg-3); }
 .tmx-panel .tmx-row .tmx-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; margin-right: 6px; background: var(--stroke); }
 .tmx-panel .tmx-note { color: var(--ink-2); font-size: 11px; }
+/* Lists take their own height (the panel scrolls); `.rows` alone would stretch each one. */
+.tmx-panel .tmx-list { flex: none; max-height: none; }
+.tmx-panel .tmx-list:empty { display: none; }
 .drawer-tab-label { writing-mode: vertical-rl; }
 .drawer-tab-icon { font-size: 10px; }
 .drawer .panel { display: flex; flex-direction: column; min-height: 0; flex: 1; width: var(--drawer-w); }
@@ -729,6 +732,12 @@ input[type="number"] { font-family: Consolas, monospace; }
 .tmx-section { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); margin: 8px 0 4px; }
 .tmx-zone { color: var(--ink-2); font-size: 11px; min-width: 70px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tmx-actions { display: flex; gap: 6px; align-items: center; }
+.tmx-actions[hidden], .tmx-status[hidden] { display: none; }
+/* A section title with its tools on the right: refresh, search. */
+.tmx-section-tools { display: flex; align-items: center; gap: 4px; }
+.tmx-section-tools .btn.icon { padding: 0 6px; height: 20px; min-width: 24px; font-size: 13px; line-height: 1; letter-spacing: 0; }
+.tmx-search { margin: 2px 0 4px; }
+.tmx-search input { min-width: 0; height: 24px; padding: 0 6px; background: var(--bg-0); color: var(--ink-0); border: 1px solid var(--stroke); border-radius: 4px; }
 .tmx-list.busy .row { opacity: 0.4; pointer-events: none; }
 .tmx-list.busy .row.loading { opacity: 1; border-left-color: var(--teal); background: var(--bg-3); }
 .tmx-status { display: flex; align-items: center; gap: 6px; }

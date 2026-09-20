@@ -2,9 +2,10 @@ import type { EditorContext } from "@plugins/api";
 import { lineHue } from "@core/layer";
 import type { Shell } from "./Shell";
 import { clear, el } from "./dom";
+import { ageText } from "@io/ghostCache";
 import {
   activeGhostKeys, clearGhosts, fetchNadeoFinishes, fetchNadeoGhost, fetchTmxGhost, fetchTmxInfo, formatRaceTime,
-  listNadeoRecords, listTmxReplays, nadeoConfigured, removeGhost, tmxIdOf,
+  listNadeoRecords, listTmxReplays, nadeoConfigured, removeGhost, searchNadeoRecords, tmxIdOf,
 } from "./ghostActions";
 import type { NadeoRecordInfo, TmxMapInfo, TmxReplayInfo } from "./ghostActions";
 
@@ -91,10 +92,19 @@ export function buildTmxPanel(ctx: EditorContext, shell: Shell): void {
     const replayList = el("div", { class: "tmx-list rows" });
     const recordStatus = el("div", { class: "tmx-status" }, el("span", { class: "spinner" }), el("span", {}, " Fetching records…"));
     const recordList = el("div", { class: "tmx-list rows" });
+    // Refresh: the list comes from the browser cache after a reload; this asks Nadeo again.
+    const refreshBtn = el("button", { class: "btn icon", title: "Fetch the records again (you just set a time?)", "aria-label": "Refresh records" }, "\u27F3") as HTMLButtonElement;
+    const searchBtn = el("button", { class: "btn icon", title: "Find a player's record by name", "aria-label": "Search a player" }, "\u{1F50D}\uFE0E") as HTMLButtonElement;
+    const searchInput = el("input", { type: "search", class: "grow", placeholder: "Player name (start of it)\u2026", spellcheck: "false" }) as HTMLInputElement;
+    const searchGo = el("button", { class: "btn" }, "Search") as HTMLButtonElement;
+    const searchBox = el("form", { class: "tmx-actions tmx-search", hidden: "" }, searchInput, searchGo) as HTMLFormElement;
+    const searchStatus = el("div", { class: "tmx-status", hidden: "" });
+    const searchList = el("div", { class: "tmx-list rows" });
     root.append(head, buttons, status, stats,
       linesHeader, linesNote, el("div", { class: "tmx-actions" }, clearBtn),
       el("div", { class: "tmx-section" }, "Map ghost & TMX replays"), replayStatus, replayList,
-      el("div", { class: "tmx-section" }, "Nadeo records (world top 10)"), recordStatus, recordList);
+      el("div", { class: "tmx-section tmx-section-tools" }, el("span", { class: "grow" }, "Nadeo records (world top 10)"), refreshBtn, searchBtn),
+      searchBox, searchStatus, searchList, recordStatus, recordList);
 
     // Map ghost row: known after import; older stored maps say "unknown".
     const mapRow = (present: boolean | null, authorTime: number) => {
@@ -114,7 +124,7 @@ export function buildTmxPanel(ctx: EditorContext, shell: Shell): void {
 
     const recordRow = (mapUid: string, r: NadeoRecordInfo) => lineRow(`nadeo:${r.accountId}`, [
       el("span", { class: "grow tmx-name" }, r.name),
-      el("span", { class: "tmx-awards" }, `#${r.position}`),
+      el("span", { class: "tmx-awards" }, r.position ? `#${r.position}` : "\u2013"),
       el("span", { class: "tmx-time" }, formatRaceTime(r.time)),
       el("span", { class: "tmx-zone", title: r.zone }, r.zone),
     ], (layerId) => fetchNadeoGhost(ctx, mapUid, layerId, r));
@@ -185,29 +195,85 @@ export function buildTmxPanel(ctx: EditorContext, shell: Shell): void {
     })();
 
     // --- Nadeo top 10 ---
-    void (async () => {
+    const mapUidReady = (async () => ctx.document.mapUid ?? (await uidFromTmx))();
+    const loadRecords = async (fresh: boolean) => {
+      refreshBtn.disabled = true;
       try {
         if (!(await nadeoConfigured())) {
           if (gen !== generation) return;
           clear(recordStatus);
           recordStatus.append("Needs a Nadeo account: create a free dedicated server account at ",
             link(SERVER_ACCOUNT_URL, "trackmania.com"), " and put its login in .trackedit.local.json (see README).");
+          searchBtn.disabled = true;
           return;
         }
-        const mapUid = ctx.document.mapUid ?? (await uidFromTmx);
+        const mapUid = await mapUidReady;
         if (gen !== generation) return;
-        if (!mapUid) { recordStatus.textContent = "The map's game uid is unknown."; return; }
-        const records = await listNadeoRecords(mapUid, 10);
+        if (!mapUid) { recordStatus.textContent = "The map's game uid is unknown."; searchBtn.disabled = true; return; }
+        if (fresh) { clear(recordStatus); recordStatus.append(el("span", { class: "spinner" }), el("span", {}, " Fetching records\u2026")); }
+        const { records, at, cached } = await listNadeoRecords(mapUid, 10, fresh);
         if (gen !== generation) return;
+        for (const r of recordList.querySelectorAll<HTMLElement>("[data-key]")) rows.delete(r.dataset.key!);
         clear(recordList);
         for (const r of records) recordList.append(recordRow(mapUid, r));
-        recordStatus.textContent = records.length ? `Top ${records.length} world records` : "No records on Nadeo's leaderboard for this map.";
+        recordStatus.textContent = (records.length ? `Top ${records.length} world records` : "No records on Nadeo's leaderboard for this map.") +
+          (cached ? ` \u2014 saved ${ageText(at)}, \u27F3 to fetch again` : "");
         syncRows();
       } catch (err) {
         if (gen !== generation) return;
         recordStatus.textContent = `Could not list records: ${err instanceof Error ? err.message : err}`;
+      } finally {
+        if (gen === generation) refreshBtn.disabled = false;
       }
-    })();
+    };
+    refreshBtn.addEventListener("click", () => void loadRecords(true));
+    void loadRecords(false);
+
+    // --- player search ---
+    searchBtn.addEventListener("click", () => {
+      searchBox.hidden = !searchBox.hidden;
+      if (!searchBox.hidden) searchInput.focus();
+    });
+    searchBox.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const name = searchInput.value.trim();
+      const mapUid = await mapUidReady;
+      if (!mapUid || gen !== generation) return;
+      searchStatus.hidden = false;
+      if (name.length < 2) { searchStatus.textContent = "Type at least two characters."; return; }
+      searchGo.disabled = true;
+      clear(searchStatus);
+      searchStatus.append(el("span", { class: "spinner" }), el("span", {}, ` Looking for "${name}"\u2026`));
+      try {
+        const found = await searchNadeoRecords(mapUid, name);
+        if (gen !== generation) return;
+        for (const r of searchList.querySelectorAll<HTMLElement>("[data-key]")) if (!recordList.querySelector(`[data-key="${CSS.escape(r.dataset.key!)}"]`)) rows.delete(r.dataset.key!);
+        clear(searchList);
+        // A player already listed in the top 10 keeps that row; the rest get one here.
+        const extra = found.records.filter((r) => !recordList.querySelector(`[data-key="${CSS.escape(`nadeo:${r.accountId}`)}"]`));
+        for (const r of extra) searchList.append(recordRow(mapUid, r));
+        const inTop = found.records.length - extra.length;
+        // Point at the ones that were in the list all along.
+        for (const r of found.records) {
+          const row = recordList.querySelector<HTMLElement>(`[data-key="${CSS.escape(`nadeo:${r.accountId}`)}"]`);
+          if (!row) continue;
+          row.classList.add("current");
+          row.scrollIntoView({ block: "nearest" });
+          window.setTimeout(() => row.classList.remove("current"), 2500);
+        }
+        searchStatus.textContent = found.records.length
+          ? `${found.records.length} record${found.records.length === 1 ? "" : "s"} by players matching "${name}"${inTop ? ` (${inTop} already in the top 10 below)` : ""}`
+          : found.matched
+            ? `${found.matched} player${found.matched === 1 ? "" : "s"} match "${name}", none has a record on this map.`
+            : `No player found for "${name}". The search matches the START of a name${found.via.includes("trackmania.io") ? "" : " (trackmania.io could not be reached)"}.`;
+        syncRows();
+      } catch (err) {
+        if (gen !== generation) return;
+        searchStatus.textContent = `Search failed: ${err instanceof Error ? err.message : err}`;
+      } finally {
+        searchGo.disabled = false;
+      }
+    });
   };
 
   const refresh = () => {

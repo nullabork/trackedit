@@ -13,6 +13,7 @@ import { join } from "node:path";
  *   GET /api/nadeo/records/:mapUid?length=50    -> { records: [{ accountId, name, position, time, zone }] }
  *   GET /api/nadeo/ghost/:mapUid?account=<id>   -> the record's driving path (meshdump ghost JSON)
  *   GET /api/nadeo/finishes/:mapUid             -> { finishes } — how many players hold a world record (max 10000)
+ *   GET /api/nadeo/search/:mapUid?name=<text>   -> { records, via } — records of players whose name contains the text
  *
  * Nadeo requires authentication. A dedicated server account (free, created
  * at https://www.trackmania.com/player/dedicated-servers) goes in the
@@ -42,6 +43,8 @@ export interface NadeoRecord {
 const CORE = "https://prod.trackmania.core.nadeo.online";
 const LIVE = "https://live-services.trackmania.nadeo.live";
 const OAUTH = "https://api.trackmania.com/api";
+/** Player search by partial name: Nadeo has none; trackmania.io (community API) does. */
+const TMIO = "https://trackmania.io/api";
 const USER_AGENT = "trackedit-dev / https://github.com/nullabork/trackedit";
 /** Nadeo tokens last an hour; refresh a little early. */
 const TOKEN_TTL_MS = 50 * 60_000;
@@ -251,6 +254,129 @@ export class NadeoClient {
     return found;
   }
 
+  /**
+   * Players by (partial) name. Nadeo's own services only resolve an EXACT
+   * display name, and only with an OAuth app; trackmania.io searches by
+   * substring. Both are tried, plus every name this session has already seen.
+   */
+  private async findPlayers(text: string): Promise<{ players: Map<string, string>; via: string[] }> {
+    const players = new Map<string, string>();
+    const via: string[] = [];
+    const needle = text.toLowerCase();
+    for (const [id, name] of this.names) if (name.toLowerCase().includes(needle)) players.set(id, name);
+    if (players.size) via.push("names seen this session");
+    try {
+      const res = await fetch(`${TMIO}/players/find?search=${encodeURIComponent(text)}`, { headers: { "User-Agent": USER_AGENT } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const found = (await res.json()) as { player?: { id?: string; name?: string } }[];
+      for (const f of Array.isArray(found) ? found : []) if (f.player?.id && f.player.name) players.set(f.player.id, f.player.name);
+      via.push("trackmania.io");
+    } catch (err) {
+      console.warn("[nadeo] trackmania.io player search unavailable:", err instanceof Error ? err.message : err);
+    }
+    const { clientId, clientSecret } = this.cfg.oauth ?? {};
+    if (clientId && clientSecret) {
+      try {
+        if (!this.oauthToken || Date.now() - this.oauthToken.at > TOKEN_TTL_MS) this.oauthToken = await this.oauthLogin(clientId, clientSecret);
+        const res = await fetch(`${OAUTH}/display-names/account-ids?displayName[]=${encodeURIComponent(text)}`, {
+          headers: { Authorization: `Bearer ${this.oauthToken.token}`, "User-Agent": USER_AGENT },
+        });
+        if (res.ok) {
+          for (const [name, id] of Object.entries((await res.json()) as Record<string, string>)) players.set(id, name);
+          via.push("exact name (Nadeo)");
+        }
+      } catch (err) {
+        console.warn("[nadeo] exact-name lookup unavailable:", err instanceof Error ? err.message : err);
+      }
+    }
+    for (const [id, name] of players) this.names.set(id, name);
+    return { players, via };
+  }
+
+  private async oauthLogin(clientId: string, clientSecret: string): Promise<{ token: string; at: number }> {
+    const res = await fetch(`${OAUTH}/access_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
+    });
+    const json = (await res.json()) as { access_token?: string };
+    if (!json.access_token) throw new Error(`OAuth token ${res.status}`);
+    return { token: json.access_token, at: Date.now() };
+  }
+
+  /**
+   * World position of a record. The "surround" endpoint answers nothing to a
+   * server account, so the leaderboard is read instead: the top 100 in one
+   * request, beyond that a binary search by offset (about 13 small requests;
+   * probes are shared within one search).
+   */
+  private async positionOf(mapUid: string, accountId: string, time: number, probes: Map<number, { accountId: string; score: number; zoneName?: string } | null>): Promise<{ position: number; zone: string }> {
+    type Row = { accountId: string; position: number; score: number; zoneName?: string };
+    type Top = { tops?: { top?: Row[] }[] };
+    const at = async (offset: number) => {
+      if (!probes.has(offset)) {
+        const json = await this.get<Top>("NadeoLiveServices",
+          `${LIVE}/api/token/leaderboard/group/Personal_Best/map/${encodeURIComponent(mapUid)}/top?onlyWorld=true&length=1&offset=${offset}`);
+        probes.set(offset, json.tops?.[0]?.top?.[0] ?? null);
+      }
+      return probes.get(offset)!;
+    };
+    try {
+      // The top 100 in one request covers most searches.
+      if (!probes.has(-1)) {
+        const json = await this.get<Top>("NadeoLiveServices",
+          `${LIVE}/api/token/leaderboard/group/Personal_Best/map/${encodeURIComponent(mapUid)}/top?onlyWorld=true&length=100&offset=0`);
+        (json.tops?.[0]?.top ?? []).forEach((row, i) => probes.set(i, row));
+        probes.set(-1, null);
+      }
+      for (let o = 0; o < 100 && probes.get(o); o++) {
+        const row = probes.get(o)!;
+        if (row.accountId === accountId) return { position: o + 1, zone: row.zoneName ?? "" };
+      }
+      if (!probes.get(99)) return { position: 0, zone: "" }; // fewer than 100 records and not among them
+      // First offset whose score is >= time; ties are walked through below.
+      let lo = 100, hi = 10000;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const row = await at(mid);
+        if (row && row.score < time) lo = mid + 1; else hi = mid;
+      }
+      for (let o = lo; o < lo + 5; o++) {
+        const row = await at(o);
+        if (!row || row.score !== time) break;
+        if (row.accountId === accountId) return { position: o + 1, zone: row.zoneName ?? "" };
+      }
+      return { position: (await at(lo))?.score === time ? lo + 1 : 0, zone: "" };
+    } catch {
+      return { position: 0, zone: "" };
+    }
+  }
+
+  /**
+   * Records on a map by players whose name contains `text`, fastest first.
+   * At most 50 name matches are checked for a record (one request).
+   */
+  async searchRecords(mapUid: string, text: string): Promise<{ records: NadeoRecord[]; via: string[]; matched: number }> {
+    const { players, via } = await this.findPlayers(text);
+    const ids = [...players.keys()].slice(0, 50);
+    if (!ids.length) return { records: [], via, matched: 0 };
+    const recs = (await this.mapRecords(mapUid, ids)).filter((r) => r.recordScore?.time);
+    recs.sort((a, b) => (a.recordScore!.time! - b.recordScore!.time!));
+    const records: NadeoRecord[] = [];
+    const probes = new Map<number, { accountId: string; score: number; zoneName?: string } | null>();
+    for (const r of recs.slice(0, 20)) {
+      const place = records.length < 5 ? await this.positionOf(mapUid, r.accountId, r.recordScore!.time!, probes) : { position: 0, zone: "" };
+      records.push({
+        accountId: r.accountId,
+        name: players.get(r.accountId) ?? r.accountId.slice(0, 8),
+        position: place.position,
+        time: r.recordScore!.time!,
+        zone: place.zone,
+      });
+    }
+    return { records, via, matched: players.size };
+  }
+
   /** Remember a name learned from a downloaded ghost. */
   rememberName(accountId: string, name: string | null | undefined): void {
     if (name) this.names.set(accountId, name);
@@ -308,6 +434,21 @@ export function nadeoBridge(meshdump: string): Plugin {
           if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
           const length = Math.min(Math.max(Number(url.searchParams.get("length")) || 50, 1), 100);
           send(res, 200, { records: await c.records(mapUid, length) });
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      server.middlewares.use("/api/nadeo/search", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://x");
+          const mapUid = url.pathname.split("/").filter(Boolean).pop();
+          const name = (url.searchParams.get("name") ?? "").trim();
+          if (!mapUid) return send(res, 400, { error: "map uid required" });
+          if (name.length < 2) return send(res, 400, { error: "type at least two characters of the player's name" });
+          const c = getClient();
+          if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
+          send(res, 200, await c.searchRecords(mapUid, name));
         } catch (err) {
           send(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }
