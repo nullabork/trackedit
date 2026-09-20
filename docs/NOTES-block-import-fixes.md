@@ -573,10 +573,16 @@ of 16; `WaterHFCRight`: 0..3) — not read yet.
   On RHEVARA 153 of 159 are light COLOURS — `Skins\Stadium\LightColors\White.dds`, `Coral`,
   `Orange`, `WhiteCold`, `Off`, and `LightTube\Orange.zip` — on `ShowLights`, `Lamp`,
   `LightSphere`, `LightTube*`; the rest are screens showing a game image or a URL, one with a
-  `.webm` foreground. NOT drawn: the `Skins` pack is outside what the Openplanet plugin
-  extracts (`GameData` only), and guessing a colour from a file name is not reading it. To do:
-  add the skin files to the extract list, take each light skin's colour from its image,
-  tint the item's emissive material by it.
+  `.webm` foreground.
+- **Light colours, drawn.** The skins live outside `GameData`, so the extract plugin learned
+  FOLDER lines (`Skins\Stadium\LightColors\*`: every file, looked for under the game, user,
+  fake and program-data roots, logging which one had it) and a quick "skins only" menu
+  entry. `meshdump skins` then writes `lightcolors.json`: each skin image's colour (mean
+  weighted by brightness; `Off` comes out black). An item with such a skin loads as a
+  template of its own (`#light:<file>`) whose SELF-ILLUMINATED materials — the ones the
+  extractor could only find an `*_I.dds` illumination map for: `ItemLampLight`, `LightShape`
+  — take the colour and glow in it. Not drawn: `LightTube\*.zip` skins, screens.
+  Stored maps converted before item skins were in the dump need re-opening from TMX.
 
 ## 6. Lessons
 

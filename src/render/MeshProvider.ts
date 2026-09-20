@@ -113,6 +113,8 @@ type MaterialIndex = Record<
     translucent?: boolean;
     /** "add" = additive glow strip (the game's TAdd shaders). */
     blend?: "add";
+    /** The game image the texture was made from; "*_I.dds" is a self-illumination map. */
+    source?: string;
   }
 >;
 
@@ -147,6 +149,8 @@ export class MeshProvider implements GeometryProvider {
   private index: MeshIndex | null = null;
   private clipDefs: ClipDefs = {};
   private skins: SkinTable = {};
+  /** lightcolors.json: light skin file (lower-case) -> "#rrggbb". */
+  private lightColors: Record<string, string | undefined> = {};
   private readonly clipInfos = new Map<string, BlockClipInfo>();
   private materialIndex: MaterialIndex = {};
   private cache = new Map<string, Object3D>();
@@ -212,6 +216,29 @@ export class MeshProvider implements GeometryProvider {
   private loadDone(): void {
     this.inFlight -= 1;
     this.pump();
+  }
+
+  /** The material shows a self-illumination map (the extractor found no diffuse, only "*_I.dds"): it IS the light. */
+  private isSelfIllum(name: string): boolean {
+    const entry = this.materialIndex[name] ?? this.materialIndex[canonicalMaterialName(name)];
+    return /_I\.dds$/i.test(entry?.source ?? "");
+  }
+
+  /** `base` glowing in a light skin's colour; one per material and colour. */
+  private litMaterial(base: MeshLambertMaterial, name: string, hex: string): MeshLambertMaterial {
+    const key = `lit:${name}:${hex}`;
+    let lit = this.materials.get(key);
+    if (!lit) {
+      lit = base.clone();
+      lit.color.set(hex);
+      lit.emissive.set(hex);
+      // "Off" is black: no glow, and the dark shape stays visible under the scene light.
+      lit.emissiveIntensity = hex === "#000000" ? 0 : 0.85;
+      lit.emissiveMap = base.map;
+      lit.userData.matName = name;
+      this.materials.set(key, lit);
+    }
+    return lit;
   }
 
   /**
@@ -464,6 +491,8 @@ export class MeshProvider implements GeometryProvider {
       else console.warn("meshes/clipdefs.json is missing — clip pieces cannot be hidden correctly; run `meshdump clipdefs` or re-extract the blocks");
       const skins = await fetch(this.baseUrl + "skins.json");
       if (skins.ok) this.skins = (await skins.json()) as SkinTable;
+      const lights = await fetch(this.baseUrl + "lightcolors.json");
+      if (lights.ok) this.lightColors = (await lights.json()) as Record<string, string>;
       const tables = await fetch(this.baseUrl + "colortables.json");
       if (tables.ok) setColorTables((await tables.json()) as ColorTables);
       return true;
@@ -502,6 +531,7 @@ export class MeshProvider implements GeometryProvider {
   private variantKey(base: string, variant: MeshVariant): string {
     // A surface skin this extraction knows makes a template of its own (same mesh, other materials).
     const [plain, skin] = splitSkin(variant);
+    if (skin.startsWith("light:")) return this.plainKey(base, plain) + (this.lightColors[skin.slice(6)] ? `#${skin}` : "");
     if (skin) return this.plainKey(base, plain) + (this.skins[skin] ? `#${skin}` : "");
     return this.plainKey(base, plain);
   }
@@ -556,7 +586,8 @@ export class MeshProvider implements GeometryProvider {
     this.pending.add(key);
     this.loadQueue.push({
       pos: this.positions.get(base) ?? null,
-      run: () => this.loadNow(key, base, objPath, entry, def?.category, this.skins[skin]),
+      run: () => this.loadNow(key, base, objPath, entry, def?.category, this.skins[skin],
+        skin.startsWith("light:") ? this.lightColors[skin.slice(6)] : undefined),
     });
     this.pump();
   }
@@ -569,8 +600,13 @@ export class MeshProvider implements GeometryProvider {
     category?: string,
     /** A placement skin's swaps: base material name -> replacement. */
     swaps?: Record<string, string>,
+    /** A light skin's colour: the item's self-illuminated materials glow in it. */
+    lightColor?: string,
   ): void {
-    const material = (name: string) => this.materialFor(swaps?.[name] ?? name, category);
+    const material = (name: string) => {
+      const mat = this.materialFor(swaps?.[name] ?? name, category);
+      return lightColor && this.isSelfIllum(name) ? this.litMaterial(mat, name, lightColor) : mat;
+    };
     const finish = (obj: Object3D) => {
         // Extracted meshes are modelled from the block's min corner. Tag the
         // template so DocumentRenderer can anchor it correctly per placement

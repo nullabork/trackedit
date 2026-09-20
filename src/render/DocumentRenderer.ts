@@ -30,7 +30,7 @@ import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells, wallSegments } from "./clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, hiddenClipFaces } from "./clipFaces";
 import type { ClipFace } from "./clipFaces";
-import { isPlacementVisible, placementMobil, placementScale, placementSkin, placementVariant } from "@core/layer";
+import { isPlacementVisible, placementLightSkin, placementMobil, placementScale, placementSkin, placementVariant } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -855,7 +855,9 @@ export class DocumentRenderer {
     const lifted = !!t && (t.rotDeg[0] !== 0 || t.rotDeg[2] !== 0 || t.translate[1] !== 0);
     // "<variant>[@<row>_<col>][#<skin>]": the mobil when it is not the base one, the surface
     // skin when the block carries one (MeshProvider takes the string apart again).
-    const mobil = placementMobil(p), skin = placementSkin(p);
+    // An item's light colour rides in the same slot, as "light:<skin file>".
+    const light = placementLightSkin(p);
+    const mobil = placementMobil(p), skin = light ? `light:${light}` : placementSkin(p);
     const variant = placementVariant(p, baseTypeOf(this.doc.decorationBase) === "stadium", lifted);
     return `${variant}${mobil ? `@${mobil}` : ""}${skin ? `#${skin}` : ""}`;
   }

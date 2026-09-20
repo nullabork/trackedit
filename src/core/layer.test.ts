@@ -78,6 +78,18 @@ describe("blockIsGround", () => {
     expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true, true)).toBe("air2"); // its layer is tilted
   });
 
+  it("a light item carries its colour as a skin file", async () => {
+    const { placementLightSkin, placementScale } = await import("./layer");
+    const lamp = (meta: Record<string, unknown>) => ({ id: "i", kind: "free" as const, block: "Lamp", pos: [0, 0, 0] as [number, number, number], rot: [0, 0, 0] as [number, number, number], isItem: true, meta });
+    expect(placementLightSkin(lamp({ skin: { pack: { file: "Skins\\Stadium\\LightColors\\Coral.dds", url: "" } } }))).toBe("skins\\stadium\\lightcolors\\coral.dds");
+    expect(placementLightSkin(lamp({ skin: { pack: { file: "Skins\\Any\\Advertisement2x1\\Off.tga", url: "" } } }))).toBe(""); // a screen image
+    expect(placementLightSkin(lamp({ skin: null }))).toBe("");
+    expect(placementLightSkin({ ...lamp({ skin: { pack: { file: "Skins\\Stadium\\LightColors\\Coral.dds" } } }), isItem: false })).toBe("");
+    expect(placementScale(lamp({ scale: 2.5 }))).toBe(2.5);
+    expect(placementScale(lamp({}))).toBe(1);
+    expect(placementScale(lamp({ scale: 0 }))).toBe(1);
+  });
+
   it("a pillar carries the surface of the platform above it as a skin", async () => {
     const { placementSkin } = await import("./layer");
     const pillar = (skin: unknown) => ({ id: "b", kind: "block" as const, block: "DecoWallBasePillar", coord: [1, 12, 1] as [number, number, number], dir: 0 as const, meta: { flags: 0xc000, skin } });

@@ -63,7 +63,7 @@ const REVIEW: Record<string, Record<string, [Verdict, string]>> = {
     PivotPosition: ["draws", "model origin offset (NOTES 5d)"], Color: ["draws", "item colour"],
     WaypointSpecialProperty: ["draws", "waypoint lists"],
     Scale: ["draws", "uniform scale about the anchor (1 on every item of the cached maps, so unverified against a real one)"],
-    PackDesc: ["todo", "item skin, now in the dump: on RHEVARA 153 of 159 are LIGHT COLOURS (Skins\\\\Stadium\\\\LightColors\\\\Coral.dds, LightTube\\\\Orange.zip), the rest screen images (game file or URL). Not drawn: the Skins pack is not part of the Openplanet extraction"],
+    PackDesc: ["draws", "item skin. LIGHT COLOURS (Skins\\\\Stadium\\\\LightColors\\\\Coral.dds; 153 of RHEVARA's 159) tint the item's self-illuminated materials once the skins are extracted (lightcolors.json, NOTES 5n). Screen images (game file or URL) and LightTube zips are not drawn"],
     ForegroundPackDesc: ["todo", "item skin foreground (a screen's .webm): not drawn"],
     AnimPhaseOffset: ["kept", "animation phase of moving items; nothing is animated in the editor"],
     Flags: ["kept", "raw bits; GBX.NET names none"],

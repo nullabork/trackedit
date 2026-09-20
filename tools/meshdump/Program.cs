@@ -1710,6 +1710,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         File.WriteAllText(Path.Combine(outDir, "index.json"), current.ToJsonString());
         WriteClipDefs(root, outDir);
         WriteSkins();
+        WriteLightColors();
         WriteMaterials();
         Console.WriteLine($"done: {ok} exported, {skipped} skipped, {failed} failed -> {outDir}");
     }
@@ -2622,8 +2623,82 @@ sealed class Dumper(string root, string outDir, string? filter)
     public int DumpSkins()
     {
         WriteSkins();
+        WriteLightColors();
         WriteMaterials();
         return 0;
+    }
+
+    /// <summary>
+    /// lightcolors.json: the colour of each light skin. A lamp, light sphere or light cube is
+    /// stored with a skin such as "Skins\Stadium\LightColors\Coral.dds" — a small image of the
+    /// light's colour. They live outside GameData (the extract plugin's "skins only" run puts
+    /// them under OpenplanetNext/Extract); without them the file is simply not written and
+    /// lights keep their default look. Key = the path as maps store it, lower-cased.
+    /// </summary>
+    private void WriteLightColors()
+    {
+        // root is …/Extract/GameData/Stadium.
+        var extract = Path.GetFullPath(Path.Combine(root, "..", ".."));
+        var folders = new List<string>();
+        foreach (var top in Directory.Exists(extract) ? Directory.EnumerateDirectories(extract) : [])
+        {
+            if (Path.GetFileName(top).Equals("GameData", StringComparison.OrdinalIgnoreCase))
+            {
+                var inside = Path.Combine(top, "Skins", "Stadium", "LightColors");
+                if (Directory.Exists(inside)) folders.Add(inside);
+                continue;
+            }
+            folders.AddRange(Directory.EnumerateDirectories(top, "LightColors", SearchOption.AllDirectories));
+            if (Path.GetFileName(top).Equals("LightColors", StringComparison.OrdinalIgnoreCase)) folders.Add(top);
+        }
+        if (folders.Count == 0)
+        {
+            Console.WriteLine("lightcolors.json: no LightColors skins extracted (Openplanet > Plugins > Trackedit Extract (skins only))");
+            return;
+        }
+        var colors = new JsonObject();
+        foreach (var folder in folders)
+            foreach (var file in Directory.EnumerateFiles(folder, "*.dds").OrderBy(f => f, StringComparer.Ordinal))
+            {
+                try
+                {
+                    var key = ("Skins\\Stadium\\LightColors\\" + Path.GetFileName(file)).ToLowerInvariant();
+                    colors[key] = AverageColor(file);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  light colour {Path.GetFileName(file)}: {ex.Message}");
+                }
+            }
+        File.WriteAllText(Path.Combine(outDir, "lightcolors.json"), colors.ToJsonString());
+        Console.WriteLine($"lightcolors.json: {colors.Count} light colours");
+    }
+
+    /// <summary>The colour of a light skin image: its mean, weighted by brightness so a dark
+    /// border does not dull it. "#000000" for a skin that is off.</summary>
+    private static string AverageColor(string ddsPath)
+    {
+        var png = Path.Combine(Path.GetTempPath(), $"trackedit-light-{Guid.NewGuid():N}.png");
+        try
+        {
+            ConvertDds(ddsPath, png);
+            using var img = Image.Load<Rgba32>(png);
+            double r = 0, g = 0, b = 0, w = 0;
+            img.ProcessPixelRows(rows =>
+            {
+                for (var y = 0; y < rows.Height; y++)
+                    foreach (var px in rows.GetRowSpan(y))
+                    {
+                        var weight = (px.R + px.G + px.B) / 765.0 + 1e-3;
+                        r += px.R * weight; g += px.G * weight; b += px.B * weight; w += weight;
+                    }
+            });
+            return $"#{(int)Math.Round(r / w):x2}{(int)Math.Round(g / w):x2}{(int)Math.Round(b / w):x2}";
+        }
+        finally
+        {
+            if (File.Exists(png)) File.Delete(png);
+        }
     }
 
     /// <summary>
