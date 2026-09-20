@@ -632,6 +632,27 @@ inside the block's box — a side panel on its unit's face, a cap that fits with
 cell; anything wider than a cell still has to meet the body. `MESHDUMP_GATE_LOG=1` says which
 clips a block loses and why.
 
+**Measured after the full re-extraction** (5,609 blocks, 0 failed). `npm run clipgeom`: clips
+without geometry 5,299 -> 1,531 of 146,129 (1.0%); what is left is `GrassBaseFCB`,
+`SnowRoad*FCB`, `DecoCliff*Snap` and stage sides — no geometry in the variant they name, not
+the gate. `npm run capfit`: 858 caps placed by the game's direction; on those the shape fit
+would have agreed on 818 of 857 (95.4%), the plain lowest-error turn on 92.8%.
+
+**3. The fit's threshold, measured instead of picked.** 3,204 blocks still have
+direction-sensitive caps no harvested map has shown, so the fit still matters. Its "a turn
+must beat no turn by 75%" rule was chosen by eye over one family (5d). Swept against the
+game's 857 known directions from the cap report: 0.75 gets 822 right, 0.4 gets 839–840, and
+the body-less threshold makes no difference between 0 and 0.15. Bodied blocks now use 0.4 —
+the wrong turns the threshold exists to stop improve the fit by ~10%, well under it. The
+sweep is a plateau (0.3: 838, 0.4: 839, 0.5: 838; 0: 794), so the number is not fragile.
+Re-extracted with it: the fit as shipped agrees on 835 of 857 (97.4%); 1,563 bodied caps
+changed turn, and of the 30 of those the game has shown, 25 are now right against 8 before.
+`clipgeom` 1,479 (1.0%), `cliptruth` 99.71% over 8 maps, `variantcheck` and `fieldaudit` clean.
+Also tried, and NOT used: taking a cap's turn from the same clip on OTHER blocks (leave one
+block out, unanimous evidence only) is right 95.3% of the time — worse than the fit, because
+a clip's turn belongs to the block's layout, not to the clip. Harvest more maps
+(`cliptruth --harvest`) and the fit's share shrinks further.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

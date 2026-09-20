@@ -2344,7 +2344,12 @@ sealed class Dumper(string root, string outDir, string? filter)
                         // clean signal, and their tall shells really do come turned (an arch's
                         // proper variant has its curved walls on other faces than the
                         // "WrongDir" base, and the shell has to follow them).
-                        var Decisive = hasBody ? 0.75f : 0.15f;
+                        // The bodied threshold is measured, not picked: against the 857 caps
+                        // whose direction the game has shown (cap_turns.json, `npm run capfit`)
+                        // 0.75 got 822 right and 0.4 got 839 — the old 0.75 held back real turns
+                        // (wall copings: 12.9 against 28.6, a 55 % gain) while the wrong turns it
+                        // was there to stop gain ~10 %. The shell threshold hardly matters (0–0.15).
+                        var Decisive = hasBody ? 0.4f : 0.15f;
                         var best = q;
                         var unturned = Err(q);
                         var bestErr = unturned * (1f - Decisive);
