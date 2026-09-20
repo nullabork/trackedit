@@ -32,7 +32,7 @@ const verifyFile = (output: string): string[] => dumpProblems(JSON.parse(readFil
 
 function run(file: string, args: string[], timeout: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(file, args, { timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       if (!error) return resolve();
       if (file === "dotnet" && error.code === "ENOENT") {
         return reject(new Error("Map import requires the .NET 8 SDK. Install it and retry, or configure TRACKEDIT_GBXDUMP with a standalone converter."));

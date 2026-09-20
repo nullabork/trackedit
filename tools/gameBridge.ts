@@ -68,7 +68,7 @@ const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "imag
 
 const run = (cmd: string, args: string[], timeout = 180_000): Promise<string> =>
   new Promise((resolve, reject) =>
-    execFile(cmd, args, { timeout, maxBuffer: 8 * 1024 * 1024 },
+    execFile(cmd, args, { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve(stdout))));
 
 /** A TMX map's original file, downloaded once into maps/gbx. */

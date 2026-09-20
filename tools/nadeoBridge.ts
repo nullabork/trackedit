@@ -238,7 +238,7 @@ export class NadeoClient {
       await Promise.all(Array.from({ length: Math.min(6, recs.length) }, worker));
       if (files.size) {
         const json = await new Promise<string>((resolve, reject) =>
-          execFile(this.meshdump, ["ghostname", ...files.keys()], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+          execFile(this.meshdump, ["ghostname", ...files.keys()], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
             (err, stdout) => (err ? reject(err) : resolve(stdout))));
         for (const [file, name] of Object.entries(JSON.parse(json) as Record<string, string | null>)) {
           const id = files.get(file);
@@ -479,8 +479,16 @@ export function nadeoBridge(meshdump: string): Plugin {
           dir = await mkdtemp(join(tmpdir(), "trackedit-nadeo-"));
           const out = join(dir, "ghost.json");
           await new Promise<void>((resolve, reject) => {
-            execFile(meshdump, ["ghost", ghostGbx, out], { timeout: 120_000 }, (err, _stdout, stderr) =>
-              err ? reject(new Error(`ghost extraction failed: ${stderr || err.message}`)) : resolve());
+            // windowsHide: a dev server with no console of its own (started from an IDE task, detached)
+            // makes Windows allocate a console per child, and that fails with 0xC0000142
+            // (STATUS_DLL_INIT_FAILED) when the machine is short of resources. Every spawn has it.
+            execFile(meshdump, ["ghost", ghostGbx, out], { timeout: 120_000, windowsHide: true }, (err, stdout, stderr) => {
+              if (!err) return resolve();
+              // Say WHY: a bare "Command failed" hides an exit code, a kill signal or what the tool printed.
+              const e = err as Error & { code?: number | string; signal?: string | null };
+              const said = (stderr || stdout || "").trim().split(/\r?\n/).slice(-3).join(" | ");
+              reject(new Error(`ghost extraction failed (exit ${e.code ?? "?"}${e.signal ? `, signal ${e.signal}` : ""}): ${said || e.message}`));
+            });
           });
           const ghost = JSON.parse(await readFile(out, "utf-8")) as Record<string, unknown>;
           c.rememberName(accountId, ghost.nickname as string | null | undefined);

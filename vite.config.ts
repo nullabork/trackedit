@@ -47,7 +47,7 @@ function tmxBridge(): Plugin {
   /** `meshdump ghost`: the path JSON, or null when the file holds no ghost. */
   const extractGhost = (gbx: string, out: string) =>
     new Promise<Record<string, unknown> | null>((resolve) => {
-      execFile(MESHDUMP, ["ghost", gbx, out], { timeout: 120_000 }, async (err) => {
+      execFile(MESHDUMP, ["ghost", gbx, out], { timeout: 120_000, windowsHide: true }, async (err) => {
         if (err) return resolve(null);
         try { resolve(JSON.parse(await readFile(out, "utf-8"))); } catch { resolve(null); }
       });
@@ -230,7 +230,7 @@ function tmxBridge(): Plugin {
             execFile(
               MESHDUMP,
               ["embedded", gbx, join(process.cwd(), "public", "meshes")],
-              { timeout: 120_000 },
+              { timeout: 120_000, windowsHide: true },
               (err, stdout) => {
                 if (err) console.warn("[tmx] embedded extraction failed:", err.message);
                 else if (stdout.trim()) console.log("[tmx]", stdout.trim());
@@ -240,7 +240,7 @@ function tmxBridge(): Plugin {
           });
           // Attach the map's mod (custom texture pack) reference, if any.
           const mod = await new Promise<{ url?: string } | null>((resolve) => {
-            execFile(MESHDUMP, ["modinfo", gbx], { timeout: 60_000 }, (err, stdout) => {
+            execFile(MESHDUMP, ["modinfo", gbx], { timeout: 60_000, windowsHide: true }, (err, stdout) => {
               if (err) return resolve(null);
               try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
             });
@@ -411,7 +411,7 @@ function modsBridge(): Plugin {
           await writeFile(zipPath, Buffer.from(await upstream.arrayBuffer()));
           const outDir = join(modsDir, id);
           await new Promise<void>((resolve, reject) => {
-            execFile(MESHDUMP, ["modpack", zipPath, outDir], { timeout: 300_000 },
+            execFile(MESHDUMP, ["modpack", zipPath, outDir], { timeout: 300_000, windowsHide: true },
               (err, _stdout, stderr) =>
                 err ? reject(new Error(`modpack: ${stderr?.toString().trim() || err.message}`)) : resolve());
           });
@@ -587,8 +587,8 @@ function setupBridge(): Plugin {
         const args = [cmd, extractRoot, meshesDir];
         // First run has no built exe — `dotnet run` builds it (needs .NET 8 SDK).
         const child = haveExe
-          ? spawn(MESHDUMP, args, { env })
-          : spawn("dotnet", ["run", "-c", "Release", "--project", join("tools", "meshdump"), "--", ...args], { env });
+          ? spawn(MESHDUMP, args, { env, windowsHide: true })
+          : spawn("dotnet", ["run", "-c", "Release", "--project", join("tools", "meshdump"), "--", ...args], { env, windowsHide: true });
         child.stdout.on("data", (d) => push(String(d)));
         child.stderr.on("data", (d) => push(String(d)));
         child.on("error", reject);
