@@ -93,6 +93,18 @@ export const ghostPathPlugin: EditorPlugin = {
       built.delete(layerId);
     };
 
+    /** Lines the playback bar has taken out of view for now ("<layerId>\n<key>"). */
+    const playbackHidden = new Set<string>();
+    const applyPlaybackHidden = () => {
+      for (const objs of built.values())
+        for (const o of objs) if (o.userData.line) o.visible = !playbackHidden.has(o.userData.line as string);
+    };
+    ctx.events.on("linePlaybackHidden", ({ layerId, key, hidden }) => {
+      const id = `${layerId}\n${key}`;
+      if (hidden) playbackHidden.add(id); else playbackHidden.delete(id);
+      applyPlaybackHidden();
+    });
+
     const clearTags = () => {
       for (const t of tags) {
         t.removeFromParent();
@@ -136,6 +148,7 @@ export const ghostPathPlugin: EditorPlugin = {
         const objs: Object3D[] = [];
         layer.ghosts.forEach((ghost, gi) => {
           if (ghost.path.length < 2 || ghost.visible === false || !layer.visible) return;
+          const first = objs.length;
           const total = ghost.path.length;
           const hue = lineHue(gi);
           for (const geom of geometryOf(ghost, radius, hue).line) {
@@ -154,6 +167,8 @@ export const ghostPathPlugin: EditorPlugin = {
             objs.push(mesh);
           }
           objs.push(marker(ghost.path[0], START, radius), marker(ghost.path[total - 1], END, radius));
+          // Everything of this line answers to one name (playback hides it, the opacity slider finds it).
+          for (const o of objs.slice(first)) o.userData.line = `${layer.id}\n${ghost.key}`;
         });
         for (const o of objs) {
           o.raycast = () => {};
@@ -161,12 +176,13 @@ export const ghostPathPlugin: EditorPlugin = {
         }
         if (objs.length) built.set(layer.id, objs);
       }
+      applyPlaybackHidden();
     };
 
     // Dragging the opacity slider restyles the one mesh; the document changes on release.
     ctx.events.on("attemptOpacityPreview", ({ layerId, key, opacity }) => {
       for (const o of built.get(layerId) ?? []) {
-        if (o.userData.line !== `${layerId}\n${key}`) continue;
+        if (o.name !== "ghost-attempts" || o.userData.line !== `${layerId}\n${key}`) continue;
         const m = (o as Mesh).material as MeshLambertMaterial;
         m.opacity = opacity;
         m.transparent = opacity < 1;

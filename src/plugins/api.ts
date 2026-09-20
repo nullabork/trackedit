@@ -23,6 +23,8 @@ export interface AppEvents extends Record<string, unknown> {
   paintColorChanged: { color: string };
   /** A driving line was selected in the Layers list (null: none) — the playback bar follows it. */
   lineSelected: { line: { layerId: string; key: string } | null };
+  /** Playback wants a line's tube out of the way (or back): not saved, the line stays loaded and "shown". */
+  linePlaybackHidden: { layerId: string; key: string; hidden: boolean };
   /** The attempt-opacity slider of a driving line is being dragged (not saved yet). */
   attemptOpacityPreview: { layerId: string; key: string; opacity: number };
   status: { text: string };

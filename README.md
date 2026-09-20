@@ -340,7 +340,18 @@ sideways in a drift, where the body parts from the direction of travel by 60° a
 (that is how the rotation data was checked: it follows the path to a degree while the car
 grips). The chase camera takes the car's heading and pitch but never its roll, so a
 banked turn does not tip the horizon; first person takes all three. Lines loaded before
-inputs and rotations were kept reload themselves the first time they are selected. There is no URL to open a map in
+inputs and rotations were kept reload themselves the first time they are selected.
+
+The marker is the game's own car when the import has it (`meshdump car` -> `meshes/car/`,
+part of the import): the models are whole folders under `GameData/Skins/Models/CarSport`,
+which the extract plugin now pulls as well (its full run, or the quick **car model only**
+entry) — Snow, Rally and Desert each with a `MainBody.Mesh.gbx`, the Stadium body under
+`Stadium/Prestige/Ranked` with its textures in `Stadium/Common`. The second LOD is
+converted, damage-decal layers and the prestige skin's medal and gems left out, and the
+body is tinted in the line's hue. Without it a box the size of a car stands in. **Hide
+line** in the bar takes the tube out of view while playing or following, so only the car
+is left; it comes back when you pause and stop following (nothing is saved — the line
+stays loaded and shown). There is no URL to open a map in
 the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from

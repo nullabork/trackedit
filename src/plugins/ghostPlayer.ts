@@ -1,4 +1,5 @@
-import { BoxGeometry, Group, Matrix4, Mesh, MeshLambertMaterial, Quaternion, Vector3 } from "three";
+import { BoxGeometry, DoubleSide, Group, Matrix4, Mesh, MeshLambertMaterial, Quaternion, SRGBColorSpace, TextureLoader, Vector3 } from "three";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { lineHue } from "@core/layer";
 import type { GhostPath, Layer } from "@core/layer";
 import { buildTimeline, sampleTimeline, stepTime } from "@core/ghostPlayback";
@@ -33,10 +34,28 @@ export const ghostPlayerPlugin: EditorPlugin = {
     let speed = 1;
     let follow = false;
     let firstPerson = false;
+    /** "Hide line": the tube is out of view while playing or following (not saved; the line stays loaded). */
+    let hideLine = false;
+    let hidden: { layerId: string; key: string } | null = null;
+    const setHidden = (line: { layerId: string; key: string } | null) => {
+      if (hidden && (!line || line.layerId !== hidden.layerId || line.key !== hidden.key))
+        ctx.events.emit("linePlaybackHidden", { ...hidden, hidden: false });
+      if (line && (!hidden || line.layerId !== hidden.layerId || line.key !== hidden.key))
+        ctx.events.emit("linePlaybackHidden", { ...line, hidden: true });
+      hidden = line;
+    };
     let last = performance.now();
 
     const car = buildCar();
     car.visible = false;
+    // The real car replaces the box once it has loaded (when the import has one).
+    void loadCarModel().then((model) => {
+      if (!model) return;
+      for (const child of [...car.children]) car.remove(child);
+      car.add(model.object);
+      car.userData.body = model.body;
+      car.userData.lift = 0; // the model's origin is on the road under it, like the ghost's position
+    });
 
     const current = (): { layer: Layer; ghost: GhostPath; index: number } | null => {
       if (!selected) return null;
@@ -82,6 +101,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       onSpeed: (s) => { speed = s; },
       onFollow: (on) => setFollow(on),
       onFirstPerson: (on) => { firstPerson = on; if (on) follow = true; },
+      onHideLine: (on) => { hideLine = on; },
       onClose: () => ctx.events.emit("lineSelected", { line: null }),
     });
     bar.element.hidden = true;
@@ -106,6 +126,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       if (!c || c.ghost.visible === false || !c.layer.visible || c.ghost.path.length < 2) {
         if (selected && !c) selected = null;
         if (follow) setFollow(false);
+        setHidden(null);
         car.visible = false;
         bar.element.hidden = true;
         return;
@@ -117,6 +138,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       }
       const s = sampleTimeline(c.ghost, tl, time);
       if (!s) return;
+      setHidden(hideLine && (playing || follow) ? { layerId: c.layer.id, key: c.ghost.key } : null);
 
       // The marker lives in the layer's group, like the line: layer-local coordinates.
       const group = ctx.renderer.getLayerGroup(c.layer.id);
@@ -135,7 +157,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
         turn.setFromRotationMatrix(basis.makeBasis(x, y, z));
       }
       car.quaternion.copy(turn);
-      car.position.set(s.pos[0], s.pos[1] + CAR_LIFT, s.pos[2]);
+      car.position.set(s.pos[0], s.pos[1] + ((car.userData.lift as number | undefined) ?? CAR_LIFT), s.pos[2]);
       car.visible = !(follow && firstPerson);
       (car.userData.body as MeshLambertMaterial).color.set(lineHue(c.index));
 
@@ -158,15 +180,53 @@ export const ghostPlayerPlugin: EditorPlugin = {
         hue: lineHue(c.index),
         time, duration: tl.duration, raceTime: s.raceTime,
         checkpoints: tl.checkpoints, checkpointsTaken: s.checkpointsTaken,
-        playing, speed, follow, firstPerson,
+        playing, speed, follow, firstPerson, hideLine,
         steer: s.steer, gas: s.gas, brake: s.brake, kmh: s.speed,
       });
     });
   },
 };
 
-/** Ghost samples are the car's centre, which rides a little above the road. */
+/** The stand-in box is centred on its middle; lift it so it sits on the road rather than in it. */
 const CAR_LIFT = 0.4;
+
+/**
+ * The game's car (meshdump car -> meshes/car/): the Stadium model, its body tinted in the
+ * line's hue through `body`. Null when the import has none — the box stays.
+ */
+async function loadCarModel(): Promise<{ object: Group; body: MeshLambertMaterial } | null> {
+  try {
+    const res = await fetch("meshes/car/index.json");
+    if (!res.ok) return null;
+    const index = (await res.json()) as Record<string, { obj: string; materials: Record<string, string | null> } | undefined>;
+    const entry = index.Stadium ?? Object.values(index)[0];
+    if (!entry) return null;
+    const textures = new TextureLoader();
+    const body = new MeshLambertMaterial({ color: 0x2dd4bf, side: DoubleSide });
+    const materialFor = (name: string): MeshLambertMaterial => {
+      const file = entry.materials[name];
+      const map = file ? textures.load("meshes/" + file) : null;
+      if (map) map.colorSpace = SRGBColorSpace;
+      if (name === "Skin") { body.map = map; return body; }
+      if (name.startsWith("Glass")) return new MeshLambertMaterial({ color: 0x0b1116, transparent: true, opacity: 0.75, side: DoubleSide });
+      return new MeshLambertMaterial({ map, color: map ? 0xffffff : 0x3a4350, side: DoubleSide });
+    };
+    const cache = new Map<string, MeshLambertMaterial>();
+    const named = (name: string) => cache.get(name) ?? cache.set(name, materialFor(name)).get(name)!;
+    const object = await new OBJLoader().loadAsync("meshes/" + entry.obj);
+    object.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry.computeVertexNormals();
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => named(m.name)) : named(mesh.material.name);
+      mesh.raycast = () => {};
+    });
+    object.name = "ghost-car-model";
+    return { object, body };
+  } catch {
+    return null;
+  }
+}
 
 /** The car: a box the size of one, lying along +z (its direction of travel), nose marked. */
 function buildCar(): Group {

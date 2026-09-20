@@ -117,6 +117,9 @@ switch (args[0])
             foreach (var g in baked.GroupBy(b => (string)b["name"]!).OrderByDescending(g => g.Count()).Take(15)) Console.WriteLine($"  {g.Count(),6} x {g.Key}");
             return 0;
         }
+    case "car":
+        // meshdump car <GameDataRoot> <meshesDir> — see CarDump.cs.
+        return CarDump.Run(args[1], args[2]);
     case "skins":
         // meshdump skins <GameDataRoot> <meshesDir> — (re)write skins.json and the materials it
         // names alone; a block extraction writes them too.

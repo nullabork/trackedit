@@ -533,6 +533,7 @@ function setupBridge(): Plugin {
     if (!(await isFile(join(meshesDir, "clipdefs.json")))) missing.push("clip rules");
     if (!(await isFile(join(meshesDir, "skins.json")))) missing.push("surface skins");
     if (!(await isFile(join(meshesDir, "waypoints.json")))) missing.push("waypoint types");
+    if (!(await isFile(join(meshesDir, "car", "index.json")))) missing.push("the car model (run Trackedit Extract in the game again first)");
     if (gameDirKnown && !(await isFile(join(meshesDir, "lightcolors.json")))) missing.push("light colours");
     try {
       const idx = await readFile(join(meshesDir, "index.json"), "utf-8");
@@ -602,6 +603,8 @@ function setupBridge(): Plugin {
       await runOne("items");
       // Which blocks/items are start, checkpoint, finish (meshes/waypoints.json).
       await runOne("waypoints");
+      // The car, for playing driving lines back (meshes/car/; nothing when it was not extracted).
+      await runOne("car");
       st.phase = "done";
       st.progress = 1;
       st.done = true;
