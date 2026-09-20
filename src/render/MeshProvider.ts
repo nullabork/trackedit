@@ -221,7 +221,8 @@ export class MeshProvider implements GeometryProvider {
   /** The material shows a self-illumination map (the extractor found no diffuse, only "*_I.dds"): it IS the light. */
   private isSelfIllum(name: string): boolean {
     const entry = this.materialIndex[name] ?? this.materialIndex[canonicalMaterialName(name)];
-    return /_I\.dds$/i.test(entry?.source ?? "");
+    // …or it is a light tube's own surface, which has a diffuse but is what a LightTube skin colours.
+    return /_I\.dds$|[\\/]LightTube[^\\/]*\.dds$/i.test(entry?.source ?? "");
   }
 
   /** `base` glowing in a light skin's colour; one per material and colour. */

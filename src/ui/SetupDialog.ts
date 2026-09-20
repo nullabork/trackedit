@@ -23,6 +23,12 @@ interface SetupStatus {
   extractReady: boolean;
   meshCount: number;
   meshesReady: boolean;
+  /** The game's install folder (optional): light colours are read from it directly. */
+  gameDir?: string | null;
+  gameDirSource?: "config" | "detected" | null;
+  gameDirValid?: boolean;
+  /** What a current import writes that this one lacks ("clip rules", "surface skins", …). */
+  meshesOutdated?: string[];
   importing: {
     running: boolean;
     phase: string;
@@ -94,6 +100,30 @@ export function openSetupDialog(initial: SetupStatus, opts?: { locked?: boolean 
       .finally(() => (dirBtn.disabled = false));
   });
 
+  // Step 1b — the game's own folder (optional)
+  const gameInput = el("input", {
+    type: "text",
+    placeholder: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Trackmania",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  gameInput.value = status.gameDir ?? "";
+  const gameNote = el("div", { class: "hint" });
+  const gameBtn = el("button", { class: "btn" }, "Use this folder") as HTMLButtonElement;
+  gameBtn.addEventListener("click", () => {
+    gameBtn.disabled = true;
+    void fetch("/api/setup/gamedir", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dir: gameInput.value.trim() }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? res.statusText);
+        await refresh();
+      })
+      .catch((err) => (gameNote.textContent = `\u2717 ${err instanceof Error ? err.message : err}`))
+      .finally(() => (gameBtn.disabled = false));
+  });
+
   // Step 2 — extract in-game
   const extractNote = el("div", { class: "hint" });
 
@@ -156,6 +186,13 @@ export function openSetupDialog(initial: SetupStatus, opts?: { locked?: boolean 
         el("div", { class: "setup-step-title" }, "Openplanet folder"),
         el("div", { class: "setup-dir-row" }, dirInput, dirBtn),
         dirNote,
+        el("div", { class: "setup-step-title" }, "Game folder (optional)"),
+        el("div", { class: "hint" },
+          "Where Trackmania.exe is. A few things ship there as plain files instead of inside the " +
+          "packs Openplanet extracts \u2014 the colours of lamps and light tubes. Found by itself for " +
+          "the usual Steam, Epic and Ubisoft Connect installs."),
+        el("div", { class: "setup-dir-row" }, gameInput, gameBtn),
+        gameNote,
       ),
     ),
     el("div", { class: "setup-step" },
@@ -229,13 +266,20 @@ export function openSetupDialog(initial: SetupStatus, opts?: { locked?: boolean 
         ? "Auto-detected — confirm to continue."
         : "Install Openplanet from openplanet.dev, then point here at its OpenplanetNext folder.";
 
+    if (!gameInput.value && s.gameDir) gameInput.value = s.gameDir;
+    gameNote.textContent = s.gameDirValid
+      ? `\u2713 ${s.gameDirSource === "detected" ? "Found by itself" : "Set"} \u2014 light colours will be imported.`
+      : "Not found \u2014 everything works without it; lamps and light tubes just keep their default colour.";
+
     extractNote.textContent = s.extractedFiles > 0
       ? `${s.extractedFiles.toLocaleString()} files extracted${step2 ? "" : " so far…"}`
       : step1 ? "Waiting for extraction…" : "";
 
     const imp = s.importing;
     if (imp?.done) assetsChanged = true;
-    importBtn.disabled = !step2 || !!imp?.running || (locked && step3);
+    // An import made by an older version lacks data the editor now draws by.
+    const outdated = step3 && !imp?.running ? (s.meshesOutdated ?? []) : [];
+    importBtn.disabled = !step2 || !!imp?.running || (locked && step3 && !outdated.length);
     importBtn.textContent = imp?.running
       ? `Importing ${imp.phase}…`
       : step3 ? (locked ? "Imported" : "Re-import models & textures") : "Import models & textures";
@@ -257,6 +301,8 @@ export function openSetupDialog(initial: SetupStatus, opts?: { locked?: boolean 
     importLog.hidden = !imp || (!imp.running && !imp.error);
     if (imp) importLog.textContent = imp.log.slice(-8).join("\n");
     if (imp?.error) importNote.textContent = `✗ ${imp.error}`;
+    else if (outdated.length)
+      importNote.textContent = `${s.meshCount.toLocaleString()} meshes ready, from an older import: re-import to add ${outdated.join(", ")}.`;
     else if (step3)
       importNote.textContent = `✓ ${s.meshCount.toLocaleString()} meshes ready${locked ? " — hit Start editing." : "."}`;
     else if (imp?.running) importNote.textContent = "Converting meshes and textures — takes a few minutes.";

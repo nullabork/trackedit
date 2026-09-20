@@ -574,15 +574,22 @@ of 16; `WaterHFCRight`: 0..3) — not read yet.
   `Orange`, `WhiteCold`, `Off`, and `LightTube\Orange.zip` — on `ShowLights`, `Lamp`,
   `LightSphere`, `LightTube*`; the rest are screens showing a game image or a URL, one with a
   `.webm` foreground.
-- **Light colours, drawn.** The skins live outside `GameData`, so the extract plugin learned
-  FOLDER lines (`Skins\Stadium\LightColors\*`: every file, looked for under the game, user,
-  fake and program-data roots, logging which one had it) and a quick "skins only" menu
-  entry. `meshdump skins` then writes `lightcolors.json`: each skin image's colour (mean
-  weighted by brightness; `Off` comes out black). An item with such a skin loads as a
-  template of its own (`#light:<file>`) whose SELF-ILLUMINATED materials — the ones the
-  extractor could only find an `*_I.dds` illumination map for: `ItemLampLight`, `LightShape`
-  — take the colour and glow in it. Not drawn: `LightTube\*.zip` skins, screens.
-  Stored maps converted before item skins were in the dump need re-opening from TMX.
+- **Light colours, drawn.** NOT via Openplanet: a "skins only" folder run of the extract
+  plugin found `Skins\Stadium\LightColors` under none of the four Fids roots (the plugin is
+  back to what it was). They ship as a plain zip next to Trackmania.exe,
+  `Packs/Stadium_Skins.zip`: 20 `LightColors/<Name>.dds` images and 20 EMPTY
+  `LightTube/<Name>.zip` — a tube's colour is keyed by that name. `meshdump skins` (and every
+  block import) finds the install (`TRACKEDIT_GAME_DIR`, else the usual Steam / Epic /
+  Ubisoft Connect places on every fixed drive — all of them, merged: an abandoned launcher's
+  old copy here held 10 colours, the current one 20) and writes `lightcolors.json`, each
+  image's colour (mean weighted by brightness; `Off` is black). An item with such a skin loads
+  as a template of its own (`#light:<file>`) whose light-emitting materials take the colour
+  and glow in it: those made from an `*_I.dds` illumination map (`ItemLampLight`,
+  `LightShape`) and a light tube's own surface. Not drawn: screens. Stored maps converted
+  before item skins were in the dump need re-opening from TMX.
+- **Fresh installs.** The Get started dialog gained an optional game-folder row (found by
+  itself; `POST /api/setup/gamedir`), passes it to the import, rebuilds a converter that is
+  older than its source, and tells an existing install which data its import predates.
 
 ## 6. Lessons
 

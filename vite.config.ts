@@ -447,6 +447,9 @@ function modsBridge(): Plugin {
  *   POST /api/setup/dir     -> {dir} remember the OpenplanetNext folder
  *                              (persisted in .trackedit.local.json, gitignored)
  *                              + install/refresh the extractor plugin into it
+ *   POST /api/setup/gamedir -> {dir} remember the game's install folder (optional: the
+ *                              light colours ship as Packs/Stadium_Skins.zip next to
+ *                              Trackmania.exe, not in the Openplanet extraction)
  *   POST /api/setup/import  -> run meshdump blocks+items -> public/meshes/
  *                              (async; progress rides in status.importing)
  *   POST /api/setup/reset   -> delete public/meshes/ (all imported assets,
@@ -474,7 +477,7 @@ function setupBridge(): Plugin {
   const isFile = async (p: string) => {
     try { return (await stat(p)).isFile(); } catch { return false; }
   };
-  const readCfg = async (): Promise<{ openplanetDir?: string }> => {
+  const readCfg = async (): Promise<{ openplanetDir?: string; gameDir?: string }> => {
     try { return JSON.parse(await readFile(cfgPath, "utf-8")); } catch { return {}; }
   };
   const readBody = (req: IncomingMessage) =>
@@ -501,6 +504,56 @@ function setupBridge(): Plugin {
     return n;
   };
 
+  /** The game's install has what we read from it directly. */
+  const isGameDir = (dir: string) => isFile(join(dir, "Packs", "Stadium_Skins.zip"));
+  /** The usual Steam / Epic / Ubisoft Connect places (tools/meshdump/GameInstall.cs looks in the same). */
+  const detectGameDir = async (): Promise<string | null> => {
+    const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+    const guesses = process.platform === "win32"
+      ? "CDEFGH".split("").flatMap((d) => [
+          `${d}:\\SteamLibrary\\steamapps\\common\\Trackmania`,
+          `${d}:\\Program Files (x86)\\Steam\\steamapps\\common\\Trackmania`,
+          `${d}:\\Program Files\\Epic Games\\TrackmaniaNext`,
+          `${d}:\\Program Files (x86)\\Ubisoft\\Ubisoft Game Launcher\\games\\Trackmania`,
+          `${d}:\\Games\\Trackmania`,
+        ])
+      : [join(home, ".steam", "steam", "steamapps", "common", "Trackmania"),
+         join(home, ".local", "share", "Steam", "steamapps", "common", "Trackmania")];
+    for (const g of guesses) if (await isGameDir(g)) return g;
+    return null;
+  };
+
+  /**
+   * Data files a current import writes that an older one lacks — the editor runs without
+   * them, but draws less correctly (clips, skins, wall trims, alternative models).
+   */
+  const outdatedParts = async (gameDirKnown: boolean): Promise<string[]> => {
+    const missing: string[] = [];
+    if (!(await isFile(join(meshesDir, "index.json")))) return missing;
+    if (!(await isFile(join(meshesDir, "clipdefs.json")))) missing.push("clip rules");
+    if (!(await isFile(join(meshesDir, "skins.json")))) missing.push("surface skins");
+    if (!(await isFile(join(meshesDir, "waypoints.json")))) missing.push("waypoint types");
+    if (gameDirKnown && !(await isFile(join(meshesDir, "lightcolors.json")))) missing.push("light colours");
+    try {
+      const idx = await readFile(join(meshesDir, "index.json"), "utf-8");
+      if (!idx.includes('"mobils"')) missing.push("alternative block models");
+    } catch { /* counted as not imported elsewhere */ }
+    return missing;
+  };
+
+  /** A built converter older than its source (after a pull) must not be used as is. */
+  const meshdumpIsCurrent = async (): Promise<boolean> => {
+    try {
+      const built = (await stat(MESHDUMP)).mtimeMs;
+      const src = join(process.cwd(), "tools", "meshdump");
+      for (const f of await readdir(src))
+        if (/\.(cs|csproj)$/.test(f) && (await stat(join(src, f))).mtimeMs > built) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const installPlugin = (opDir: string) =>
     cp(pluginSrc, join(opDir, "Plugins", "TrackeditExtract"), { recursive: true, force: true });
 
@@ -524,14 +577,17 @@ function setupBridge(): Plugin {
       }
     };
     const extractRoot = join(opDir, "Extract", "GameData", "Stadium");
-    const haveExe = await isFile(MESHDUMP);
+    // No exe, or one older than the source: `dotnet run` (re)builds it first.
+    const haveExe = await meshdumpIsCurrent();
+    const gameDir = (await readCfg()).gameDir;
+    const env = gameDir ? { ...process.env, TRACKEDIT_GAME_DIR: gameDir } : process.env;
     const runOne = (cmd: string) =>
       new Promise<void>((resolve, reject) => {
         const args = [cmd, extractRoot, meshesDir];
         // First run has no built exe — `dotnet run` builds it (needs .NET 8 SDK).
         const child = haveExe
-          ? spawn(MESHDUMP, args)
-          : spawn("dotnet", ["run", "-c", "Release", "--project", join("tools", "meshdump"), "--", ...args]);
+          ? spawn(MESHDUMP, args, { env })
+          : spawn("dotnet", ["run", "-c", "Release", "--project", join("tools", "meshdump"), "--", ...args], { env });
         child.stdout.on("data", (d) => push(String(d)));
         child.stderr.on("data", (d) => push(String(d)));
         child.on("error", reject);
@@ -602,7 +658,15 @@ function setupBridge(): Plugin {
               };
               meshCount = Object.keys(idx.blocks ?? {}).length + Object.keys(idx.items ?? {}).length;
             } catch { /* not imported yet */ }
+            let gameDir = cfg.gameDir ?? null;
+            let gameDirSource: "config" | "detected" | null = gameDir ? "config" : null;
+            if (!gameDir && (gameDir = await detectGameDir())) gameDirSource = "detected";
+            const gameDirValid = !!gameDir && (await isGameDir(gameDir));
             res.end(JSON.stringify({
+              gameDir,
+              gameDirSource,
+              gameDirValid,
+              meshesOutdated: await outdatedParts(gameDirValid),
               openplanetDir,
               dirSource,
               dirValid,
@@ -632,6 +696,15 @@ function setupBridge(): Plugin {
               console.warn("[setup] plugin install failed:", err);
             }
             res.end(JSON.stringify({ ok: true, pluginInstalled }));
+            return;
+          }
+
+          if (req.method === "POST" && sub === "gamedir") {
+            const { dir } = JSON.parse(await readBody(req)) as { dir?: string };
+            if (!dir || !(await isGameDir(dir)))
+              throw new Error(`not the game's folder (no Packs/Stadium_Skins.zip in it): ${dir ?? "(empty)"}`);
+            await writeFile(cfgPath, JSON.stringify({ ...(await readCfg()), gameDir: dir }, null, 1));
+            res.end('{"ok":true}');
             return;
           }
 

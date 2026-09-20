@@ -2631,47 +2631,48 @@ sealed class Dumper(string root, string outDir, string? filter)
     /// <summary>
     /// lightcolors.json: the colour of each light skin. A lamp, light sphere or light cube is
     /// stored with a skin such as "Skins\Stadium\LightColors\Coral.dds" — a small image of the
-    /// light's colour. They live outside GameData (the extract plugin's "skins only" run puts
-    /// them under OpenplanetNext/Extract); without them the file is simply not written and
-    /// lights keep their default look. Key = the path as maps store it, lower-cased.
+    /// light's colour; a light tube with "Skins\Stadium\LightTube\Coral.zip", an EMPTY zip: the
+    /// game keys the tube's colour by that name, and the two folders hold the same 20 names.
+    /// Both ship as a plain zip in the game's install, Packs/Stadium_Skins.zip — no in-game
+    /// extraction involved. Key = the path as maps store it, lower-cased. Without the game's
+    /// folder the file is not written and lights keep their default look.
     /// </summary>
     private void WriteLightColors()
     {
-        // root is …/Extract/GameData/Stadium.
-        var extract = Path.GetFullPath(Path.Combine(root, "..", ".."));
-        var folders = new List<string>();
-        foreach (var top in Directory.Exists(extract) ? Directory.EnumerateDirectories(extract) : [])
+        var zips = GameInstall.FindAll("Packs", "Stadium_Skins.zip");
+        if (zips.Count == 0)
         {
-            if (Path.GetFileName(top).Equals("GameData", StringComparison.OrdinalIgnoreCase))
-            {
-                var inside = Path.Combine(top, "Skins", "Stadium", "LightColors");
-                if (Directory.Exists(inside)) folders.Add(inside);
-                continue;
-            }
-            folders.AddRange(Directory.EnumerateDirectories(top, "LightColors", SearchOption.AllDirectories));
-            if (Path.GetFileName(top).Equals("LightColors", StringComparison.OrdinalIgnoreCase)) folders.Add(top);
-        }
-        if (folders.Count == 0)
-        {
-            Console.WriteLine("lightcolors.json: no LightColors skins extracted (Openplanet > Plugins > Trackedit Extract (skins only))");
+            Console.WriteLine("lightcolors.json: game install not found (set TRACKEDIT_GAME_DIR to the folder with Trackmania.exe)");
             return;
         }
         var colors = new JsonObject();
-        foreach (var folder in folders)
-            foreach (var file in Directory.EnumerateFiles(folder, "*.dds").OrderBy(f => f, StringComparer.Ordinal))
+        foreach (var zipPath in zips)
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(zipPath);
+            foreach (var entry in zip.Entries.OrderBy(e => e.FullName, StringComparer.Ordinal))
             {
+                var name = entry.FullName.Replace('/', '\\');
+                if (!name.StartsWith("Skins\\Stadium\\LightColors\\", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".dds", StringComparison.OrdinalIgnoreCase)) continue;
+                var tmp = Path.Combine(Path.GetTempPath(), $"trackedit-light-{Guid.NewGuid():N}.dds");
                 try
                 {
-                    var key = ("Skins\\Stadium\\LightColors\\" + Path.GetFileName(file)).ToLowerInvariant();
-                    colors[key] = AverageColor(file);
+                    entry.ExtractToFile(tmp, true);
+                    var hex = AverageColor(tmp);
+                    colors[name.ToLowerInvariant()] = hex;
+                    colors[$"skins\\stadium\\lighttube\\{Path.GetFileNameWithoutExtension(name).ToLowerInvariant()}.zip"] = hex;
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"  light colour {Path.GetFileName(file)}: {ex.Message}");
+                    Console.Error.WriteLine($"  light colour {name}: {ex.Message}");
+                }
+                finally
+                {
+                    if (File.Exists(tmp)) File.Delete(tmp);
                 }
             }
+        }
         File.WriteAllText(Path.Combine(outDir, "lightcolors.json"), colors.ToJsonString());
-        Console.WriteLine($"lightcolors.json: {colors.Count} light colours");
+        Console.WriteLine($"lightcolors.json: {colors.Count / 2} light colours from {string.Join(", ", zips)}");
     }
 
     /// <summary>The colour of a light skin image: its mean, weighted by brightness so a dark

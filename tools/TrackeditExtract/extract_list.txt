@@ -17857,5 +17857,3 @@ GameData\Trackmania\Media\Audio\Sound\WavData\ObstacleWoosh.wav
 GameData\Trackmania\Media\Audio\Sound\WavData\ObstacleWooshStart.wav
 GameData\Vehicles\GameSkin\CarFx.GameSkin.gbx
 GameData\Vehicles\Media\Material\ParticleSmokeAsphalt.Material.Gbx
-Skins\Stadium\LightColors\*
-Skins\Stadium\LightTube\*

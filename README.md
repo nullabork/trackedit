@@ -24,19 +24,31 @@ the one-time asset setup:
 1. Point it at your `OpenplanetNext` folder (auto-detected on the default
    install). It installs the bundled **Trackedit Extract** Openplanet plugin
    for you (from [`tools/TrackeditExtract`](tools/TrackeditExtract)).
+   The **game folder** below it is optional and found by itself for the usual
+   Steam, Epic and Ubisoft Connect installs: the colours of lamps and light
+   tubes ship there as a plain zip (`Packs/Stadium_Skins.zip`), not inside the
+   packs Openplanet extracts. Without it everything works; lights keep their
+   default colour.
 2. Launch TM2020 with Openplanet and set plugin signature mode to
    **Developer** (F3 → Openplanet menu → Developer → Signature mode) so the
    local plugin loads, then click **Trackedit Extract** in the Openplanet
    menu. It extracts the ~18k files the editor needs to
    `OpenplanetNext/Extract` (a few minutes; the dialog watches the folder).
 3. Back in the editor, hit **Import models & textures** — meshdump converts
-   the extraction into `public/meshes/` (OBJs + PNG textures, gitignored).
+   the extraction into `public/meshes/` (OBJs + PNG textures, gitignored),
+   together with the data the editor draws by: clip rules (`clipdefs.json`),
+   surface skins (`skins.json`), light colours (`lightcolors.json`), waypoint
+   types, and every alternative model and wall segment of a block. The
+   converter is (re)built first when it is missing or older than its source.
 
 The dialog can't be skipped — real geometry is a prerequisite, so it stays
 until all three steps are done (it's one-time; it never shows again once the
 import exists). Afterwards the box icon at the bottom of the tool rail
 reopens it in manage mode: change the folder, re-import after a game update,
-or remove the imported assets. Extracted assets stay on your machine — never
+or remove the imported assets. After updating trackedit it also says when the
+import on disk predates data the editor now uses ("re-import to add clip
+rules, surface skins, …") — the editor runs without, it just draws less
+correctly until then. Extracted assets stay on your machine — never
 commit or redistribute them.
 
 ## Map pipeline

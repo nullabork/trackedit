@@ -144,12 +144,13 @@ export function placementSkin(p: Placement): string {
 
 /**
  * The light-colour skin an ITEM carries ("skins\stadium\lightcolors\coral.dds", lower-cased as
- * lightcolors.json keys it), or "". Lamps, light spheres and light cubes are stored with one.
+ * lightcolors.json keys it), or "". Lamps, light spheres and light cubes are stored with one;
+ * light tubes with the same name under "lighttube" (an empty zip: the name IS the colour).
  */
 export function placementLightSkin(p: Placement): string {
   if (p.kind !== "free" || !p.isItem) return "";
   const file = (p.meta as { skin?: { pack?: { file?: string } } } | undefined)?.skin?.pack?.file ?? "";
-  return /[\\/]lightcolors[\\/]/i.test(file) ? file.replace(/\//g, "\\").toLowerCase() : "";
+  return /[\\/]light(colors|tube)[\\/]/i.test(file) ? file.replace(/\//g, "\\").toLowerCase() : "";
 }
 
 /** An item's uniform scale (CGameCtnAnchoredObject.Scale); 1 unless the map says otherwise. */
