@@ -303,7 +303,13 @@ active layer and again to hide it; any number can show at once, each in
 its own hue (bright at the start, darker toward the finish), and **Hide all
 lines** clears them. Lines are stored on the layer (`ghosts` in the map
 record) so they survive reloads. The tube's thickness is a render setting
-(Render settings ▸ Ghost line thickness). There is no URL to open a map in
+(Render settings ▸ Ghost line thickness). A ghost records every failed try too
+(an RPG run can be four fifths respawns): the LINE is only what reached the
+next checkpoint or the finish — a piece that ends in a respawn counts up to
+the last checkpoint it took (`src/core/ghostRuns.ts`, from the ghost's sample
+and checkpoint times). **Show attempts** in the line's settings draws the
+rest as well — thinner, in a shifted hue, one merged mesh however many there
+are — with an opacity slider (default 50%). There is no URL to open a map in
 the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from

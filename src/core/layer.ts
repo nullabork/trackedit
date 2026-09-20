@@ -169,7 +169,17 @@ export interface GhostPath {
   visible?: boolean;
   /** Editor only: number the checkpoints along the line in the viewport. */
   showNumbers?: boolean;
+  /**
+   * Editor only: also draw the tries that ended in a respawn before the next
+   * checkpoint (see core/ghostRuns). Off by default: a run with a thousand
+   * failed jumps is unreadable otherwise.
+   */
+  showAttempts?: boolean;
+  /** Editor only: how solid the attempts are drawn, 0..1 (default 0.5). */
+  attemptOpacity?: number;
 }
+
+export const DEFAULT_ATTEMPT_OPACITY = 0.5;
 
 /** One hue per line on a layer, by its position in `Layer.ghosts`. */
 export const LINE_HUES = ["#2dd4bf", "#f97316", "#a78bfa", "#facc15", "#f472b6", "#38bdf8", "#a3e635", "#f87171"];

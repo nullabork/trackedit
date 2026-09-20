@@ -11,9 +11,12 @@ import {
   TubeGeometry,
   Vector3,
 } from "three";
-import type { Object3D } from "three";
+import type { BufferGeometry, Object3D } from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Vec3 } from "@core/math";
-import { lineHue } from "@core/layer";
+import { DEFAULT_ATTEMPT_OPACITY, lineHue } from "@core/layer";
+import type { GhostPath } from "@core/layer";
+import { splitGhostRuns } from "@core/ghostRuns";
 import type { EditorContext, EditorPlugin } from "./api";
 import { onPassesChanged, passesOf } from "./linePasses";
 
@@ -23,8 +26,6 @@ const END = new Color(0xff4d4d);
 const NUMBER_LIFT = 6;
 /** Fallback tube radius in metres (render prefs override it). */
 const DEFAULT_RADIUS = 1.2;
-/** A jump longer than this between samples is a respawn: break the tube. */
-const RESPAWN_GAP = 40;
 /** Resample spacing along the path (metres); ghosts are ~20 Hz, a few metres apart. */
 const STEP = 3;
 
@@ -33,6 +34,10 @@ const STEP = 3;
  * replay) as a tube under that layer's group, so it follows the layer
  * transform like every placement. Green at the start, red at the finish;
  * depth-tested so it threads behind and through the track like spaghetti.
+ * Only the pieces that reached the next checkpoint are the line; tries that
+ * ended in a respawn (core/ghostRuns) are drawn on request: thinner, in a
+ * shifted hue and see-through, as ONE merged mesh per line however many
+ * there are.
  * Unpickable. A line with "show checkpoint numbers" on also gets a tag at
  * every waypoint it passes (S, 1, 2, … F) — drawn over the map geometry at a
  * constant screen size, like the transform handles, so they can be found
@@ -45,10 +50,45 @@ export const ghostPathPlugin: EditorPlugin = {
     const built = new Map<string, Object3D[]>();
     const tags: Sprite[] = [];
 
+    /**
+     * Tube geometry per line, kept while the line's samples, the radius and the hue stay
+     * the same: toggling a checkbox or dragging the opacity slider rebuilds nothing.
+     */
+    const geometries = new Map<readonly Vec3[], { radius: number; hue: string; line: BufferGeometry[]; attempts: BufferGeometry | null | undefined }>();
+    const geometryOf = (ghost: GhostPath, radius: number, hue: string) => {
+      let g = geometries.get(ghost.path);
+      if (!g || g.radius !== radius || g.hue !== hue) {
+        for (const old of g?.line ?? []) old.dispose();
+        g?.attempts?.dispose();
+        const color = new Color(hue), total = ghost.path.length;
+        const line = splitGhostRuns(ghost.path, ghost.times, ghost.checkpoints).line
+          .map((run) => tubeGeometry(run.points, run.start / total, (run.start + run.points.length) / total, radius, 8, color))
+          .filter((t): t is BufferGeometry => !!t);
+        g = { radius, hue, line, attempts: undefined };
+        geometries.set(ghost.path, g);
+      }
+      return g;
+    };
+    /** The attempts of a line as one geometry, built the first time they are shown. */
+    const attemptsOf = (ghost: GhostPath, radius: number, hue: string): BufferGeometry | null => {
+      const g = geometryOf(ghost, radius, hue);
+      if (g.attempts === undefined) {
+        const color = attemptColor(hue), total = ghost.path.length;
+        const tubes = splitGhostRuns(ghost.path, ghost.times, ghost.checkpoints).attempts
+          .map((run) => tubeGeometry(run.points, run.start / total, (run.start + run.points.length) / total, radius * ATTEMPT_RADIUS, 5, color))
+          .filter((t): t is BufferGeometry => !!t);
+        g.attempts = tubes.length ? mergeGeometries(tubes) : null;
+        for (const t of tubes) t.dispose();
+      }
+      return g.attempts;
+    };
+
     const clearLayer = (layerId: string) => {
+      // Tube geometry belongs to the cache above; only the meshes and their materials go.
       for (const o of built.get(layerId) ?? []) {
         o.removeFromParent();
-        (o as Mesh).geometry?.dispose();
+        if (o.name === "ghost-marker") (o as Mesh).geometry.dispose();
+        ((o as Mesh).material as MeshLambertMaterial | undefined)?.dispose();
       }
       built.delete(layerId);
     };
@@ -80,6 +120,14 @@ export const ghostPathPlugin: EditorPlugin = {
 
     const rebuild = () => {
       for (const id of [...built.keys()]) clearLayer(id);
+      // Free the tubes of lines that were unloaded.
+      const live = new Set(ctx.document.layers.flatMap((l) => l.ghosts.map((g) => g.path as readonly Vec3[])));
+      for (const [path, g] of geometries) {
+        if (live.has(path)) continue;
+        for (const t of g.line) t.dispose();
+        g.attempts?.dispose();
+        geometries.delete(path);
+      }
       rebuildTags();
       const radius = ctx.view.getRenderPrefs().ghostRadius || DEFAULT_RADIUS;
       for (const layer of ctx.document.layers) {
@@ -89,14 +137,21 @@ export const ghostPathPlugin: EditorPlugin = {
         layer.ghosts.forEach((ghost, gi) => {
           if (ghost.path.length < 2 || ghost.visible === false || !layer.visible) return;
           const total = ghost.path.length;
-          const color = new Color(lineHue(gi));
-          let index = 0;
-          for (const run of splitRespawns(ghost.path)) {
-            const t0 = index / total;
-            const t1 = (index + run.length) / total;
-            index += run.length;
-            const tube = buildTube(run, t0, t1, radius, color);
-            if (tube) objs.push(tube);
+          const hue = lineHue(gi);
+          for (const geom of geometryOf(ghost, radius, hue).line) {
+            const tube = new Mesh(geom, new MeshLambertMaterial({ vertexColors: true }));
+            tube.name = "ghost-tube";
+            objs.push(tube);
+          }
+          const attempts = ghost.showAttempts ? attemptsOf(ghost, radius, hue) : null;
+          if (attempts) {
+            const opacity = Math.min(1, Math.max(0.05, ghost.attemptOpacity ?? DEFAULT_ATTEMPT_OPACITY));
+            // depthWrite off: overlapping see-through tries must not punch holes in each other.
+            const mesh = new Mesh(attempts, new MeshLambertMaterial({ vertexColors: true, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 }));
+            mesh.name = "ghost-attempts";
+            mesh.userData.line = `${layer.id}\n${ghost.key}`;
+            mesh.renderOrder = 2;
+            objs.push(mesh);
           }
           objs.push(marker(ghost.path[0], START, radius), marker(ghost.path[total - 1], END, radius));
         });
@@ -108,6 +163,17 @@ export const ghostPathPlugin: EditorPlugin = {
       }
     };
 
+    // Dragging the opacity slider restyles the one mesh; the document changes on release.
+    ctx.events.on("attemptOpacityPreview", ({ layerId, key, opacity }) => {
+      for (const o of built.get(layerId) ?? []) {
+        if (o.userData.line !== `${layerId}\n${key}`) continue;
+        const m = (o as Mesh).material as MeshLambertMaterial;
+        m.opacity = opacity;
+        m.transparent = opacity < 1;
+        m.depthWrite = opacity >= 1;
+        m.needsUpdate = true;
+      }
+    });
     ctx.document.events.on("reset", rebuild);
     ctx.document.events.on("layerAdded", rebuild);
     ctx.document.events.on("layerRemoved", rebuild);
@@ -119,30 +185,26 @@ export const ghostPathPlugin: EditorPlugin = {
   },
 };
 
-/** Continuous driving runs: a respawn teleports the car, so cut there. */
-function splitRespawns(path: readonly Vec3[]): Vec3[][] {
-  const runs: Vec3[][] = [[path[0]]];
-  for (let i = 1; i < path.length; i++) {
-    const [ax, ay, az] = path[i - 1];
-    const [bx, by, bz] = path[i];
-    const gap = Math.hypot(bx - ax, by - ay, bz - az);
-    if (gap > RESPAWN_GAP) runs.push([path[i]]);
-    else runs[runs.length - 1].push(path[i]);
-  }
-  return runs.filter((r) => r.length >= 2);
+/** Attempts are drawn thinner than the line, */
+const ATTEMPT_RADIUS = 0.7;
+/** and in a neighbouring, paler hue, so they read as "the same driver, but not the line". */
+function attemptColor(hue: string): Color {
+  const hsl = { h: 0, s: 0, l: 0 };
+  new Color(hue).getHSL(hsl);
+  return new Color().setHSL((hsl.h + 0.08) % 1, hsl.s * 0.6, Math.min(0.78, hsl.l + 0.12));
 }
 
-/** One run as a smooth tube in the line's hue, bright at the start and darkening toward the finish. */
-function buildTube(run: Vec3[], t0: number, t1: number, radius: number, base: Color): Mesh | null {
+/** One run as a smooth tube in the given hue, bright at the start of the ghost and darkening toward its end. */
+function tubeGeometry(run: Vec3[], t0: number, t1: number, radius: number, sides: number, base: Color): BufferGeometry | null {
   const pts = run.map(([x, y, z]) => new Vector3(x, y, z));
   const curve = new CatmullRomCurve3(pts, false, "centripetal");
   const length = curve.getLength();
   if (length < 1) return null;
   const segments = Math.max(4, Math.min(4000, Math.round(length / STEP)));
-  const geom = new TubeGeometry(curve, segments, radius, 8, false);
-  // Colour per ring: vertices come in (segments + 1) rings of 9 vertices.
+  const geom = new TubeGeometry(curve, segments, radius, sides, false);
+  // Colour per ring: vertices come in (segments + 1) rings of (sides + 1) vertices.
   const count = geom.attributes.position.count;
-  const ring = 9;
+  const ring = sides + 1;
   const colors = new Float32Array(count * 3);
   const dark = base.clone().multiplyScalar(0.35);
   const c = new Color();
@@ -152,9 +214,7 @@ function buildTube(run: Vec3[], t0: number, t1: number, radius: number, base: Co
     colors.set([c.r, c.g, c.b], i * 3);
   }
   geom.setAttribute("color", new Float32BufferAttribute(colors, 3));
-  const mesh = new Mesh(geom, new MeshLambertMaterial({ vertexColors: true }));
-  mesh.name = "ghost-tube";
-  return mesh;
+  return geom;
 }
 
 /** A checkpoint number: a pill in the line's hue, always on top, the same size at any distance. */

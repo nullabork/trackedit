@@ -42,7 +42,7 @@ export function removeGhost(ctx: EditorContext, layerId: string, key: string): v
 }
 
 /** Change a line's editor settings (visibility, checkpoint numbers). */
-export function updateGhost(ctx: EditorContext, layerId: string, key: string, patch: Partial<Pick<GhostPath, "visible" | "showNumbers">>): void {
+export function updateGhost(ctx: EditorContext, layerId: string, key: string, patch: Partial<Pick<GhostPath, "visible" | "showNumbers" | "showAttempts" | "attemptOpacity">>): void {
   const layer = ctx.document.getLayer(layerId);
   if (!layer || !layer.ghosts.some((g) => g.key === key)) return;
   ctx.document.mutUpdateLayer(layerId, { ghosts: layer.ghosts.map((g) => (g.key === key ? { ...g, ...patch } : g)) });

@@ -6,6 +6,7 @@ import type { Layer, Placement } from "@core/layer";
 import { getCurrentId, loadMap } from "@io/mapStore";
 import { applyStored } from "@ui/session";
 import { openTmxMap } from "@ui/tmxOpen";
+import { updateGhost } from "@ui/ghostActions";
 import { el, clear } from "@ui/dom";
 
 /**
@@ -229,6 +230,17 @@ export const instrumentationPlugin: EditorPlugin = {
           ctx.document.setAtmosphere({ sun: customSunFrom(sunFromHeading(heading, altitude), ctx.document.atmosphere.sun) });
         } else if (uid) ctx.document.setAtmosphere(JSON.parse(uid));
         return { ok: true, atmosphere: ctx.document.atmosphere };
+      }
+      if (action === "line") {
+        // ?action=line&uid=<JSON patch> sets a driving line's editor settings (the first line
+        // of the active layer): {"showAttempts":true,"attemptOpacity":0.5}. No arg = read.
+        const layer = ctx.document.activeLayer;
+        const ghost = layer.ghosts[0];
+        if (!ghost) return { ok: false, error: "the active layer has no driving line" };
+        if (uid) updateGhost(ctx, layer.id, ghost.key, JSON.parse(uid));
+        const now = ctx.document.activeLayer.ghosts[0];
+        return { ok: true, line: now.label, samples: now.path.length, visible: now.visible !== false,
+          showNumbers: !!now.showNumbers, showAttempts: !!now.showAttempts, attemptOpacity: now.attemptOpacity ?? null };
       }
       if (action === "mood") {
         // uid doubles as the value slot: ?action=mood&uid=Night

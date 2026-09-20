@@ -889,10 +889,15 @@ input[type="number"] { font-family: Consolas, monospace; }
 .mod-share .hint { margin: 0; }
 
 /* Driving lines in the layer list */
-.line-row { border-left: 2px solid var(--line-hue, var(--teal)); margin-left: 10px; }
+/* Flush with the layer rows: the hue stripe is what marks a line, not an indent. */
+.line-row { border-left: 2px solid var(--line-hue, var(--teal)); }
 .line-row .layer-name { color: var(--line-hue, var(--ink-0)); }
 .line-swatch { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.line-pass { margin-left: 10px; padding-left: 26px; }
+.line-pass { padding-left: 26px; }
+/* Line settings: a slider that belongs to the checkbox above it. */
+.line-slider { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px 22px; font-size: 11px; color: var(--ink-1); }
+.line-slider input[type=range] { flex: 1; min-width: 0; accent-color: var(--teal); }
+.line-slider output { flex: 0 0 34px; text-align: right; font-family: Consolas, monospace; color: var(--ink-0); }
 .pass-badge { flex: 0 0 22px; text-align: center; font-size: 10px; font-weight: 700; padding: 1px 0; background: var(--bg-3); color: var(--ink-0); }
 .pass-badge.pass-start { background: var(--green-ok); color: var(--bg-void); }
 .pass-badge.pass-finish { background: var(--red); color: var(--bg-void); }

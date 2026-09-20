@@ -21,6 +21,8 @@ export interface AppEvents extends Record<string, unknown> {
   geometryLoaded: { name: string };
   /** The paint tool's active color changed. */
   paintColorChanged: { color: string };
+  /** The attempt-opacity slider of a driving line is being dragged (not saved yet). */
+  attemptOpacityPreview: { layerId: string; key: string; opacity: number };
   status: { text: string };
 }
 

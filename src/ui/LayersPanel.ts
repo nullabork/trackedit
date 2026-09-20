@@ -2,7 +2,8 @@ import type { EditorContext } from "@plugins/api";
 import { AddLayerCmd, RemoveLayerCmd, ReplacePlacementCmd, UpdateLayerCmd } from "@core/commands";
 import { Vector3 } from "three";
 import type { GhostPath, Layer, Placement } from "@core/layer";
-import { createLayer, isPlacementVisible, lineHue } from "@core/layer";
+import { DEFAULT_ATTEMPT_OPACITY, createLayer, isPlacementVisible, lineHue } from "@core/layer";
+import { splitGhostRuns } from "@core/ghostRuns";
 import type { WaypointPass } from "@core/waypoints";
 import { onPassesChanged, passesOf } from "@plugins/linePasses";
 import { frameDebugSubject } from "@render/debugView";
@@ -400,8 +401,22 @@ ${ghost.key}`;
     return el("label", { class: `check${disabled ? " disabled" : ""}`, title: title ?? "" }, input, el("span", {}, label));
   };
 
+  /** How see-through the attempts are. Dragging only restyles; the value is saved on release. */
+  const attemptSlider = (layer: Layer, ghost: GhostPath) => {
+    const value = Math.round((ghost.attemptOpacity ?? DEFAULT_ATTEMPT_OPACITY) * 100);
+    const input = el("input", { type: "range", min: "5", max: "100", step: "5", value: String(value), "aria-label": "Attempt opacity" });
+    const out = el("output", {}, `${value}%`);
+    input.addEventListener("input", () => {
+      out.textContent = `${input.value}%`;
+      ctx.events.emit("attemptOpacityPreview", { layerId: layer.id, key: ghost.key, opacity: Number(input.value) / 100 });
+    });
+    input.addEventListener("change", () => updateGhost(ctx, layer.id, ghost.key, { attemptOpacity: Number(input.value) / 100 }));
+    return el("label", { class: "line-slider", title: "How solid the attempts are drawn" }, el("span", {}, "Opacity"), input, out);
+  };
+
   /** Settings of the selected driving line. */
   const renderLineSettings = (layer: Layer, ghost: GhostPath, index: number) => {
+    const attempts = splitGhostRuns(ghost.path, ghost.times, ghost.checkpoints).attempts.length;
     const passes = passesOf(ctx, layer, ghost);
     const checkpoints = passes.filter((p) => p.number !== null).length;
     const swatch = el("span", { class: "line-swatch" });
@@ -417,6 +432,12 @@ ${ghost.key}`;
         (v) => updateGhost(ctx, layer.id, ghost.key, { showNumbers: v }),
         "A tag at every start, checkpoint and finish the line passes, counted in driving order and drawn over the map so it can be found from anywhere"),
       checkbox("Show the line", ghost.visible !== false, false, (v) => updateGhost(ctx, layer.id, ghost.key, { visible: v })),
+      checkbox(`Show attempts${attempts ? ` (${attempts})` : ""}`, !!ghost.showAttempts, !attempts,
+        (v) => updateGhost(ctx, layer.id, ghost.key, { showAttempts: v }),
+        attempts
+          ? "Also draw the tries that ended in a respawn before the next checkpoint. The line itself is only what got the driver to the next checkpoint."
+          : ghost.times && ghost.checkpoints?.length ? "This run has no failed tries: it never respawned." : "This line was saved without its timing; reload it to tell attempts apart."),
+      ...(ghost.showAttempts && attempts ? [attemptSlider(layer, ghost)] : []),
       el("p", { class: "hint" },
         "Expand the line in the list for the waypoints it passes, in order; double-click one to go there. " +
         "A respawn onto a checkpoint is not counted again."),
