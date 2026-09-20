@@ -333,6 +333,52 @@ variant 2 was 4.2 m off and wanted a quarter turn, and that the loop end's
 shell was 16 m off in its base variant. Deco-wall family under both tests:
 138 blocks flagged -> 118, none newly flagged.
 
+## 5h. A hole in a loop end: ghost blocks, unread clip flags, and asking the game (RHEVARA)
+
+**Report.** `DecoWallLoopEndIce` at [11,16,12] (dir 2, variant 2): "there is still some
+surface or shell missing". In air this block has NO body mesh at all — it is eight clip
+pieces (four flat back walls, two curved side panels, top plate, underside). The editor
+hid five of them: the back walls as "joined" to the `DecoWallBaseVFC` backs of the
+`PlatformTechLoopStart` and `DecoWallBasePillar` behind it, one side panel as joined to
+the next loop end. What is left is a panel, a plate and a view into the structure.
+
+**What the rule did not know.**
+
+1. *Ghost blocks.* The selected block carries flag bit 28 — placed in ghost mode, which
+   is how it can share cells with its neighbours. 7,493 of the map's 24,514 blocks are
+   ghost blocks, and `clipAdjacency` has never looked at the flag. Ghost blocks live
+   outside the editor's grid (`PluginMapType.GhostBlocks` is a separate list), so the
+   likely game rule is: a ghost block keeps all its clips and hides nobody else's.
+   On this map that flips **46,067 of 139,072** clip decisions (hidden 109,134 -> 63,067)
+   — far too many to change on a hunch, in either direction.
+2. *Clip flags never read.* `meshdump clipflags <GameData>` lists every clip definition
+   with the fields the game decides by. Besides group / symmetrical group we had used,
+   there are `IsFullFreeClip` (10 clips: the full wall panels, e.g. `DecoWallBaseVFC`,
+   `PlatformBaseFCT`), `CanBeDeletedByFullFreeClip` (217), `IsExclusiveFreeClip` (6) and
+   `ASymmetricalClipId` (488, the Left<->Right pairs). The names say the join is NOT
+   symmetric: a full free clip deletes a deletable neighbour; a partial panel (the curved
+   `DecoWallLoopEndVFCLeft/Right`: not full, not deletable) is not deleted by a wall.
+   Our rule hides both sides of any same-group pair. Also: for vertical clips the
+   extractor sets `sym = group`, which throws away the real `SymmetricalClipGroupId`
+   (`...VFCLeft` names `...VFCRight`).
+
+**Ground truth instead of a third heuristic.** Map files store no clip blocks (checked
+four maps: 0), but the running editor holds them — `TrackeditLive/Sync.as` had been
+filtering `BlockInfo.IsClip` out all along. `tools/TrackeditTruth` is a dependency-free
+Openplanet plugin: Plugins menu -> "Trackedit Truth (dump clip blocks)" writes every clip
+block (name, cell, direction, classic or ghost list) of the map open in the editor to
+`OpenplanetNext/PluginStorage/TrackeditTruth/clips-<uid>.json`.
+`npm run cliptruth -- <map.Map.Gbx>` then compares clip by clip:
+
+- MISSING (game shows, we hide) and EXTRA (we show, game does not), grouped by clip and block;
+- agreement of the current rule AND of the "ghost blocks are off the grid" rule, split by
+  ghost / normal blocks, so the dump picks the rule rather than us;
+- for every top/bottom clip the game's direction relative to its block — the table the
+  extractor's cap shape-fit (5e) has to reproduce, or be replaced by.
+
+Nothing in the editor's rule was changed for this report. The order is: dump, read the
+numbers, change the rule once, re-run until MISSING and EXTRA are 0.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

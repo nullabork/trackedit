@@ -88,6 +88,23 @@ switch (args[0])
         }
         var dumper = new Dumper(args[1], args[2], args.Length > 3 ? args[3] : null);
         return args[0] == "blocks" ? dumper.DumpBlocks() : dumper.DumpItems();
+    case "clipflags":
+        {
+            // meshdump clipflags <GameDataRoot> [out.tsv] — every clip definition's rule
+            // fields (the game's own inputs for which clip shows against which neighbour).
+            var dir = Path.Combine(args[1], "GameCtnBlockInfo", "GameCtnBlockInfoClip");
+            var lines = new List<string> { "id\tkind\tclipType\tfullFree\texclusiveFree\tdeletedByFullFree\tgroup\tsymGroup\tasymId\tmultiDir" };
+            foreach (var f in Directory.EnumerateFiles(dir, "*.Gbx").OrderBy(f => f, StringComparer.Ordinal))
+            {
+                if (Gbx.ParseNode(f) is not CGameCtnBlockInfoClip c) continue;
+                var group = (c as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId ?? (c as CGameCtnBlockInfoClipHorizontal)?.HorizontalClipGroupId ?? c.ClipGroupId;
+                lines.Add(string.Join('\t', c.Ident.Id, c.GetType().Name.Replace("CGameCtnBlockInfoClip", "") is { Length: > 0 } k ? k : "Clip", c.ClipType, c.IsFullFreeClip, c.IsExclusiveFreeClip,
+                    c.CanBeDeletedByFullFreeClip, group, c.SymmetricalClipGroupId, c.ASymmetricalClipId, c.TopBottomMultiDir));
+            }
+            if (args.Length > 2) File.WriteAllLines(args[2], lines);
+            else foreach (var l in lines) Console.WriteLine(l);
+            return 0;
+        }
     case "clipinfo":
         // meshdump clipinfo <GameDataRoot> <ClipId> — raw (unplaced) bounds of a
         // clip's geometry per variant, for checking attachment conventions.
