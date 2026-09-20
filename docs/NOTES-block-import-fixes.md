@@ -283,6 +283,8 @@ outline test is too blunt for. Go through them before trusting the count.
 
 ## 5f. Dark plates poking through snow: caps are FREE clips (RHEVARA)
 
+> **Superseded by 5h:** the game keeps a cap that another block overlaps (500 of 500 in its baked clips); the "swallowed cap" rule and `clipcheck` are gone.
+
 Report: dark wedges all over a snowy slope; "rotations are wrong or sections
 should not be rendered". The isolated block (`DecoWallSlope2StraightIce`)
 shows what they are: its sloped TOP CAP, which is dark concrete
@@ -309,6 +311,8 @@ would open a hole.
 
 ## 5g. Two corrections the next day (RHEVARA, the arch over a platform)
 
+> **Superseded by 5h:** the game keeps a cap that another block overlaps (500 of 500 in its baked clips); the "swallowed cap" rule and `clipcheck` are gone.
+
 **The cap rule of 5f was too broad.** "Hidden whenever the cell it faces is
 occupied" also removed the underside of `DecoWallArchSlope2EndIce` — the arch
 IS its bottom piece, and a platform merely stands in the cell below. The two
@@ -333,51 +337,69 @@ variant 2 was 4.2 m off and wanted a quarter turn, and that the loop end's
 shell was 16 m off in its base variant. Deco-wall family under both tests:
 138 blocks flagged -> 118, none newly flagged.
 
-## 5h. A hole in a loop end: ghost blocks, unread clip flags, and asking the game (RHEVARA)
+## 5h. The game's own clips are IN the map file — the clip rule, measured (RHEVARA)
 
-**Report.** `DecoWallLoopEndIce` at [11,16,12] (dir 2, variant 2): "there is still some
-surface or shell missing". In air this block has NO body mesh at all — it is eight clip
-pieces (four flat back walls, two curved side panels, top plate, underside). The editor
-hid five of them: the back walls as "joined" to the `DecoWallBaseVFC` backs of the
-`PlatformTechLoopStart` and `DecoWallBasePillar` behind it, one side panel as joined to
-the next loop end. What is left is a panel, a plate and a view into the structure.
+**Report.** `DecoWallLoopEndIce` at [11,16,12]: "there is still some surface or shell
+missing", and: "surely the game has a standard format for rendering, not 100s of edge
+cases". It has. We had been guessing at it.
 
-**What the rule did not know.**
+**Where the truth is.** Not in the editor's block lists (an Openplanet dump of
+`PluginMapType.ClassicBlocks/GhostBlocks` on RHEVARA: 24,919 blocks, 0 clips — the
+`IsClip` filter in TrackeditLive was defensive, not evidence; that plugin experiment is
+deleted again). It is in the map FILE: `CGameCtnChallenge.BakedBlocks` — 31,648 entries in
+RHEVARA, every clip block the game generated, with name, cell and direction.
+`meshdump baked <map> [out.json]` dumps them. (5f's "map files store no clip blocks"
+looked at `Blocks` only. trackedit's own saves clear the list; the game rebuilds it.)
 
-1. *Ghost blocks.* The selected block carries flag bit 28 — placed in ghost mode, which
-   is how it can share cells with its neighbours. 7,493 of the map's 24,514 blocks are
-   ghost blocks, and `clipAdjacency` has never looked at the flag. Ghost blocks live
-   outside the editor's grid (`PluginMapType.GhostBlocks` is a separate list), so the
-   likely game rule is: a ghost block keeps all its clips and hides nobody else's.
-   On this map that flips **46,067 of 139,072** clip decisions (hidden 109,134 -> 63,067)
-   — far too many to change on a hunch, in either direction.
-2. *Clip flags never read.* `meshdump clipflags <GameData>` lists every clip definition
-   with the fields the game decides by. Besides group / symmetrical group we had used,
-   there are `IsFullFreeClip` (10 clips: the full wall panels, e.g. `DecoWallBaseVFC`,
-   `PlatformBaseFCT`), `CanBeDeletedByFullFreeClip` (217), `IsExclusiveFreeClip` (6) and
-   `ASymmetricalClipId` (488, the Left<->Right pairs). The names say the join is NOT
-   symmetric: a full free clip deletes a deletable neighbour; a partial panel (the curved
-   `DecoWallLoopEndVFCLeft/Right`: not full, not deletable) is not deleted by a wall.
-   Our rule hides both sides of any same-group pair. Also: for vertical clips the
-   extractor sets `sym = group`, which throws away the real `SymmetricalClipGroupId`
-   (`...VFCLeft` names `...VFCRight`).
+**Measured conventions.** A clip block sits in the cell it FACES, not in its unit's cell
+(26,915 vs 859 name matches); a side clip points back at its block (face direction +180°:
+15,654 of 15,927).
 
-**Ground truth instead of a third heuristic.** Map files store no clip blocks (checked
-four maps: 0), but the running editor holds them — `TrackeditLive/Sync.as` had been
-filtering `BlockInfo.IsClip` out all along. `tools/TrackeditTruth` is a dependency-free
-Openplanet plugin: Plugins menu -> "Trackedit Truth (dump clip blocks)" writes every clip
-block (name, cell, direction, classic or ghost list) of the map open in the editor to
-`OpenplanetNext/PluginStorage/TrackeditTruth/clips-<uid>.json`.
-`npm run cliptruth -- <map.Map.Gbx>` then compares clip by clip:
+**The rule** — `npm run cliptruth -- <map> --explain` tabulates, per situation, what the
+game did. What fell out, all from fields of the clip DEFINITIONS that the extractor had
+never read (`meshdump clipflags` lists them; `clipdefs.json` ships them, 1,848 clips
+including the `Theme/` and `Deprecated/` subfolders the first pass missed):
 
-- MISSING (game shows, we hide) and EXTRA (we show, game does not), grouped by clip and block;
-- agreement of the current rule AND of the "ghost blocks are off the grid" rule, split by
-  ghost / normal blocks, so the dump picks the rule rather than us;
-- for every top/bottom clip the game's direction relative to its block — the table the
-  extractor's cap shape-fit (5e) has to reproduce, or be replaced by.
+| field | meaning |
+|---|---|
+| `ASymmetricalClipId` | mates with exactly that clip (curve cap top <-> bottom) |
+| `SymmetricalClipGroupId` | mates with clips of THAT group (top plate <-> underside, Left <-> Right) |
+| `ClipGroupId` | without the two above: mates within its own group; no group: with itself |
+| `IsFullFreeClip` / `CanBeDeletedByFullFreeClip` | a deletable clip facing a FULL clip is gone — one way only |
 
-Nothing in the editor's rule was changed for this report. The order is: dump, read the
-numbers, change the rule once, re-run until MISSING and EXTRA are 0.
+A clip is hidden iff a clip on the face looking back at it mates with it or deletes it.
+Nothing else: not a block that merely stands in the faced cell, not one overlapping the
+clip's own cell, and ghost blocks (7,493 of RHEVARA's 24,514) count like any other —
+"ghost blocks are off the grid" scored 63%.
+
+| rule | RHEVARA, 139,072 clips | 7 cached maps, 176,343 clips |
+|---|---|---|
+| before (shared group or id; swallowed caps; `VerticalClipGroupId` used as the group) | 93.5% | — |
+| definitions, partner must agree too | | 99.64% |
+| definitions, the clip's own fields decide (shipped) | 99.8% | **99.65%** (624 differ) |
+
+What the old rule got wrong, by size: deletable clips facing a full wall left showing
+(~3,600); full walls hidden against partial panels of the same *vertical* group (~1,400,
+the game keeps both); caps "swallowed" by an overlapping block hidden (5f/5g — the game
+shows 500 of 500, that fix was wrong and is gone); caps facing a non-mating cap.
+
+**The reported block itself** comes out the same as before — and the same as the game:
+the baked clips around it are exactly its curved west panel, top plate and underside. Its
+four back walls really are deleted (full wall against the loop start's full wall). What
+looks open there is decided by the neighbours' clips, which is where the rule changed.
+
+**Still open (624 clips, 0.35%).** Road ends against platform edge trims
+(`OpenTechRoadFC` + zone clips facing `PlatformFCSmall`: the game drops both, no field we
+read says so); `...ACLeft/Right` "anti clips" (`sym: PlatformFCSmallAntiClips`); caps
+whose mating depends on direction — `TopBottomMultiDir` (SameDir / SymmetricalDirs /
+AllDir) is a condition on the two caps' directions, and index.json does not carry a cap's
+direction yet. The baked blocks DO (cliptruth prints each cap's direction relative to its
+block), which is also the ground truth the extractor's cap shape-fit (5e) should be
+checked against next, instead of `capcheck`'s outline heuristic.
+
+**Tooling.** `npm run cliptruth` (all cached maps, totals; one map for detail; `--explain`
+for the situation table and the wrong pairs) replaces `clipcheck`, whose one assertion
+("no cap shown inside another block") the game contradicts.
 
 ## 6. Lessons
 

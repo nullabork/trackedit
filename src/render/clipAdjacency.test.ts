@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  clipsConnect, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, unrotateByDir,
+  clipHiddenBy, clipsConnect, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, unrotateByDir, withClipDefs,
 } from "./clipAdjacency";
 import type { BlockClipInfo, ClipSubject, UnitClip } from "./clipAdjacency";
 import type { Dir, GridCoord } from "@core/math";
@@ -52,13 +52,44 @@ describe("unit cells", () => {
   });
 });
 
-describe("clip groups", () => {
-  const a: UnitClip = { u: [0, 0, 0], face: "east", id: "A", group: "g1" };
-  it("join on a shared group, on the symmetrical group, or on identity", () => {
-    expect(clipsConnect(a, { u: [0, 0, 0], face: "west", id: "B", group: "g1" })).toBe(true);
-    expect(clipsConnect(a, { u: [0, 0, 0], face: "west", id: "B", group: "g2", sym: "g1" })).toBe(true);
-    expect(clipsConnect({ ...a, group: undefined }, { u: [0, 0, 0], face: "west", id: "A" })).toBe(true);
-    expect(clipsConnect(a, { u: [0, 0, 0], face: "west", id: "B", group: "g2" })).toBe(false);
+describe("clip mating (the game's definition fields)", () => {
+  const clip = (id: string, def: Partial<UnitClip> = {}): UnitClip => ({ u: [0, 0, 0], face: "east", id, ...def });
+  it("a shared group mates", () => {
+    const wall = clip("DecoWallBaseVFC", { group: "DecoWallBaseVFC" });
+    expect(clipsConnect(wall, clip("PlatformBaseVFC", { group: "DecoWallBaseVFC" }))).toBe(true);
+    expect(clipsConnect(wall, clip("Other", { group: "g2" }))).toBe(false);
+    // The clip's OWN definition decides; what the other one asks for does not matter.
+    expect(clipsConnect(clip("PlatformDiag1FCLeft", { group: "Small" }), clip("PlatformWaterFCSmall", { group: "Small", sym: "Small" }))).toBe(true);
+  });
+  it("a symmetrical group mates with THAT group only: top plate with underside, not with another top plate", () => {
+    const top = clip("PlatformBaseFCT", { group: "PlatformBaseFCT", sym: "PlatformBaseFCB" });
+    expect(clipsConnect(top, clip("PlatformBaseFCB", { group: "PlatformBaseFCB", sym: "PlatformBaseFCT" }))).toBe(true);
+    expect(clipsConnect(top, top)).toBe(false);
+  });
+  it("an asymmetrical clip mates with exactly its partner: Left with Right", () => {
+    const left = clip("DecoWallCurve1FCT", { asym: "DecoWallCurve1FCB" });
+    expect(clipsConnect(left, clip("DecoWallCurve1FCB", { asym: "DecoWallCurve1FCT" }))).toBe(true);
+    expect(clipsConnect(left, left)).toBe(false);
+  });
+  it("without any of these fields a clip mates with itself", () => {
+    expect(clipsConnect(clip("A"), clip("A"))).toBe(true);
+    expect(clipsConnect(clip("A"), clip("B"))).toBe(false);
+  });
+  it("a full free clip deletes a deletable clip facing it — and only that way round", () => {
+    const full = clip("DecoWallBaseVFC", { group: "DecoWallBaseVFC", full: true, deletable: true });
+    const trim = clip("SomeTrim", { deletable: true });
+    const panel = clip("DecoWallLoopEndVFCLeft", { group: "DecoWallLoopEndVFCLeft", sym: "DecoWallLoopEndVFCRight" });
+    expect(clipHiddenBy(trim, full)).toBe(true);
+    expect(clipHiddenBy(full, trim)).toBe(false);
+    // A full wall and a partial panel both stay (the game keeps 100% of these).
+    expect(clipHiddenBy(full, panel)).toBe(false);
+    expect(clipHiddenBy(panel, full)).toBe(false);
+  });
+  it("definitions replace whatever index.json guessed", () => {
+    const guessed: UnitClip = { u: [0, 3, 0], face: "east", id: "DecoWallLoopEndVFCLeft", group: "DecoWallBaseVFC", sym: "DecoWallBaseVFC", vertical: true };
+    expect(withClipDefs([guessed], { DecoWallLoopEndVFCLeft: { group: "DecoWallLoopEndVFCLeft", sym: "DecoWallLoopEndVFCRight" } }))
+      .toEqual([{ u: [0, 3, 0], face: "east", id: "DecoWallLoopEndVFCLeft", vertical: true, group: "DecoWallLoopEndVFCLeft", sym: "DecoWallLoopEndVFCRight" }]);
+    expect(withClipDefs([guessed], {})).toEqual([{ u: [0, 3, 0], face: "east", id: "DecoWallLoopEndVFCLeft", vertical: true }]);
   });
 });
 
@@ -120,12 +151,13 @@ describe("caps inside another block", () => {
     expect(hiddenClipParts(wall, world(wall))).toEqual(new Set());
   });
 
-  it("drops a cap swallowed by a block that fills its cell and the one it faces", () => {
-    // RHEVARA: a hill shares the deco-wall slope's cells and reaches one cell
-    // higher — the wall's dark top plate poked through the snow.
+  it("keeps a cap that another block overlaps", () => {
+    // RHEVARA: a hill shares the deco-wall slope's cells and reaches one cell higher.
+    // We used to drop the wall's top plate here; the game's baked clips keep it in
+    // 500 of 500 such cases — only a mating clip removes a cap.
     const wall = at([9, 20, 16], 0, wallSlope());
     const snow = at([9, 20, 16], 3, hill());
-    expect(hiddenClipParts(wall, (cell) => world(snow)(cell))).toEqual(new Set(["clip:DecoWallSlope2StraightFCT:top:0,1,0"]));
+    expect(hiddenClipParts(wall, (cell) => world(snow)(cell))).toEqual(new Set());
   });
 
   it("keeps a cap over a mere neighbour that does not join it", () => {

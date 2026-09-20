@@ -88,18 +88,44 @@ switch (args[0])
         }
         var dumper = new Dumper(args[1], args[2], args.Length > 3 ? args[3] : null);
         return args[0] == "blocks" ? dumper.DumpBlocks() : dumper.DumpItems();
+    case "baked":
+        {
+            // meshdump baked <map.Map.Gbx> [out.json] — the blocks the GAME generated and stored
+            // with the map: clip pieces (and auto pillars) with cell and direction, plus the
+            // per-cell clip data. The game's own answer to which clips show and how they face.
+            var map = Gbx.ParseNode<CGameCtnChallenge>(args[1]);
+            var baked = (map.BakedBlocks ?? []).Select(b => new Dictionary<string, object?>
+            {
+                ["name"] = b.Name, ["coord"] = new[] { b.Coord.X, b.Coord.Y, b.Coord.Z }, ["dir"] = (int)b.Direction,
+                ["flags"] = b.Flags, ["isGround"] = b.IsGround, ["isGhost"] = b.IsGhost, ["isClip"] = b.IsClip, ["variant"] = b.Variant, ["subVariant"] = b.SubVariant,
+            }).ToList();
+            var extra = (map.BakedClipsAdditionalData ?? []).Select(c => new Dictionary<string, object?>
+            {
+                ["coord"] = new[] { c.Coord.X, c.Coord.Y, c.Coord.Z },
+                ["clips"] = new[] { c.Clip1?.Id, c.Clip2?.Id, c.Clip3?.Id, c.Clip4?.Id },
+            }).ToList();
+            var json = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?> { ["mapName"] = map.MapName, ["baked"] = baked, ["clipData"] = extra });
+            if (args.Length > 2) File.WriteAllText(args[2], json);
+            Console.WriteLine($"{map.MapName}: {map.Blocks?.Count ?? 0} blocks, {baked.Count} baked blocks ({baked.Count(b => (bool)b["isClip"]!)} clips), {extra.Count} cells of clip data");
+            foreach (var g in baked.GroupBy(b => (string)b["name"]!).OrderByDescending(g => g.Count()).Take(15)) Console.WriteLine($"  {g.Count(),6} x {g.Key}");
+            return 0;
+        }
+    case "clipdefs":
+        // meshdump clipdefs <GameDataRoot> <meshesDir> — (re)write clipdefs.json alone; a
+        // block extraction writes it too.
+        return Dumper.WriteClipDefs(args[1], args[2]);
     case "clipflags":
         {
             // meshdump clipflags <GameDataRoot> [out.tsv] — every clip definition's rule
             // fields (the game's own inputs for which clip shows against which neighbour).
             var dir = Path.Combine(args[1], "GameCtnBlockInfo", "GameCtnBlockInfoClip");
-            var lines = new List<string> { "id\tkind\tclipType\tfullFree\texclusiveFree\tdeletedByFullFree\tgroup\tsymGroup\tasymId\tmultiDir" };
-            foreach (var f in Directory.EnumerateFiles(dir, "*.Gbx").OrderBy(f => f, StringComparer.Ordinal))
+            var lines = new List<string> { "id\tkind\tclipType\tfullFree\texclusiveFree\tdeletedByFullFree\tgroup\tsymGroup\tasymId\tmultiDir\tclipGroup\tverticalGroup\thorizontalGroup" };
+            foreach (var f in Directory.EnumerateFiles(dir, "*.Gbx", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
             {
                 if (Gbx.ParseNode(f) is not CGameCtnBlockInfoClip c) continue;
                 var group = (c as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId ?? (c as CGameCtnBlockInfoClipHorizontal)?.HorizontalClipGroupId ?? c.ClipGroupId;
                 lines.Add(string.Join('\t', c.Ident.Id, c.GetType().Name.Replace("CGameCtnBlockInfoClip", "") is { Length: > 0 } k ? k : "Clip", c.ClipType, c.IsFullFreeClip, c.IsExclusiveFreeClip,
-                    c.CanBeDeletedByFullFreeClip, group, c.SymmetricalClipGroupId, c.ASymmetricalClipId, c.TopBottomMultiDir));
+                    c.CanBeDeletedByFullFreeClip, group, c.SymmetricalClipGroupId, c.ASymmetricalClipId, c.TopBottomMultiDir, c.ClipGroupId, (c as CGameCtnBlockInfoClipVertical)?.VerticalClipGroupId, (c as CGameCtnBlockInfoClipHorizontal)?.HorizontalClipGroupId));
             }
             if (args.Length > 2) File.WriteAllLines(args[2], lines);
             else foreach (var l in lines) Console.WriteLine(l);
@@ -1585,6 +1611,34 @@ sealed class Dumper(string root, string outDir, string? filter)
             Console.WriteLine($"  progress {processed}/{total}");
     }
 
+    /// <summary>
+    /// clipdefs.json: per clip definition, the fields the game decides clip visibility by.
+    /// A clip is hidden when the clip facing it MATES with it — its ASymmetricalClipId names
+    /// that clip, else its SymmetricalClipGroupId names that clip's group, else both share a
+    /// ClipGroupId — or when it CanBeDeletedByFullFreeClip and the facing clip IsFullFreeClip.
+    /// Checked against the clip blocks the game bakes into map files (npm run cliptruth).
+    /// </summary>
+    public static int WriteClipDefs(string gameData, string meshesDir)
+    {
+        var dir = Path.Combine(gameData, "GameCtnBlockInfo", "GameCtnBlockInfoClip");
+        if (!Directory.Exists(dir)) { Console.Error.WriteLine($"no clip definitions under {dir}"); return 1; }
+        var defs = new JsonObject();
+        foreach (var f in Directory.EnumerateFiles(dir, "*.Gbx", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
+        {
+            if (Gbx.ParseNode(f) is not CGameCtnBlockInfoClip c) continue;
+            var def = new JsonObject();
+            if (!string.IsNullOrEmpty(c.ClipGroupId)) def["group"] = c.ClipGroupId;
+            if (!string.IsNullOrEmpty(c.SymmetricalClipGroupId)) def["sym"] = c.SymmetricalClipGroupId;
+            if (!string.IsNullOrEmpty(c.ASymmetricalClipId)) def["asym"] = c.ASymmetricalClipId;
+            if (c.IsFullFreeClip) def["full"] = true;
+            if (c.CanBeDeletedByFullFreeClip) def["deletable"] = true;
+            defs[c.Ident.Id] = def;
+        }
+        File.WriteAllText(Path.Combine(meshesDir, "clipdefs.json"), defs.ToJsonString());
+        Console.WriteLine($"clipdefs.json: {defs.Count} clip definitions");
+        return 0;
+    }
+
     private JsonObject LoadIndex()
     {
         var path = Path.Combine(outDir, "index.json");
@@ -1608,6 +1662,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                 target[name] = entry?.DeepClone();
         }
         File.WriteAllText(Path.Combine(outDir, "index.json"), current.ToJsonString());
+        WriteClipDefs(root, outDir);
         WriteMaterials();
         Console.WriteLine($"done: {ok} exported, {skipped} skipped, {failed} failed -> {outDir}");
     }

@@ -11,7 +11,8 @@ import {
   TextureLoader,
 } from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
-import type { BlockClipInfo, UnitClip } from "./clipAdjacency";
+import { withClipDefs } from "./clipAdjacency";
+import type { BlockClipInfo, ClipDefs, UnitClip } from "./clipAdjacency";
 import { paintHex, setColorTables } from "@core/palettes";
 import type { ColorTables } from "@core/palettes";
 import type { BlockDef } from "@core/catalog";
@@ -128,6 +129,8 @@ export function canonicalMaterialName(name: string): string {
  */
 export class MeshProvider implements GeometryProvider {
   private index: MeshIndex | null = null;
+  private clipDefs: ClipDefs = {};
+  private readonly clipInfos = new Map<string, BlockClipInfo>();
   private materialIndex: MaterialIndex = {};
   private cache = new Map<string, Object3D>();
   private pending = new Set<string>();
@@ -439,6 +442,9 @@ export class MeshProvider implements GeometryProvider {
       this.index = (await res.json()) as MeshIndex;
       const mats = await fetch(this.baseUrl + "materials.json");
       if (mats.ok) this.materialIndex = (await mats.json()) as MaterialIndex;
+      const defs = await fetch(this.baseUrl + "clipdefs.json");
+      if (defs.ok) this.clipDefs = (await defs.json()) as ClipDefs;
+      else console.warn("meshes/clipdefs.json is missing — clip pieces cannot be hidden correctly; run `meshdump clipdefs` or re-extract the blocks");
       const tables = await fetch(this.baseUrl + "colortables.json");
       if (tables.ok) setColorTables((await tables.json()) as ColorTables);
       return true;
@@ -450,13 +456,17 @@ export class MeshProvider implements GeometryProvider {
   blockClips(name: string, variant: MeshVariant): BlockClipInfo | undefined {
     const entry = this.index?.blocks[name];
     if (!entry) return undefined;
+    const cached = this.clipInfos.get(name + KEY_SEP + variant);
+    if (cached) return cached;
     // A variant without its own table borrows its base's, then the other
     // base's (several blocks model only air or only ground).
     const base = baseVariant(variant);
     const other = base === "air" ? "ground" : "air";
     const units = entry.units?.[variant] ?? entry.units?.[base] ?? entry.units?.[other] ?? [];
     const clips = entry.clips?.[variant] ?? entry.clips?.[base] ?? entry.clips?.[other] ?? [];
-    return { size: entry.size ?? [1, 1, 1], units, clips };
+    const info: BlockClipInfo = { size: entry.size ?? [1, 1, 1], units, clips: withClipDefs(clips, this.clipDefs) };
+    this.clipInfos.set(name + KEY_SEP + variant, info);
+    return info;
   }
 
   /** Footprint sizes from the extraction, for catalog enrichment. */

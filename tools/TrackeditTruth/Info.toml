@@ -1,6 +1,0 @@
-[meta]
-name = "Trackedit Truth"
-author = "trackedit"
-category = "Map Editor"
-version = "0.1.0"
-description = "Developer aid: dumps the clip blocks the game editor generated for the open map, for trackedit's verification tools."

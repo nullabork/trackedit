@@ -6,10 +6,17 @@ import type { Dir, GridCoord } from "@core/math";
  *
  * Every unit face of a block can carry clips: caps the game shows only while
  * that side is open (platform edge trims, the "turbines" on the ends of
- * special platforms, deco walls, base undersides). When the block next
- * door carries a clip of the same clip group on its facing side, the two
- * connect and both caps vanish, so the surfaces tile. Maps store nothing
- * about this — the game derives it from neighbours, and so do we.
+ * special platforms, deco walls, base undersides). The rule is the game's
+ * own, read from its clip definitions (clipdefs.json, see `ClipDef`): a clip
+ * vanishes when the clip facing it MATES with it, or when it can be deleted
+ * by a full free clip and the one facing it is one. Nothing else hides a
+ * clip — not a block that merely stands in the faced cell, not one that
+ * overlaps the clip's own cell, and ghost blocks count like any other.
+ *
+ * Verified, not assumed: the game bakes the clip blocks it generated into
+ * every map file, and `npm run cliptruth` compares ours with them clip by
+ * clip (99.8% on a 24,500-block map; the older group-and-overlap heuristics
+ * reached 93.5%).
  *
  * Geometry comes from meshdump with each clip as its own OBJ group named
  * `clip:<id>:<face>:<x,y,z>`; index.json lists the units and clips per
@@ -23,10 +30,37 @@ export interface UnitClip {
   u: [number, number, number];
   face: ClipFace;
   id: string;
-  group?: string;
-  /** The group this clip joins with, when different from its own. */
-  sym?: string;
   vertical?: boolean;
+  /** From the clip's definition — see `ClipDef`; filled in by `withClipDefs`. */
+  group?: string;
+  sym?: string;
+  asym?: string;
+  full?: boolean;
+  deletable?: boolean;
+}
+
+/** A clip definition's rule fields (meshdump writes them to clipdefs.json). */
+export interface ClipDef {
+  /** ClipGroupId: clips of one group mate with each other. */
+  group?: string;
+  /** SymmetricalClipGroupId: mates with clips of THAT group instead (top plate <-> underside). */
+  sym?: string;
+  /** ASymmetricalClipId: mates with exactly that clip (a Left panel with its Right). */
+  asym?: string;
+  /** IsFullFreeClip: covers its whole face — deletes a deletable clip facing it. */
+  full?: boolean;
+  /** CanBeDeletedByFullFreeClip. */
+  deletable?: boolean;
+}
+export type ClipDefs = Record<string, ClipDef | undefined>;
+
+/**
+ * Clips with their definitions' rule fields. index.json's own `group`/`sym`
+ * (an extractor-side guess from before the definitions were read in full)
+ * are dropped, never mixed in.
+ */
+export function withClipDefs(clips: readonly UnitClip[], defs: ClipDefs): UnitClip[] {
+  return clips.map(({ u, face, id, vertical }) => ({ u, face, id, vertical, ...defs[id] }));
 }
 
 export interface BlockClipInfo {
@@ -106,12 +140,23 @@ export function faceToward(worldNormal: readonly [number, number, number], dir: 
   return null;
 }
 
-/** Two facing clips join when they share a clip group (or one names the other's). */
+/**
+ * Does clip `a` mate with the clip `b` facing it? By `a`'s definition: a named
+ * partner clip, or a partner group; without either, its own group, or — with
+ * no group at all — the same clip. One-directional on purpose: measured
+ * against the game's baked clips, asking `b` to agree as well (or instead)
+ * is worse.
+ */
 export function clipsConnect(a: UnitClip, b: UnitClip): boolean {
-  if (a.id === b.id) return true;
-  if (a.group && (a.group === b.group || a.group === b.sym)) return true;
-  if (a.sym && a.sym === b.group) return true;
-  return false;
+  if (a.asym && b.id === a.asym) return true;
+  if (a.sym && b.group === a.sym) return true;
+  if (a.sym || a.asym) return false;
+  return a.group ? b.group === a.group : a.id === b.id;
+}
+
+/** Is clip `a` gone because of the clip `b` facing it? */
+export function clipHiddenBy(a: UnitClip, b: UnitClip): boolean {
+  return clipsConnect(a, b) || (a.deletable === true && b.full === true);
 }
 
 /** OBJ group name meshdump gives a clip's geometry. */
@@ -137,16 +182,8 @@ export function hiddenClipParts(
       const unit = (other.info.units.length ? other.info.units : [[0, 0, 0] as [number, number, number]])
         .find((u) => cellKey(unitCell(other.pose, other.info.size, u)) === cellKey(target));
       if (!unit) continue;
-      // A top or bottom cap INSIDE another block is gone, clip partner or not:
-      // a snow hill sharing a deco-wall slope's cells and reaching one cell
-      // higher swallows the wall's dark top plate (the hill has no clips at
-      // all). "Inside" = the other block fills the cap's own cell AND the cell
-      // it faces. A mere neighbour does not count — an arch keeps its underside
-      // over a platform that stands in the cell below — it has to join.
-      const cap = clip.face === "top" || clip.face === "bottom";
-      const swallows = cap && occupiedCells(other).some((c) => cellKey(c) === cellKey(cell));
-      const joins = swallows || other.info.clips.some((d) =>
-        d.face === face && d.u[0] === unit[0] && d.u[1] === unit[1] && d.u[2] === unit[2] && clipsConnect(clip, d));
+      const joins = other.info.clips.some((d) =>
+        d.face === face && d.u[0] === unit[0] && d.u[1] === unit[1] && d.u[2] === unit[2] && clipHiddenBy(clip, d));
       if (joins) {
         hidden.add(clipPartName(clip));
         break;
