@@ -13,7 +13,8 @@
     "test": "vitest run",
     "roundtrip": "tsx tools/roundtrip_check.ts",
     "variantcheck": "tsx tools/variant_check.ts",
-    "capcheck": "python tools/cap_check.py"
+    "capcheck": "python tools/cap_check.py",
+    "clipcheck": "tsx tools/clip_check.ts"
   },
   "dependencies": {
     "three": "^0.168.0"

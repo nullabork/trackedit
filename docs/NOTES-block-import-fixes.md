@@ -281,6 +281,32 @@ Open: 85 deco-wall blocks (slopes, loop starts, tilt transitions) are flagged
 under every rule — either real, or sloped multi-unit shapes the top-view
 outline test is too blunt for. Go through them before trusting the count.
 
+## 5f. Dark plates poking through snow: caps are FREE clips (RHEVARA)
+
+Report: dark wedges all over a snowy slope; "rotations are wrong or sections
+should not be rendered". The isolated block (`DecoWallSlope2StraightIce`)
+shows what they are: its sloped TOP CAP, which is dark concrete
+(`TrackWallClips`) in every terrain flavour — a cover for when nothing stands
+on the wall. Here a snow hill (`DecoHillIceSlope2Straight`) shares the wall's
+cells and reaches one cell higher, sloping another way, so the plate cut
+through the snow. The hill has no clips at all, and our rule only hid a clip
+when the neighbour carried one that JOINS it.
+
+The game's own word: of its 1,718 clip definitions 1,717 have `ClipType`
+`FreeClipTop` / `FreeClipBottom` / `FreeClipSide` — pieces for a FREE face.
+Now (`render/clipAdjacency.ts`): a top or bottom cap is hidden whenever the
+cell it faces is occupied, by anything. Side clips keep the joining rule for
+now.
+
+Check: `npm run clipcheck` (tools/clip_check.ts) runs maps through the
+editor's import and adjacency code and fails on any cap shown against an
+occupied cell. It also lists side clips shown against occupied cells — on
+RHEVARA 15,571 of them (587 × `DecoWallBaseVFC` against `PlatformBase`, the
+water edge clips against deco walls, …). By the same "free" reading those
+should probably go too; held back until a case shows which way the game does
+it, because hiding a wall face beside a block that only partly fills its cell
+would open a hole.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

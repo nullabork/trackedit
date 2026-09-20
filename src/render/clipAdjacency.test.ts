@@ -101,3 +101,38 @@ describe("hidden clip parts", () => {
     expect(hiddenClipParts(a, world(a, b)).size).toBe(0);
   });
 });
+
+describe("top and bottom caps are free clips", () => {
+  const wallSlope = (): BlockClipInfo => ({
+    size: [1, 2, 1],
+    units: [[0, 0, 0], [0, 1, 0]],
+    clips: [
+      { u: [0, 0, 0], face: "bottom", id: "PlatformBaseFCB", group: "PlatformBaseFCB", sym: "PlatformBaseFCT" },
+      { u: [0, 1, 0], face: "top", id: "DecoWallSlope2StraightFCT" },
+      { u: [0, 0, 0], face: "west", id: "DecoWallBaseVFC", group: "DecoWallBaseVFC", vertical: true },
+    ],
+  });
+  /** A snow hill: three cells tall, no clips at all. */
+  const hill = (): BlockClipInfo => ({ size: [1, 3, 1], units: [[0, 0, 0], [0, 1, 0], [0, 2, 0]], clips: [] });
+
+  it("shows both caps of a block standing alone", () => {
+    const wall = at([9, 20, 16], 0, wallSlope());
+    expect(hiddenClipParts(wall, world(wall))).toEqual(new Set());
+  });
+
+  it("drops the cap under anything that fills the cell it faces, clip or no clip", () => {
+    // RHEVARA: a hill shares the deco-wall slope's cells and reaches one cell
+    // higher — the wall's dark top plate poked through the snow.
+    const wall = at([9, 20, 16], 0, wallSlope());
+    const snow = at([9, 20, 16], 3, hill());
+    expect(hiddenClipParts(wall, (cell) => world(snow)(cell))).toEqual(new Set(["clip:DecoWallSlope2StraightFCT:top:0,1,0"]));
+    const below = at([9, 19, 16], 2, hill());
+    expect(hiddenClipParts(wall, (cell) => world(below)(cell))).toEqual(new Set(["clip:PlatformBaseFCB:bottom:0,0,0"]));
+  });
+
+  it("keeps a side wall that faces a block which does not join it", () => {
+    const wall = at([9, 20, 16], 0, wallSlope());
+    const neighbour = at([10, 20, 16], 0, hill()); // west of the wall is x + 1
+    expect(hiddenClipParts(wall, (cell) => world(neighbour)(cell))).toEqual(new Set());
+  });
+});

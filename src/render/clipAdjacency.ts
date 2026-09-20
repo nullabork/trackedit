@@ -47,7 +47,7 @@ export interface ClipSubject {
 }
 
 /** Block-local outward normals. East is the x=0 face, west x=32 (GBX). */
-const FACE_NORMAL: Record<ClipFace, [number, number, number]> = {
+export const FACE_NORMAL: Record<ClipFace, [number, number, number]> = {
   north: [0, 0, 1],
   south: [0, 0, -1],
   east: [-1, 0, 0],
@@ -137,7 +137,12 @@ export function hiddenClipParts(
       const unit = (other.info.units.length ? other.info.units : [[0, 0, 0] as [number, number, number]])
         .find((u) => cellKey(unitCell(other.pose, other.info.size, u)) === cellKey(target));
       if (!unit) continue;
-      const joins = other.info.clips.some((d) =>
+      // Top and bottom caps are the game's "FreeClipTop" / "FreeClipBottom": they
+      // exist on a FREE face only. Whatever occupies the cell above or below —
+      // a snow hill over a deco-wall slope has no clip of its own at all —
+      // the cap is gone. Side clips still need a partner that joins them.
+      const cap = clip.face === "top" || clip.face === "bottom";
+      const joins = cap || other.info.clips.some((d) =>
         d.face === face && d.u[0] === unit[0] && d.u[1] === unit[1] && d.u[2] === unit[2] && clipsConnect(clip, d));
       if (joins) {
         hidden.add(clipPartName(clip));
