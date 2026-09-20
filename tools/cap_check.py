@@ -14,6 +14,12 @@ block and variant this reports caps with vertices outside that outline.
 
   python tools/cap_check.py [meshes dir] [--json report.json] [--filter Name]
 
+A second test covers what a top view cannot see — TALL caps (arch and loop
+shells, slope undersides): where such a cap runs along a face that carries a
+side wall, its edge has to follow that wall's profile. A shell turned a
+quarter or mirrored rises where the walls fall ("follows": mean height
+difference over the shared columns, tolerance 3 m).
+
 Two kinds of block are left out, because the test cannot speak for them:
 blocks whose other geometry does not outline them (a lone wall panel says
 nothing about where a square cap belongs — the outline has to cover at
@@ -84,16 +90,65 @@ def area(poly):
     return abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly)))) / 2
 
 
+def edge_profile(points, axis, at, lo, hi, top):
+    """Height of a part's upper (or lower) edge per 4 m column along a face plane (axis=0: x=at, axis=2: z=at)."""
+    cols = {}
+    other = 2 if axis == 0 else 0
+    for p in points:
+        if abs(p[axis] - at) > 1.0 or not (lo - 0.5 <= p[other] <= hi + 0.5):
+            continue
+        c = int(min(max(p[other] - lo, 0), hi - lo - 0.001) // 4)
+        cols[c] = max(cols.get(c, p[1]), p[1]) if top else min(cols.get(c, p[1]), p[1])
+    return cols
+
+
+def check_profiles(groups):
+    """Tall caps against the side walls on the faces they run along."""
+    problems = []
+    walls = {g: v for g, v in groups.items() if re.match(r"clip:[^:]+:(north|south|east|west):", g)}
+    for name, v in groups.items():
+        m = re.match(r"clip:[^:]+:(top|bottom):", name)
+        if not m:
+            continue
+        ys = [p[1] for p in v]
+        if max(ys) - min(ys) < 3.0:
+            continue  # a flat plate has no profile to get wrong
+        xs, zs = [p[0] for p in v], [p[2] for p in v]
+        worst = 0.0
+        for wname, w in walls.items():
+            wx, wz = [p[0] for p in w], [p[2] for p in w]
+            flat_x, flat_z = max(wx) - min(wx) < 0.5, max(wz) - min(wz) < 0.5
+            if flat_x == flat_z or max(p[1] for p in w) - min(p[1] for p in w) < 3.0:
+                continue
+            axis, at = (0, wx[0]) if flat_x else (2, wz[0])
+            lo, hi = (min(zs), max(zs)) if flat_x else (min(xs), max(xs))
+            # The shell's upper edge meets a wall's curved edge, whichever way the wall hangs.
+            cap_top = edge_profile(v, axis, at, lo, hi, True)
+            best = None
+            for wall_top in (True, False):
+                wall = edge_profile(w, axis, at, lo, hi, wall_top)
+                shared = [c for c in cap_top if c in wall]
+                if len(shared) < 4:
+                    continue
+                d = sum(abs(cap_top[c] - wall[c]) for c in shared) / len(shared)
+                best = d if best is None else min(best, d)
+            if best is not None:
+                worst = max(worst, best)
+        if worst > 3.0:
+            problems.append({"cap": name, "profile_off_m": round(worst, 1)})
+    return problems
+
+
 def check(path):
     groups = load_groups(path)
     caps = {g: v for g, v in groups.items() if re.match(r"clip:[^:]+:(top|bottom):", g)}
     rest = [(x, z) for g, v in groups.items() if g not in caps for x, _, z in v]
+    problems = check_profiles(groups)
     if not caps or len(set(rest)) < 3:
-        return []
+        return problems
     outline = hull(rest)
     if len(outline) < 3:
-        return []
-    problems = []
+        return problems
     for name, v in caps.items():
         if re.search(r"Ground:bottom:", name):
             continue  # a terrain-blend skirt: meant to spread

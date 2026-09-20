@@ -307,6 +307,32 @@ should probably go too; held back until a case shows which way the game does
 it, because hiding a wall face beside a block that only partly fills its cell
 would open a hole.
 
+## 5g. Two corrections the next day (RHEVARA, the arch over a platform)
+
+**The cap rule of 5f was too broad.** "Hidden whenever the cell it faces is
+occupied" also removed the underside of `DecoWallArchSlope2EndIce` — the arch
+IS its bottom piece, and a platform merely stands in the cell below. The two
+cases differ in one thing: the snow hill that must hide the wall's top plate
+fills the plate's OWN cell too (the plate is inside it); the platform is a
+neighbour. Rule now: a cap is hidden when a neighbour's clip joins it, or when
+another block swallows it — fills the cap's cell and the one it faces.
+`npm run clipcheck` fails on swallowed caps that are shown and lists the rest.
+
+**Tall shells on wall-only blocks were left unturned.** The game names this
+arch's base variants "Variant Air WrongDir"; the map uses variant 2, the
+proper "Variant Air", whose curved walls sit on other faces. The shell has to
+follow the walls, and the fit knew (errors 7.0 / 8.0 / 8.1 / 5.7 once it
+compares along the walls only, `CapMismatch(shellOnly)`), but the "decisive"
+bar of 5e (75 %) — calibrated on the noisy whole-footprint score — held it
+back. Blocks with no body now fit along their walls and turn on a 15 % gain.
+
+The check grew a second test for it (`tools/cap_check.py`): a TALL cap's edge
+has to follow the profile of the side walls on the faces it runs along (mean
+height difference over shared columns, 3 m tolerance). It said the arch's
+variant 2 was 4.2 m off and wanted a quarter turn, and that the loop end's
+shell was 16 m off in its base variant. Deco-wall family under both tests:
+138 blocks flagged -> 118, none newly flagged.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

@@ -137,12 +137,15 @@ export function hiddenClipParts(
       const unit = (other.info.units.length ? other.info.units : [[0, 0, 0] as [number, number, number]])
         .find((u) => cellKey(unitCell(other.pose, other.info.size, u)) === cellKey(target));
       if (!unit) continue;
-      // Top and bottom caps are the game's "FreeClipTop" / "FreeClipBottom": they
-      // exist on a FREE face only. Whatever occupies the cell above or below —
-      // a snow hill over a deco-wall slope has no clip of its own at all —
-      // the cap is gone. Side clips still need a partner that joins them.
+      // A top or bottom cap INSIDE another block is gone, clip partner or not:
+      // a snow hill sharing a deco-wall slope's cells and reaching one cell
+      // higher swallows the wall's dark top plate (the hill has no clips at
+      // all). "Inside" = the other block fills the cap's own cell AND the cell
+      // it faces. A mere neighbour does not count — an arch keeps its underside
+      // over a platform that stands in the cell below — it has to join.
       const cap = clip.face === "top" || clip.face === "bottom";
-      const joins = cap || other.info.clips.some((d) =>
+      const swallows = cap && occupiedCells(other).some((c) => cellKey(c) === cellKey(cell));
+      const joins = swallows || other.info.clips.some((d) =>
         d.face === face && d.u[0] === unit[0] && d.u[1] === unit[1] && d.u[2] === unit[2] && clipsConnect(clip, d));
       if (joins) {
         hidden.add(clipPartName(clip));

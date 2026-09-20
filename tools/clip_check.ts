@@ -2,17 +2,19 @@
  * Developer check: which clip pieces (caps, side walls) does the editor show
  * where another block sits right against them?
  *
- * Clips are the game's "free clips" — pieces a block only shows on a FREE
- * face. The editor hides a top/bottom cap when the cell it faces is occupied,
- * and a side clip when the neighbour carries a clip that joins it
- * (src/render/clipAdjacency.ts). This runs every cached map (or the ones
- * named) through the editor's own import and adjacency code and reports:
+ * Clips are the game's "free clips" — pieces a block shows on a free face.
+ * The editor hides a clip when the neighbour carries one that joins it, and a
+ * top/bottom cap also when another block swallows it, i.e. fills the cap's
+ * own cell and the one it faces (src/render/clipAdjacency.ts). This runs
+ * every cached map (or the ones named) through the editor's own import and
+ * adjacency code and reports:
  *
- * - caps shown although the cell they face is occupied — must be 0
- *   (a dark plate poking through whatever stands on it);
- * - side clips shown although the neighbouring cell is occupied — not
- *   necessarily wrong (a wall beside an unrelated block), listed by
- *   clip -> neighbour so the biggest groups can be looked at in the editor.
+ * - caps shown although a block swallows them — must be 0 (a dark plate
+ *   poking through the snow hill that shares its cells);
+ * - caps and side clips shown against a merely occupied cell — not wrong by
+ *   themselves (an arch keeps its underside over a platform below; a wall
+ *   stands beside an unrelated block), listed by clip -> neighbour so the
+ *   biggest groups can be looked at in the editor.
  *
  * usage: npx tsx tools/clip_check.ts [map.Map.Gbx ...]     (npm run clipcheck)
  */
@@ -70,7 +72,7 @@ try {
       (cells.get(k) ?? cells.set(k, []).get(k)!).push(s);
     }
 
-    let clips = 0, hidden = 0, capsAgainstBlocks = 0, sidesAgainstBlocks = 0;
+    let clips = 0, hidden = 0, swallowed = 0, capsAgainstBlocks = 0, sidesAgainstBlocks = 0;
     const sides = new Map<string, number>();
     for (const s of subjects) {
       const gone = hiddenClipParts(s, (cell) => (cells.get(cellKey(cell)) ?? []).filter((o) => o !== s));
@@ -82,22 +84,22 @@ try {
         const target: GridCoord = [cell[0] + n[0], cell[1] + n[1], cell[2] + n[2]];
         const neighbours = (cells.get(cellKey(target)) ?? []).filter((o) => o !== s);
         if (!neighbours.length) continue;
-        if (clip.face === "top" || clip.face === "bottom") capsAgainstBlocks++;
-        else {
-          sidesAgainstBlocks++;
-          const key = `${clip.id} | ${neighbours[0].block}`;
-          sides.set(key, (sides.get(key) ?? 0) + 1);
-        }
+        const cap = clip.face === "top" || clip.face === "bottom";
+        if (cap && neighbours.some((o) => occupiedCells(o).some((c) => cellKey(c) === cellKey(cell)))) swallowed++;
+        if (cap) capsAgainstBlocks++;
+        else sidesAgainstBlocks++;
+        const key = `${cap ? "cap " : "side"} ${clip.id} | ${neighbours[0].block}`;
+        sides.set(key, (sides.get(key) ?? 0) + 1);
       }
     }
-    if (capsAgainstBlocks) failed++;
-    console.log(`${capsAgainstBlocks ? "FAIL" : "ok  "} ${map}\n     ${subjects.length} blocks, ${clips} clips: ${hidden} hidden, ${clips - hidden} shown`);
-    console.log(`     caps shown against an occupied cell: ${capsAgainstBlocks}`);
-    console.log(`     side clips shown against an occupied cell: ${sidesAgainstBlocks}`);
+    if (swallowed) failed++;
+    console.log(`${swallowed ? "FAIL" : "ok  "} ${map}\n     ${subjects.length} blocks, ${clips} clips: ${hidden} hidden, ${clips - hidden} shown`);
+    console.log(`     caps shown although another block swallows them: ${swallowed}`);
+    console.log(`     shown against a merely occupied cell: ${capsAgainstBlocks} caps, ${sidesAgainstBlocks} side clips`);
     for (const [what, n] of [...sides].sort((a, b) => b[1] - a[1]).slice(0, 8)) console.log(`       ${n} x ${what}`);
   }
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
-console.log(failed ? `${failed} of ${maps.length} maps show caps against occupied cells` : `all ${maps.length} maps: no cap shown against an occupied cell`);
+console.log(failed ? `${failed} of ${maps.length} maps show caps inside other blocks` : `all ${maps.length} maps: no cap shown inside another block`);
 process.exit(failed ? 1 : 0);

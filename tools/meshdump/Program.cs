@@ -634,7 +634,7 @@ switch (args[0])
             allVariants.AddRange((bi.AdditionalVariantsGround ?? []).Select((v, i) => ($"ground+{i + 1}", (CGameCtnBlockInfoVariant?)v)));
             foreach (var variant in allVariants)
             {
-                Console.WriteLine($"[{variant.Item1}] units: {variant.Item2?.BlockUnitModels?.Length ?? 0}, name '{variant.Item2?.Name}', mobils {variant.Item2?.Mobils?.Length ?? 0}, noPillarBelow {variant.Item2?.NoPillarBelowIndex}");
+                Console.WriteLine($"[{variant.Item1}] units: {variant.Item2?.BlockUnitModels?.Length ?? 0}, name '{variant.Item2?.Name}', mobils {variant.Item2?.Mobils?.Length ?? 0}, noPillarBelow {variant.Item2?.NoPillarBelowIndex}, cardinalDir {variant.Item2?.CardinalDir}, multiDir {variant.Item2?.MultiDir}, symmetricalVariant {variant.Item2?.SymmetricalVariantIndex}, baseType {variant.Item2?.VariantBaseType}");
                 foreach (var u in variant.Item2?.BlockUnitModels ?? [])
                 {
                     if (u is null) continue;
@@ -2139,7 +2139,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                             // placements have nothing, or the wrong height,
                             // beneath them (a twisted tilt-transition
                             // underside only fits one way).
-                            var err = sc.CapMismatch(builder, face == "top");
+                            var err = sc.CapMismatch(builder, face == "top", shellOnly: !hasBody);
                             // Plates belong inside the block (what the clip
                             // box trims away is lost) and must not stack on
                             // a copy already placed on this face.
@@ -2173,7 +2173,12 @@ sealed class Dumper(string root, string outDir, string? filter)
                         // tools/cap_check.py: where a turn was right the fit improved by ~95 %,
                         // where it was wrong (quarter-round walls got their quarter-disc caps
                         // turned away from the wall) by ~10 %, on near-equal errors.
-                        const float Decisive = 0.75f;
+                        // Blocks that are only a shell of walls are different: their fit is
+                        // measured along the walls alone (CapMismatch shellOnly), which is a
+                        // clean signal, and their tall shells really do come turned (an arch's
+                        // proper variant has its curved walls on other faces than the
+                        // "WrongDir" base, and the shell has to follow them).
+                        var Decisive = hasBody ? 0.75f : 0.15f;
                         var best = q;
                         var unturned = Err(q);
                         var bestErr = unturned * (1f - Decisive);
@@ -3272,19 +3277,31 @@ sealed class ObjBuilder
      * all count as a full 32-unit miss. Orientation-sensitive where range
      * maxima are not: a coping strip turned 90° along a quarter pipe's side
      * floats above the curve for most of its length. */
-    public float CapMismatch(ObjBuilder body, bool top)
+    public float CapMismatch(ObjBuilder body, bool top, bool shellOnly = false)
     {
         if (footprintCells == 0) return 0f;
         var sum = 0f;
+        var compared = 0;
         for (var xi = 0; xi < 64; xi++)
             for (var zi = 0; zi < 64; zi++)
             {
                 if (CellMaxY[xi, zi] == float.MinValue) continue;
-                if (body.CellMaxY[xi, zi] == float.MinValue) { sum += 32f; continue; }
+                if (body.CellMaxY[xi, zi] == float.MinValue)
+                {
+                    // A real body must be under every cell of the cap. A block that is
+                    // only a shell of walls has nothing in its middle whichever way the
+                    // cap turns: charging for that drowns the cells along the walls,
+                    // the only ones that can tell (an arch shell scored 24.1 / 25.5 /
+                    // 26.6 / 23.7 for its four turns).
+                    if (!shellOnly) sum += 32f;
+                    continue;
+                }
+                compared++;
                 sum += top
                     ? MathF.Abs(CellMinY[xi, zi] - body.CellMaxY[xi, zi])
                     : MathF.Abs(CellMaxY[xi, zi] - body.CellMinY[xi, zi]);
             }
+        if (shellOnly) return compared == 0 ? 0f : sum / compared;
         return sum / footprintCells;
     }
 

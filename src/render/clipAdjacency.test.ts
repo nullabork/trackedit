@@ -102,7 +102,7 @@ describe("hidden clip parts", () => {
   });
 });
 
-describe("top and bottom caps are free clips", () => {
+describe("caps inside another block", () => {
   const wallSlope = (): BlockClipInfo => ({
     size: [1, 2, 1],
     units: [[0, 0, 0], [0, 1, 0]],
@@ -120,19 +120,21 @@ describe("top and bottom caps are free clips", () => {
     expect(hiddenClipParts(wall, world(wall))).toEqual(new Set());
   });
 
-  it("drops the cap under anything that fills the cell it faces, clip or no clip", () => {
+  it("drops a cap swallowed by a block that fills its cell and the one it faces", () => {
     // RHEVARA: a hill shares the deco-wall slope's cells and reaches one cell
     // higher — the wall's dark top plate poked through the snow.
     const wall = at([9, 20, 16], 0, wallSlope());
     const snow = at([9, 20, 16], 3, hill());
     expect(hiddenClipParts(wall, (cell) => world(snow)(cell))).toEqual(new Set(["clip:DecoWallSlope2StraightFCT:top:0,1,0"]));
-    const below = at([9, 19, 16], 2, hill());
-    expect(hiddenClipParts(wall, (cell) => world(below)(cell))).toEqual(new Set(["clip:PlatformBaseFCB:bottom:0,0,0"]));
   });
 
-  it("keeps a side wall that faces a block which does not join it", () => {
+  it("keeps a cap over a mere neighbour that does not join it", () => {
+    // RHEVARA again: an arch's underside IS the arch; a platform in the cell
+    // below must not remove it.
     const wall = at([9, 20, 16], 0, wallSlope());
-    const neighbour = at([10, 20, 16], 0, hill()); // west of the wall is x + 1
+    const below = at([9, 17, 16], 2, hill()); // fills 17..19, not the wall's own cells
+    expect(hiddenClipParts(wall, (cell) => world(below)(cell))).toEqual(new Set());
+    const neighbour = at([10, 20, 16], 0, hill()); // beside it: side walls stay too
     expect(hiddenClipParts(wall, (cell) => world(neighbour)(cell))).toEqual(new Set());
   });
 });
