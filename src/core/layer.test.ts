@@ -77,4 +77,16 @@ describe("blockIsGround", () => {
     expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true)).toBe("ground2");
     expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true, true)).toBe("air2"); // its layer is tilted
   });
+
+  it("a free block names its variant like a grid block, and is never ground; items have none", async () => {
+    const { placementVariant } = await import("./layer");
+    // RHEVARA: StructureSupportCurve1Out placed free with variant 1 (the bare curved rail) was
+    // drawn as the base variant, struts and all. Flags: free (bit 29) + variant 1 (bit 21).
+    const free = { id: "f", kind: "free" as const, block: "StructureSupportCurve1Out", pos: [544, 288, 320] as [number, number, number],
+      rot: [0, 0, 0] as [number, number, number], isItem: false, meta: { flags: 0x20200040, isGround: false } };
+    expect(placementVariant(free, true)).toBe("air1");
+    expect(placementVariant({ ...free, meta: { flags: 0x20000000 } }, true)).toBe("air");
+    expect(placementVariant({ ...free, meta: { flags: 0x20200040, isGround: true } }, true)).toBe("air1");
+    expect(placementVariant({ ...free, isItem: true }, true)).toBe("air");
+  });
 });

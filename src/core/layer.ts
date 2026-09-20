@@ -98,15 +98,23 @@ export function metaAfterMove(meta: BlockPlacement["meta"], fromLevel: number, t
  * tilted or raised, which takes every block in it off the terrain. The one
  * place this is decided — the renderer draws it, tools/variant_check.ts
  * verifies it against what the map file says.
+ *
+ * A FREE block names a variant exactly like a grid block (same flag bits) and
+ * is never a ground variant (0 of 658 across the cached maps). Items have no
+ * variants.
  */
 export function placementVariant(p: Placement, stadiumBase: boolean, lifted = false): string {
+  if (p.kind === "free") {
+    const index = p.isItem ? 0 : blockVariantIndex(p);
+    return index ? `air${index}` : "air";
+  }
   if (p.kind !== "block") return "air";
   const base = !lifted && blockIsGround(p, stadiumBase) ? "ground" : "air";
   const index = blockVariantIndex(p);
   return index ? `${base}${index}` : base;
 }
 
-export function blockVariantIndex(p: Pick<BlockPlacement, "meta">): number {
+export function blockVariantIndex(p: { readonly meta?: Readonly<Record<string, unknown>> }): number {
   return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
 }
 

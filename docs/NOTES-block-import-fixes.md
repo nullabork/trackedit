@@ -401,6 +401,32 @@ checked against next, instead of `capcheck`'s outline heuristic.
 for the situation table and the wrong pairs) replaces `clipcheck`, whose one assertion
 ("no cap shown inside another block") the game contradicts.
 
+## 5i. Free blocks name a variant too (RHEVARA, struts under a platform)
+
+**Report.** Two free-placed `StructureSupport*` blocks under an oval platform showed
+diagonal struts; "I think it should just be the curved black rail". Right: the file names
+variant 1 for both (flags `0x20200040` = free + bit 21), `air1` is the bare rail (44 KB),
+the base `air` is the rail with struts (408 KB).
+
+**Cause.** `placementVariant` returned `"air"` for every placement that is not a grid
+block. The variant is not derived from anything (unlike clips, 5h): it is STORED per
+block — bits 21+ of the flags, plus the ground flag — and free blocks store it in the
+same bits. Across the 7 cached maps 138 of 658 free blocks name a variant above 0, and
+none is a ground variant.
+
+**Fix.** Free (non-item) placements use `air<index>`. `npm run variantcheck` compared
+grid blocks only, which is why it said 0 mismatches; it now compares free blocks as well
+(38,000 blocks, 0 drawn with another variant than the file names).
+
+**Not covered yet.** The flags carry two more fields, GBX.NET's `Variant` (bits 0-5;
+151 blocks on RHEVARA) and `SubVariant` (bits 6-11; about 900). `SubVariant` indexes the
+mobil WITHIN the chosen variant's row: `StructureSupportCurve1Out` has `[0][0]
+SupportCurve1Out_Air` and `[0][1] ..._Airv2` (the colourizable build, extra `*Colorize`
+materials). The extractor exports `[row][0]` only. Same shape in the cases looked at, so
+it is a material / colouring difference rather than a wrong-looking block — but it is
+unverified across the block set, and wants the same treatment: export per mobil, pick by
+the file's field, check editor against file.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

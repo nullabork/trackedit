@@ -64,7 +64,8 @@ function compareWithEditor(map: string, work: string): { checked: number; wrong:
   const examples: string[] = [];
   let checked = 0;
   for (const layer of doc.layers) for (const p of layer.placements.values()) {
-    if (p.kind !== "block") continue;
+    // Grid blocks AND free blocks: both name a variant (items do not).
+    if (p.kind !== "block" && !(p.kind === "free" && !p.isItem)) continue;
     const original = dump.blocks[Number((p.meta as { idx?: number } | undefined)?.idx)];
     if (!original || original.name !== p.block) continue;
     checked++;
@@ -74,7 +75,7 @@ function compareWithEditor(map: string, work: string): { checked: number; wrong:
     if (file === editor) continue;
     const key = `${p.block}: file ${file}, editor ${editor}`;
     wrong.set(key, (wrong.get(key) ?? 0) + 1);
-    if (examples.length < 3) examples.push(`${p.block} at ${p.coord.join(",")}`);
+    if (examples.length < 3) examples.push(`${p.block} at ${(p.kind === "block" ? p.coord : p.pos).join(",")}`);
   }
   return { checked, wrong, examples };
 }
@@ -96,7 +97,7 @@ try {
     const variants = Object.entries(r.byVariant).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${k} ${n}`).join(", ");
     console.log(`${bad ? "FAIL" : "ok  "} ${map}\n     ${r.blocks - r.custom - r.undefinedBlocks} blocks checked (${r.custom} custom, ${r.undefinedBlocks} undefined skipped): ${variants}`);
     const mismatches = [...editor.wrong.values()].reduce((a, b) => a + b, 0);
-    console.log(`     editor vs file: ${editor.checked} grid blocks compared, ${mismatches} drawn with another variant than the file names`);
+    console.log(`     editor vs file: ${editor.checked} blocks (grid and free) compared, ${mismatches} drawn with another variant than the file names`);
     for (const [what, n] of [...editor.wrong].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`       ${n} x ${what}`);
     if (r.outOfRange) console.log(`     ${r.outOfRange} name a variant their definition does not have`);
     if (r.notExtracted) {
