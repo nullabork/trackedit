@@ -70,7 +70,7 @@ export function inspectDebugSubject(ctx: EditorContext, options: DebugViewOption
   const meshes: Record<string, unknown>[] = [];
   for (const obj of objects) obj.traverse(node => {
     if (!(node instanceof Mesh)) return;
-    meshes.push({ name: node.name, vertices: node.geometry.getAttribute("position")?.count,
+    meshes.push({ name: node.name, visible: node.visible, vertices: node.geometry.getAttribute("position")?.count,
       uvCount: node.geometry.getAttribute("uv")?.count,
       materials: (Array.isArray(node.material) ? node.material : [node.material]).map(mat => {
         const map = "map" in mat ? mat.map as import("three").Texture | null : null;
