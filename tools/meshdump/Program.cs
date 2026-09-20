@@ -1673,6 +1673,9 @@ sealed class Dumper(string root, string outDir, string? filter)
             if (!string.IsNullOrEmpty(c.ClipGroupId)) def["group"] = c.ClipGroupId;
             if (!string.IsNullOrEmpty(c.SymmetricalClipGroupId)) def["sym"] = c.SymmetricalClipGroupId;
             if (!string.IsNullOrEmpty(c.ASymmetricalClipId)) def["asym"] = c.ASymmetricalClipId;
+            // Wall panels of one vertical group stack into one wall: which segment a panel shows
+            // (Middle / Top / Bottom / TopBottom) depends on the panels above and below it.
+            if (c is CGameCtnBlockInfoClipVertical { VerticalClipGroupId: { Length: > 0 } vg }) def["vgroup"] = vg;
             if (c.IsFullFreeClip) def["full"] = true;
             if (c.CanBeDeletedByFullFreeClip) def["deletable"] = true;
             defs[c.Ident.Id] = def;
@@ -2348,6 +2351,8 @@ sealed class Dumper(string root, string outDir, string? filter)
                     var t = off + extraEff + center - Vector3.Transform(center, q);
 
                     Action<ObjBuilder> emit;
+                    // Wall panels: the same placement with another segment's mobil (see below).
+                    Action<ObjBuilder, CGameCtnBlockInfoMobil>? emitWall = null;
                     if (isWall && rawMax.Z > 33f)
                     {
                         // Modular wall compositions (TrackWallVFC family) are
@@ -2359,8 +2364,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                         var flip = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
                         var qc = Quaternion.Concatenate(flip, q);
                         var tc = Vector3.Transform(new Vector3(32f, 0f, 32f + rawMin.Z), q) + t;
-                        var w = wall!;
-                        emit = b =>
+                        emitWall = (b, w) =>
                         {
                             // Ground rows of these compositions add terrain
                             // skirts that reach into the neighbouring cells.
@@ -2368,6 +2372,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                             AddMobil(b, w, qc, tc);
                             b.ClipBox = null;
                         };
+                        emit = b => emitWall(b, wall!);
                     }
                     else if (isWall)
                     {
@@ -2378,16 +2383,16 @@ sealed class Dumper(string root, string outDir, string? filter)
                         // asymmetric panels (the 48-wide loop-start walls
                         // overhang one end) otherwise land end-for-end
                         // reversed, hanging outside the block.
-                        var w = wall!;
                         var wq = Quaternion.Concatenate(
                             Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI), q);
                         var wt = t + Vector3.Transform(new Vector3(32f, 0f, 64f), q);
-                        emit = b =>
+                        emitWall = (b, w) =>
                         {
                             if (preferGround) b.ClipBox = footprint;
                             AddMobil(b, w, wq, wt);
                             b.ClipBox = null;
                         };
+                        emit = b => emitWall(b, wall!);
                     }
                     else
                     {
@@ -2427,9 +2432,30 @@ sealed class Dumper(string root, string outDir, string? filter)
                     if (hasBody ? scratch.GapTo(bodyMin, bodyMax) > 1.5f
                                 : scratch.GapTo(blockBox.Item1, blockBox.Item2) > 8f) continue;
 
-                    builder.SetSource(
-                        $"clip:{clip.Ident.Id}:{face}:{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}");
+                    var partName = $"clip:{clip.Ident.Id}:{face}:{unit.RelativeOffset.X},{unit.RelativeOffset.Y},{unit.RelativeOffset.Z}";
+                    builder.SetSource(partName);
                     emit(builder);
+                    // Which SEGMENT a wall panel is (Middle / Top / Bottom / TopBottom) depends on
+                    // whether the wall continues above and below — inside this block, decided
+                    // here, but just as well in ANOTHER block stacked on it, which only the
+                    // editor knows. So the segments a neighbour could turn this panel into ride
+                    // along as "<part>~a" (a panel above it), "~b" (below), "~ab" (both);
+                    // the editor shows exactly one (render/clipAdjacency wallSegments). A
+                    // segment that is the same mobil as the default is not written twice.
+                    if (emitWall is not null && wall is not null)
+                    {
+                        // Named by the ABSOLUTE state they show; a neighbour can only add a panel
+                        // above or below, never take this block's own away.
+                        foreach (var (a2, b2) in new[] { (true, false), (false, true), (true, true) })
+                        {
+                            if ((a2 == above && b2 == below) || (above && !a2) || (below && !b2)) continue;
+                            var suffix = "~" + (a2 ? "a" : "") + (b2 ? "b" : "");
+                            var other = WallRowMobil(clip, preferGround && unit.RelativeOffset.Y == 0, a2, b2);
+                            if (other is null || ReferenceEquals(other, wall)) continue;
+                            builder.SetSource(partName + suffix);
+                            emitWall(builder, other);
+                        }
+                    }
                     if (face is "top" or "bottom")
                     {
                         if (!capCover.TryGetValue(face, out var cov)) capCover[face] = cov = new bool[64, 64];

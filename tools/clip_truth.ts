@@ -31,7 +31,7 @@ import { placementVariant } from "../src/core/layer";
 import type { GridCoord } from "../src/core/math";
 import { baseTypeOf } from "../src/core/mapbase";
 import { importDump, type MapDump } from "../src/io/trackoJson";
-import { FACE_NORMAL, cellKey, clipHiddenBy, clipPartName, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, withClipDefs } from "../src/render/clipAdjacency";
+import { FACE_NORMAL, cellKey, clipHiddenBy, clipPartName, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, wallSegments, withClipDefs } from "../src/render/clipAdjacency";
 import type { BlockClipInfo, ClipDefs, ClipSubject, UnitClip } from "../src/render/clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, gridClipFaces, hiddenClipFaces } from "../src/render/clipFaces";
 import type { ClipFace } from "../src/render/clipFaces";
@@ -39,7 +39,7 @@ import type { ClipFace } from "../src/render/clipFaces";
 const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
   join(process.cwd(), "tools", "meshdump", "bin", "Release", "net8.0", process.platform === "win32" ? "meshdump.exe" : "meshdump");
 
-interface TruthBlock { name: string; coord: GridCoord; dir: number; ghost: boolean }
+interface TruthBlock { name: string; coord: GridCoord; dir: number; ghost: boolean; variant: number; ground: boolean }
 interface Truth { mapName: string; clips: TruthBlock[] }
 
 type Entry = { size?: [number, number, number]; units?: Record<string, [number, number, number][] | null>; clips?: Record<string, BlockClipInfo["clips"] | null> };
@@ -85,9 +85,9 @@ try {
   execFileSync(MESHDUMP, ["map", mapPath, dumpPath], { stdio: "ignore" });
   const bakedPath = join(work, "baked.json");
   execFileSync(MESHDUMP, ["baked", mapPath, bakedPath], { stdio: "ignore" });
-  const baked = JSON.parse(readFileSync(bakedPath, "utf-8")) as { mapName: string; baked: Array<{ name: string; coord: GridCoord; dir: number; isGhost: boolean; isFree: boolean }> };
+  const baked = JSON.parse(readFileSync(bakedPath, "utf-8")) as { mapName: string; baked: Array<{ name: string; coord: GridCoord; dir: number; isGhost: boolean; isFree: boolean; variant: number; isGround: boolean }> };
   // Clips of free blocks are baked without a cell: compared by name and count further down.
-  truth = { mapName: baked.mapName, clips: baked.baked.filter((b) => !b.isFree).map((b) => ({ name: b.name, coord: b.coord, dir: b.dir, ghost: b.isGhost })) };
+  truth = { mapName: baked.mapName, clips: baked.baked.filter((b) => !b.isFree).map((b) => ({ name: b.name, coord: b.coord, dir: b.dir, ghost: b.isGhost, variant: b.variant, ground: b.isGround })) };
   for (const b of baked.baked) if (b.isFree) bakedFree.set(b.name, (bakedFree.get(b.name) ?? 0) + 1);
   doc = new MapDocument();
   const imported = importDump(JSON.parse(readFileSync(dumpPath, "utf-8")) as MapDump);
@@ -129,8 +129,11 @@ for (const c of truth.clips) {
 
 interface OurClip { subject: Subject; clip: UnitClip; own: GridCoord; faced: GridCoord; hidden: boolean }
 const all: OurClip[] = [];
+const othersAt = (s: ClipSubject) => (cell: GridCoord) => (cells.get(cellKey(cell)) ?? []).filter((o) => o !== s);
+const hiddenMemo = new Map<ClipSubject, Set<string>>();
+const hiddenOf = (s: ClipSubject): Set<string> => hiddenMemo.get(s) ?? hiddenMemo.set(s, hiddenClipParts(s, othersAt(s))).get(s)!;
 for (const s of subjects) {
-  const gone = hiddenClipParts(s, (cell) => (cells.get(cellKey(cell)) ?? []).filter((o) => o !== s));
+  const gone = hiddenOf(s);
   for (const clip of s.info.clips) {
     const own = unitCell(s.pose, s.info.size, clip.u);
     const n = rotateByDir(FACE_NORMAL[clip.face], s.pose.dir);
@@ -197,6 +200,10 @@ let agree = 0;
 const extra = new Map<string, number>(), missing = new Map<string, number>(), dirs = new Map<string, Map<number, number>>();
 const claimed = new Set<TruthBlock>();
 const sideDirs = new Map<number, number>();
+// Wall panels: the segment (Middle/Top/Bottom/TopBottom) we would show vs the variant the game baked.
+const SEGMENT = ["Middle", "Top", "Bottom", "TopBottom"];
+const walls = { n: 0, agree: 0, alwaysTopBottom: 0, confusion: new Map<string, number>() };
+const segmentMemo = new Map<Subject, Map<string, { above: boolean; below: boolean }>>();
 const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
 for (const c of all) {
   const list = gameClips.get(`${c.clip.id}@${cellKey(where === "own" ? c.own : c.faced)}`) ?? [];
@@ -219,6 +226,21 @@ for (const c of all) {
   if (!!game === !c.hidden) agree++;
   else if (game) bump(missing, `${c.clip.id} (${c.clip.face}) of ${c.subject.block}`);
   else bump(extra, `${c.clip.id} (${c.clip.face}) of ${c.subject.block}`);
+  if (game && !c.hidden && c.clip.vgroup && !cap) {
+    const segs = segmentMemo.get(c.subject) ?? segmentMemo.set(c.subject, wallSegments(c.subject, othersAt(c.subject), hiddenOf)).get(c.subject)!;
+    const seg = segs.get(clipPartName(c.clip));
+    if (seg) {
+      const ours = (seg.above ? 0 : 1) + (seg.below ? 0 : 2);
+      // Air table: Middle, Top, Bottom, TopBottom, then an empty slot and merged tall Middles
+      // (a stack drawn as one piece). A panel standing on the ground uses the ground table,
+      // which only has Bottom and TopBottom.
+      const theirs = game.ground ? (game.variant === 0 ? 2 : 3) : game.variant >= 4 ? 0 : game.variant;
+      walls.n++;
+      if (ours === theirs) walls.agree++;
+      else bump(walls.confusion, `ours ${SEGMENT[ours]}, game ${SEGMENT[theirs]}`);
+      if (theirs === 3) walls.alwaysTopBottom++;
+    }
+  }
   if (game && c.clip.face !== "top" && c.clip.face !== "bottom") {
     // Which way does the game turn a side clip, relative to the way its face looks?
     const rel = (((game.dir - lookDir(c)) % 4) + 4) % 4;
@@ -284,6 +306,10 @@ if (situations.size) {
 if (wrongPairs.size) {
   console.log("  pairs we get wrong:");
   for (const [k, n] of top(wrongPairs, 25)) console.log(`     ${String(n).padStart(5)}  ${k}`);
+}
+if (walls.n) {
+  console.log(`  wall panels: ${walls.n} matched; segment agrees on ${walls.agree} (${((100 * walls.agree) / walls.n).toFixed(1)}%) — always TopBottom would on ${walls.alwaysTopBottom} (${((100 * walls.alwaysTopBottom) / walls.n).toFixed(1)}%)`);
+  if (!brief) for (const [k, n] of top(walls.confusion, 6)) console.log(`     ${n} x ${k}`);
 }
 console.log(`  MISSING — the game shows it, we hide it: ${total(missing)}`);
 for (const [k, n] of top(missing)) console.log(`     ${n} x ${k}`);

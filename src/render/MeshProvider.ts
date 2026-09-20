@@ -577,6 +577,9 @@ export class MeshProvider implements GeometryProvider {
         // kind (grid blocks pivot around the footprint centre, free blocks
         // use the raw origin).
         obj.name = base;
+        // Alternative wall-panel segments ("clip:…~a", "~b", "~ab") are off until a renderer
+        // that knows the neighbours picks one: previews and thumbnails show the plain parts.
+        obj.traverse((o) => { if (o.name.startsWith("clip:") && o.name.includes("~")) o.visible = false; });
         obj.userData.anchor = "corner";
         obj.userData.sizeCells = entry.size ?? [1, 1, 1];
         this.cache.set(key, obj);

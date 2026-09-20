@@ -527,6 +527,43 @@ Seen in the editor: pillars skinned ice / grass / dirt load `PlatformIce.TrackWa
 `PlatformGrass.TrackWall`, `PlatformDirt.TrackWall`. Not drawn yet: a skin that names an
 image pack (one `TechnicsScreen4x1` on RHEVARA), and item skins.
 
+## 5m. Wall panels are one wall across blocks: Middle / Top / Bottom / TopBottom
+
+The baked clip blocks carry a `Variant` of their own (11,640 of RHEVARA's 31,648). For a
+VERTICAL clip (a wall panel) it is the row of the clip's mobil table: `Middle, Top, Bottom,
+TopBottom, (empty), Middle x2, x3, x4, x8, x16, x32` in the air — the last seven being a
+stack of Middles drawn as one tall piece plus the empty slots it covers — and `Bottom,
+TopBottom` for a panel standing on the ground. Top and Bottom carry the trim along a wall's
+upper and lower edge.
+
+The extractor already picked the segment — but only by looking inside ONE block
+(`WallRowMobil`, "does the wall continue on the unit above/below"). A one-cell block
+(`DecoWallBasePillar`: 8,587 on RHEVARA) therefore always got TopBottom, however tall the
+stack of them.
+
+**Rule, measured** (`wallSegments`, scored by `npm run cliptruth` against the baked variant):
+a panel has the wall continuing above / below it when a SHOWN panel of the same
+`VerticalClipGroupId` looks the same way from the cell directly above / below — in this
+block or any other; ghost or not makes no difference (asking for equal ghostness drops
+RHEVARA from 92.7% to 83.8%).
+
+| map | panels | rule | always TopBottom |
+|---|---|---|---|
+| RHEVARA | 9,469 | 92.7% | 31.9% |
+| Islander | 3,494 | 95.3% | 40.6% |
+| tmx-1 | 1,260 | 97.6% | 46.7% |
+| tmx-84457 | 555 | 97.5% | 32.3% |
+
+**How it ships.** `clipdefs.json` gains `vgroup`. The extractor writes, next to each wall
+panel part, the segments a neighbour could turn it into — `<part>~a` (a panel above),
+`~b` (below), `~ab` — skipping any that is the same mobil as the default. They load hidden;
+the renderer shows exactly one per open panel, and re-evaluates the blocks diagonally above
+and below a change as well, since whether THEIR panel shows decides a neighbour's segment.
+Free blocks keep the per-block answer.
+
+Horizontal clips use the same field as a neighbour bitmask (`WaterHFCLeft`: rows 0, 4, 8, 12
+of 16; `WaterHFCRight`: 0..3) — not read yet.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

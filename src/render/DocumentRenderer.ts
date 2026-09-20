@@ -24,9 +24,10 @@ import type { MapDocument } from "@core/document";
 import type { Layer, Placement } from "@core/layer";
 import type { BlockCatalog, BlockDef } from "@core/catalog";
 import { CELL, degToRad } from "@core/math";
+import type { GridCoord } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
-import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
+import { cellKey, hiddenClipParts, occupiedCells, wallSegments } from "./clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, hiddenClipFaces } from "./clipFaces";
 import type { ClipFace } from "./clipFaces";
 import { isPlacementVisible, placementMobil, placementSkin, placementVariant } from "@core/layer";
@@ -688,24 +689,52 @@ export class DocumentRenderer {
     const s = this.clipSubject(layer, p);
     if (!s || !s.info.clips.length) return false;
     const cells = this.cellIndex.get(layer.id);
-    const hidden = hiddenClipParts(s, (cell) => {
+    // Subjects by placement id for the length of this call: a wall panel's segment asks
+    // whether its neighbours' panels are hidden, which asks about THEIR neighbours.
+    const subjects = new Map<string, ClipSubject | null>([[p.id, s]]);
+    const ids = new Map<ClipSubject, string>([[s, p.id]]);
+    const subjectOf = (id: string): ClipSubject | null => {
+      if (!subjects.has(id)) {
+        const q = layer.placements.get(id);
+        const qs = (q && this.clipSubject(layer, q)) ?? null;
+        subjects.set(id, qs);
+        if (qs) ids.set(qs, id);
+      }
+      return subjects.get(id)!;
+    };
+    const othersAt = (self: ClipSubject) => (cell: GridCoord): ClipSubject[] => {
       const out: ClipSubject[] = [];
       for (const id of cells?.get(cellKey(cell)) ?? []) {
-        if (id === p.id) continue;
-        const q = layer.placements.get(id);
-        const qs = q && this.clipSubject(layer, q);
+        if (id === ids.get(self)) continue;
+        const qs = subjectOf(id);
         if (qs) out.push(qs);
       }
       return out;
-    });
-    return this.showClipParts(obj, hidden);
+    };
+    const hiddenMemo = new Map<ClipSubject, Set<string>>();
+    const hiddenOf = (x: ClipSubject) => hiddenMemo.get(x) ?? hiddenMemo.set(x, hiddenClipParts(x, othersAt(x))).get(x)!;
+    const segments = s.info.clips.some((c) => c.vgroup) ? wallSegments(s, othersAt(s), hiddenOf) : undefined;
+    return this.showClipParts(obj, hiddenOf(s), segments);
   }
 
-  private showClipParts(obj: Object3D, hidden: ReadonlySet<string>): boolean {
+  /**
+   * Show a block's open clip parts. A wall panel comes in up to four segments — the plain part
+   * and "<part>~a", "~b", "~ab" for a wall that continues above, below or both (meshdump) —
+   * and exactly one of them shows: the one for `segments`, else the plain one.
+   */
+  private showClipParts(obj: Object3D, hidden: ReadonlySet<string>, segments?: ReadonlyMap<string, { above: boolean; below: boolean }>): boolean {
     let changed = false;
+    const names = new Set<string>();
+    if (segments) obj.traverse((o) => { if (o.name.startsWith("clip:")) names.add(o.name); });
     obj.traverse((o) => {
       if (!o.name.startsWith("clip:")) return;
-      const show = !hidden.has(o.name);
+      const tilde = o.name.indexOf("~");
+      const part = tilde < 0 ? o.name : o.name.slice(0, tilde);
+      const seg = segments?.get(part);
+      const wanted = seg && (seg.above || seg.below) ? `${part}~${seg.above ? "a" : ""}${seg.below ? "b" : ""}` : part;
+      // A segment that looks like the plain one is not in the mesh: the plain one stands in.
+      const chosen = names.has(wanted) ? wanted : part;
+      const show = !hidden.has(part) && (segments ? o.name === chosen : tilde < 0);
       if (o.visible !== show) changed = true;
       o.visible = show;
     });
@@ -720,7 +749,10 @@ export class DocumentRenderer {
     const seen = new Set<string>();
     for (const k of keys) {
       const [x, y, z] = k.split(",").map(Number);
-      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      // The six neighbours, and the ones diagonally above and below the sides: whether THEIR
+      // wall panels show decides which segment a panel next to them is.
+      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+        [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1], [1, -1, 0], [-1, -1, 0], [0, -1, 1], [0, -1, -1]]) {
         for (const id of cells.get(cellKey([x + dx, y + dy, z + dz])) ?? []) {
           if (seen.has(id)) continue;
           seen.add(id);

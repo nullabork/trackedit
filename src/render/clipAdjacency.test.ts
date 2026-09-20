@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  clipHiddenBy, clipsConnect, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, unrotateByDir, withClipDefs,
+  clipHiddenBy, clipsConnect, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, unrotateByDir, wallSegments, withClipDefs,
 } from "./clipAdjacency";
 import type { BlockClipInfo, ClipSubject, UnitClip } from "./clipAdjacency";
 import type { Dir, GridCoord } from "@core/math";
@@ -168,5 +168,45 @@ describe("caps inside another block", () => {
     expect(hiddenClipParts(wall, (cell) => world(below)(cell))).toEqual(new Set());
     const neighbour = at([10, 20, 16], 0, hill()); // beside it: side walls stay too
     expect(hiddenClipParts(wall, (cell) => world(neighbour)(cell))).toEqual(new Set());
+  });
+});
+
+describe("wall panel segments", () => {
+  /** A one-cell deco wall: a panel of one vertical group on each side. */
+  const wall = (): BlockClipInfo => ({
+    size: [1, 1, 1],
+    units: [[0, 0, 0]],
+    clips: (["north", "south", "east", "west"] as const).map((face) => (
+      { u: [0, 0, 0] as [number, number, number], face, id: "DecoWallBaseVFC", group: "DecoWallBaseVFC", vgroup: "DecoWallBaseVFC", full: true, deletable: true })),
+  });
+  const segmentsOf = (me: ClipSubject, all: ClipSubject[]) => {
+    const others = (self: ClipSubject) => (cell: GridCoord) => all.filter((o) => o !== self && occupiedCells(o).some((c) => c.join() === cell.join()));
+    return wallSegments(me, others(me), (x) => hiddenClipParts(x, others(x)));
+  };
+
+  it("a wall standing alone is TopBottom on every side", () => {
+    const a = at([5, 12, 5], 0, wall());
+    expect([...segmentsOf(a, [a]).values()]).toEqual(Array(4).fill({ above: false, below: false }));
+  });
+
+  it("three stacked blocks make one wall: Bottom, Middle, Top", () => {
+    const stack = [12, 13, 14].map((y) => at([5, y, 5], 0, wall()));
+    const north = (s: ClipSubject) => segmentsOf(s, stack).get("clip:DecoWallBaseVFC:north:0,0,0");
+    expect(north(stack[0])).toEqual({ above: true, below: false });
+    expect(north(stack[1])).toEqual({ above: true, below: true });
+    expect(north(stack[2])).toEqual({ above: false, below: true });
+  });
+
+  it("whichever way the blocks are turned", () => {
+    const low = at([5, 12, 5], 1, wall()), high = at([5, 13, 5], 3, wall());
+    for (const seg of segmentsOf(low, [low, high]).values()) expect(seg).toEqual({ above: true, below: false });
+  });
+
+  it("a panel that is hidden does not continue the wall", () => {
+    // The upper block has a neighbour to its north that deletes its north panel.
+    const low = at([5, 12, 5], 0, wall()), high = at([5, 13, 5], 0, wall()), beside = at([5, 13, 6], 0, wall());
+    const segs = segmentsOf(low, [low, high, beside]);
+    expect(segs.get("clip:DecoWallBaseVFC:north:0,0,0")).toEqual({ above: false, below: false });
+    expect(segs.get("clip:DecoWallBaseVFC:south:0,0,0")).toEqual({ above: true, below: false });
   });
 });

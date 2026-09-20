@@ -37,6 +37,7 @@ export interface UnitClip {
   asym?: string;
   full?: boolean;
   deletable?: boolean;
+  vgroup?: string;
 }
 
 /** A clip definition's rule fields (meshdump writes them to clipdefs.json). */
@@ -51,6 +52,8 @@ export interface ClipDef {
   full?: boolean;
   /** CanBeDeletedByFullFreeClip. */
   deletable?: boolean;
+  /** VerticalClipGroupId: wall panels of one group stack into one wall (see `wallSegments`). */
+  vgroup?: string;
 }
 export type ClipDefs = Record<string, ClipDef | undefined>;
 
@@ -191,4 +194,44 @@ export function hiddenClipParts(
     }
   }
   return hidden;
+}
+
+/**
+ * Which SEGMENT each shown wall panel of a block is: a vertical clip's mesh comes as
+ * Middle / Top / Bottom / TopBottom (row 0..3 of its mobil table), and the game picks by
+ * whether a shown panel of the same vertical group continues the wall directly above and
+ * directly below — in this block or in another one. Returned per clip part name as
+ * `{ above, below }`; 92.7% of RHEVARA's 9,517 baked wall panels carry the variant this
+ * predicts (always-TopBottom, the old per-block answer for single-cell blocks, 27%).
+ *
+ * `hiddenOf` must answer for ANY subject (the caller caches it): a panel that is hidden
+ * does not continue a wall.
+ */
+export function wallSegments(
+  subject: ClipSubject,
+  blocksAt: (cell: GridCoord) => Iterable<ClipSubject>,
+  hiddenOf: (s: ClipSubject) => ReadonlySet<string>,
+): Map<string, { above: boolean; below: boolean }> {
+  const out = new Map<string, { above: boolean; below: boolean }>();
+  const mine = hiddenOf(subject);
+  for (const clip of subject.info.clips) {
+    if (!clip.vgroup || clip.face === "top" || clip.face === "bottom" || mine.has(clipPartName(clip))) continue;
+    const cell = unitCell(subject.pose, subject.info.size, clip.u);
+    const n = rotateByDir(FACE_NORMAL[clip.face], subject.pose.dir);
+    const continues = (dy: number): boolean => {
+      const at: GridCoord = [cell[0], cell[1] + dy, cell[2]];
+      for (const other of [subject, ...blocksAt(at)]) {
+        const face = faceToward(n, other.pose.dir);
+        if (!face) continue;
+        const gone = other === subject ? mine : hiddenOf(other);
+        for (const d of other.info.clips) {
+          if (d.face !== face || d.vgroup !== clip.vgroup || gone.has(clipPartName(d))) continue;
+          if (cellKey(unitCell(other.pose, other.info.size, d.u)) === cellKey(at)) return true;
+        }
+      }
+      return false;
+    };
+    out.set(clipPartName(clip), { above: continues(1), below: continues(-1) });
+  }
+  return out;
 }
