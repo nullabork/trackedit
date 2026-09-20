@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Vector3 } from "three";
+import { PerspectiveCamera, Quaternion, Vector3 } from "three";
 
 import { ControlPreferences, blocksEditorInput, dragAction, wheelAction } from "@input/ControlScheme";
 
@@ -30,7 +30,7 @@ export class CameraRig {
    * the target and the wheel zooms — both keep following. Anything that moves the camera
    * AWAY (pan, fly, WASD) ends it and calls `onFollowEnded`.
    */
-  private following: { target: Vector3; heading: number; firstPerson: boolean } | null = null;
+  private following: { target: Vector3; heading: number; pitch: number; firstPerson: boolean; attitude: Quaternion | null } | null = null;
   /** Camera yaw relative to the target's heading; 0 = straight behind it. */
   private relYaw = 0;
   onFollowEnded: (() => void) | null = null;
@@ -174,16 +174,19 @@ export class CameraRig {
   }
 
   /**
-   * Follow `target`, which is heading `heading` (the yaw of its direction of travel). Call
-   * every frame while following; the first call snaps the camera behind the target.
+   * Follow `target`. `heading` and `pitch` are where its nose points (yaw about +y, and up
+   * from the horizon); `attitude` its full orientation when known. The chase camera uses
+   * heading and pitch but never the roll — a banked turn should not tip the horizon — while
+   * first person rides IN the car and takes all three. Call every frame while following;
+   * the first call snaps the camera behind the target.
    */
-  follow(target: Vector3, heading: number, firstPerson: boolean): void {
+  follow(target: Vector3, heading: number, pitch: number, firstPerson: boolean, attitude: Quaternion | null = null): void {
     if (!this.following) {
       // Chase-camera close: the editor's own distance is usually hundreds of metres.
       this.relYaw = 0;
       this.pitch = -0.28;
       this.distance = 18;
-      this.following = { target: target.clone(), heading, firstPerson };
+      this.following = { target: target.clone(), heading, pitch, firstPerson, attitude: attitude?.clone() ?? null };
     } else {
       if (firstPerson !== this.following.firstPerson) { this.relYaw = 0; this.pitch = firstPerson ? -0.05 : -0.35; }
       this.following.target.copy(target);
@@ -191,7 +194,10 @@ export class CameraRig {
       let d = heading - this.following.heading;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.following.heading += d * 0.2;
+      this.following.pitch += (pitch - this.following.pitch) * 0.2;
       this.following.firstPerson = firstPerson;
+      if (attitude && this.following.attitude) this.following.attitude.slerp(attitude, 0.35);
+      else this.following.attitude = attitude?.clone() ?? null;
     }
   }
 
@@ -289,14 +295,21 @@ export class CameraRig {
     }
 
     if (this.following) {
-      const { target, heading, firstPerson } = this.following;
+      const { target, heading, firstPerson, attitude } = this.following;
       this.yaw = heading + this.relYaw;
-      if (firstPerson) {
-        // From the driver's seat: a little above the path, looking where the car goes.
-        this.pos.set(target.x, target.y + 1.1, target.z);
-      } else {
-        this.pos.copy(target).addScaledVector(this.forwardVec(), -this.distance);
+      if (firstPerson && attitude) {
+        // In the driver's seat: the camera IS the car — heading, pitch and roll — turned by
+        // wherever the user is looking. A camera looks down -z, the car's nose is +z.
+        const up = new Vector3(0, 1, 0).applyQuaternion(attitude);
+        this.pos.copy(target).addScaledVector(up, 1.1);
+        this.camera.position.copy(this.pos);
+        this.camera.quaternion.copy(attitude)
+          .multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI + this.relYaw))
+          .multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), this.pitch));
+        return;
       }
+      if (firstPerson) this.pos.set(target.x, target.y + 1.1, target.z);
+      else this.pos.copy(target).addScaledVector(this.forwardVec(), -this.distance);
     }
 
     this.camera.position.copy(this.pos);
@@ -320,10 +333,12 @@ export class CameraRig {
   }
 
   private forwardVec(): Vector3 {
+    // While following, the user's pitch is relative to the car's: climbing a ramp tilts the view up with it.
+    const pitch = this.following ? Math.min(Math.max(this.pitch + this.following.pitch, -1.55), 1.55) : this.pitch;
     return new Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(this.yaw) * Math.cos(pitch),
     );
   }
 

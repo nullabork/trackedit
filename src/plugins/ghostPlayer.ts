@@ -10,15 +10,16 @@ import type { EditorContext, EditorPlugin } from "./api";
 /**
  * Plays the selected driving line back.
  *
- * Selecting a line in the Layers list puts a car marker at its start — a box lying along
- * the direction of travel — and a floating bar at the bottom of the viewport: play / pause,
+ * Selecting a line in the Layers list puts a car marker at its start — a box turned like the
+ * car's body in the ghost (heading, pitch, roll; along the direction of travel when the ghost
+ * has no rotations) — and a floating bar at the bottom of the viewport: play / pause,
  * speed, steps (hold to accelerate), previous / next checkpoint, a scrubber, and the
  * driver's inputs. Only the line itself plays: tries that ended in a respawn before the next
  * checkpoint are skipped (core/ghostPlayback).
  *
- * Follow puts the camera behind the car, relative to its heading; dragging orbits around
- * it, the wheel zooms, and moving away (pan, fly, WASD) switches it off. First person rides
- * in the car.
+ * Follow puts the camera behind the car, relative to its heading and pitch — never its roll;
+ * dragging orbits around it, the wheel zooms, and moving away (pan, fly, WASD) switches it
+ * off. First person rides in the car and rolls with it.
  */
 export const ghostPlayerPlugin: EditorPlugin = {
   id: "builtin.ghostPlayer",
@@ -96,7 +97,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
     });
 
     const up = new Vector3(0, 1, 0), x = new Vector3(), y = new Vector3(), z = new Vector3();
-    const basis = new Matrix4(), turn = new Quaternion();
+    const basis = new Matrix4(), turn = new Quaternion(), nose = new Vector3();
     ctx.view.onFrame(() => {
       const now = performance.now();
       const dt = Math.min(now - last, 100); // a background tab must not fast-forward the run
@@ -120,21 +121,35 @@ export const ghostPlayerPlugin: EditorPlugin = {
       // The marker lives in the layer's group, like the line: layer-local coordinates.
       const group = ctx.renderer.getLayerGroup(c.layer.id);
       if (group && car.parent !== group) group.add(car);
-      z.set(s.forward[0], s.forward[1], s.forward[2]);
-      x.crossVectors(up, z);
-      if (x.lengthSq() < 1e-6) x.set(1, 0, 0);
-      x.normalize();
-      y.crossVectors(z, x);
-      car.quaternion.copy(turn.setFromRotationMatrix(basis.makeBasis(x, y, z)));
+      if (s.quat) {
+        // The body as the ghost recorded it: heading, pitch AND roll — sideways in a drift,
+        // banked on a wall ride, upside down at the top of a loop.
+        turn.set(s.quat[0], s.quat[1], s.quat[2], s.quat[3]);
+      } else {
+        // No orientation in the ghost: lie along the direction of travel, wheels down.
+        z.set(s.forward[0], s.forward[1], s.forward[2]);
+        x.crossVectors(up, z);
+        if (x.lengthSq() < 1e-6) x.set(1, 0, 0);
+        x.normalize();
+        y.crossVectors(z, x);
+        turn.setFromRotationMatrix(basis.makeBasis(x, y, z));
+      }
+      car.quaternion.copy(turn);
       car.position.set(s.pos[0], s.pos[1] + CAR_LIFT, s.pos[2]);
       car.visible = !(follow && firstPerson);
       (car.userData.body as MeshLambertMaterial).color.set(lineHue(c.index));
 
       if (follow) {
         // The camera works in world space; the line may sit in a moved or turned layer.
-        const [p, ahead] = toWorld(c.layer, [s.pos, [s.pos[0] + s.forward[0], s.pos[1] + s.forward[1], s.pos[2] + s.forward[2]]]);
-        const heading = Math.atan2(ahead[0] - p[0], ahead[2] - p[2]);
-        ctx.view.rig.follow(new Vector3(p[0], p[1] + CAR_LIFT, p[2]), heading, firstPerson);
+        // Where the NOSE points (the body, when the ghost has it — else the direction of travel).
+        nose.set(0, 0, 1).applyQuaternion(turn);
+        const [p, ahead] = toWorld(c.layer, [s.pos, [s.pos[0] + nose.x, s.pos[1] + nose.y, s.pos[2] + nose.z]]);
+        const dx = ahead[0] - p[0], dy = ahead[1] - p[1], dz = ahead[2] - p[2];
+        const heading = Math.atan2(dx, dz), pitch = Math.asin(Math.min(1, Math.max(-1, dy)));
+        // The full attitude is only handed over when the layer is not turned itself.
+        const t = c.layer.transform;
+        const plain = t.rotDeg[0] === 0 && t.rotDeg[1] === 0 && t.rotDeg[2] === 0;
+        ctx.view.rig.follow(new Vector3(p[0], p[1] + CAR_LIFT, p[2]), heading, pitch, firstPerson, plain ? turn : null);
       }
 
       bar.element.hidden = false;

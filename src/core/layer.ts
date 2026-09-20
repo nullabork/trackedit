@@ -225,6 +225,11 @@ export interface GhostPath {
   gas?: number[];
   brake?: number[];
   speed?: number[];
+  /**
+   * The car body's orientation per sample: unit quaternions (x, y, z, w) in thousandths,
+   * flattened (4 per sample); forward is +z. Not the direction of travel — they part in a drift.
+   */
+  rot?: number[];
   /** Who drove it, when the source said. */
   driver?: string;
   /** Editor only: false hides the line without unloading it. */

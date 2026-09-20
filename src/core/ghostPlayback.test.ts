@@ -59,6 +59,20 @@ describe("ghost playback", () => {
     expect(sampleTimeline({ path: [] as Vec3[] }, buildTimeline({ path: [] }), 0)).toBeNull();
   });
 
+  it("hands back the car body's orientation, blended the short way round", () => {
+    // Facing +z for the whole run except the very first sample, which is the same rotation
+    // written with the opposite sign: blending the two must not swing through anything.
+    const rot = ghost.path.flatMap((_, i) => (i === 0 ? [0, 0, 0, -1000] : [0, 0, 0, 1000]));
+    const s = sampleTimeline({ ...ghost, rot }, tl, 50)!;
+    expect(s.quat!.map((v) => Math.abs(Math.round(v * 1000)))).toEqual([0, 0, 0, 1000]);
+    // A quarter turn about y at sample 2, none at sample 3: halfway is an eighth turn.
+    const turning = ghost.path.flatMap((_, i) => (i === 2 ? [0, 707, 0, 707] : [0, 0, 0, 1000]));
+    const q = sampleTimeline({ ...ghost, rot: turning }, tl, 250)!.quat!;
+    expect(2 * Math.atan2(q[1], q[3]) * (180 / Math.PI)).toBeCloseTo(45, 0);
+    expect(sampleTimeline(ghost, tl, 50)!.quat).toBeNull();
+    expect(sampleTimeline({ ...ghost, rot: [0, 0, 0, 1000] }, tl, 50)!.quat).toBeNull(); // wrong length
+  });
+
   it("steps sample by sample", () => {
     expect(entryAt(tl, 250)).toBe(2);
     expect(stepTime(tl, 250, 1)).toBe(300);

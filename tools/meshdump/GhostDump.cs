@@ -35,6 +35,12 @@ public static class GhostDump
         // steer -100..100 (left negative), gas and brake 0..100, speed in km/h. Whole numbers:
         // a two-hour RPG run is 130,000 samples and rides along in the saved map.
         var steer = new List<int>(); var gas = new List<int>(); var brake = new List<int>(); var speed = new List<int>();
+        // The car's orientation per sample: a unit quaternion (x, y, z, w) in thousandths,
+        // flattened — pitch and roll on banked turns, loops and wall rides, not just heading.
+        // Its forward is +z. It is the BODY, not the direction of travel: checked against the
+        // path, the two agree to a degree while the car grips and part by 60 degrees and more
+        // in a drift (full steer held at 180 km/h), which is exactly what it should show.
+        var rot = new List<int>();
 
         // Older format: decoded samples with a position per record.
         var data = ghost.SampleData;
@@ -71,6 +77,9 @@ public static class GhostDump
                     gas.Add((int)MathF.Round(Math.Clamp(v.Gas, 0f, 1f) * 100f));
                     brake.Add((int)MathF.Round(Math.Clamp(v.Brake, 0f, 1f) * 100f));
                     speed.Add((int)MathF.Round(MathF.Abs(v.Speed)));
+                    var q = v.Rotation;
+                    rot.Add((int)MathF.Round(q.X * 1000f)); rot.Add((int)MathF.Round(q.Y * 1000f));
+                    rot.Add((int)MathF.Round(q.Z * 1000f)); rot.Add((int)MathF.Round(q.W * 1000f));
                 }
             }
         }
@@ -91,6 +100,7 @@ public static class GhostDump
             gas = hasInputs ? gas : null,
             brake = hasInputs ? brake : null,
             speed = hasInputs ? speed : null,
+            rot = hasInputs && rot.Count == path.Count * 4 ? rot : null,
         });
         if (output is not null) File.WriteAllText(output, json);
         return path.Count > 0 ? 0 : 2;

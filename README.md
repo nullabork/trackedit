@@ -334,8 +334,13 @@ relative to its heading: drag orbits around it, the wheel zooms, and moving away
 fly, WASD) switches it off; **1st person** rides in the car. The arrow keys beside the
 scrubber are the driver's inputs from the ghost (steer, gas, brake, plus km/h): each key
 fills by how far the input is pressed, with the percentage on it in two inks so it reads
-over the lit and the unlit part alike. Lines loaded before inputs were kept reload
-themselves the first time they are selected. There is no URL to open a map in
+over the lit and the unlit part alike. The car marker is turned by the BODY's orientation from the
+ghost — heading, pitch and roll: banked on a wall ride, upside down in a loop, and
+sideways in a drift, where the body parts from the direction of travel by 60° and more
+(that is how the rotation data was checked: it follows the path to a degree while the car
+grips). The chase camera takes the car's heading and pitch but never its roll, so a
+banked turn does not tip the horizon; first person takes all three. Lines loaded before
+inputs and rotations were kept reload themselves the first time they are selected. There is no URL to open a map in
 the game's editor, so the panel offers play only.
 
 Extraction is `meshdump ghost <Map.Gbx|Replay.Gbx> [out.json]`, ported from

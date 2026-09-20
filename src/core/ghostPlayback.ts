@@ -29,6 +29,11 @@ export interface PlaybackSample {
   pos: Vec3;
   /** Unit vector the car travels along (layer-local). */
   forward: Vec3;
+  /**
+   * The car body's orientation (x, y, z, w; forward = +z), when the ghost has it. Differs
+   * from `forward` whenever the car slides.
+   */
+  quat: [number, number, number, number] | null;
   /** -1 (full left) .. 1 (full right); null when the ghost has no inputs. */
   steer: number | null;
   /** 0..1 */
@@ -90,7 +95,7 @@ export function entryAt(timeline: PlaybackTimeline, ms: number): number {
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
 export function sampleTimeline(
-  ghost: Pick<GhostPath, "path" | "times" | "checkpoints" | "steer" | "gas" | "brake" | "speed">,
+  ghost: Pick<GhostPath, "path" | "times" | "checkpoints" | "steer" | "gas" | "brake" | "speed" | "rot">,
   timeline: PlaybackTimeline,
   ms: number,
 ): PlaybackSample | null {
@@ -119,10 +124,19 @@ export function sampleTimeline(
 
   const at = (arr: number[] | undefined, scale: number): number | null =>
     arr?.length === ghost.path.length ? lerp(arr[i], arr[j], k) / scale : null;
+  // Orientation: normalised lerp of the two samples' quaternions, the short way round.
+  let quat: PlaybackSample["quat"] = null;
+  if (ghost.rot?.length === ghost.path.length * 4) {
+    const qa = ghost.rot.slice(4 * i, 4 * i + 4), qb = ghost.rot.slice(4 * j, 4 * j + 4);
+    const sign = qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3] < 0 ? -1 : 1;
+    const q = qa.map((v, c) => lerp(v, sign * qb[c], k));
+    const norm = Math.hypot(q[0], q[1], q[2], q[3]);
+    if (norm > 1e-6) quat = [q[0] / norm, q[1] / norm, q[2] / norm, q[3] / norm];
+  }
   const timed = ghost.times?.length === ghost.path.length;
   const raceTime = timed ? lerp(ghost.times![i], ghost.times![j], k) : clamped;
   return {
-    pos, forward: f,
+    pos, forward: f, quat,
     steer: at(ghost.steer, 100), gas: at(ghost.gas, 100), brake: at(ghost.brake, 100), speed: at(ghost.speed, 1),
     raceTime,
     checkpointsTaken: timeline.checkpoints.filter((c) => c <= clamped).length,
