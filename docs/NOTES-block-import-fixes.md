@@ -455,6 +455,50 @@ show the next thing to read: a vertical clip's `Variant` (0/1/2) picks the botto
 or top piece of a post by what stands above and below it — the extractor guesses one row
 (`DensestWallRow`).
 
+## 5k. Every field, audited: what is kept on save, what is drawn by (all cached maps)
+
+**Ask.** "Read all the fields, the subvariant etc. — when we save maps all the fields must be
+saved correctly, and I want it to look good. Go through every piece and see if we are using
+every flag that matters."
+
+**Tool.** `meshdump fieldaudit <map>` reflects over every property GBX.NET exposes on a map's
+blocks, free blocks, items and baked blocks: how often each is set, to what, and which of the
+32 flag bits occur. `npm run fieldaudit` runs it over every cached map, twice:
+
+1. *Kept on save.* The map goes through the real save path untouched and is audited again;
+   every field must come out with the same counts and values. This sees what `roundtrip`
+   cannot — fields our own dump never mentions (item snaps, skins, macroblock references,
+   authors, decals). Result: all 7 maps, every field of every block and item survives (the
+   save reuses the original objects). Baked blocks go to 0 by design; the game rebuilds them.
+2. *Drawn by.* Every field that is set anywhere needs a verdict in the tool's REVIEW table
+   (draws / kept / todo); one without a verdict fails the run, so a field added by a game
+   update or a newer GBX.NET cannot go unnoticed. 41 fields are set across the maps.
+
+**The flag bits, now all accounted for.** 0-5 `Variant`, 6-11 `SubVariant`, 12 ground,
+14 pillar, 15 has author, 16 replacement, 20 waypoint, 21-26 block variant index (5c),
+28 ghost, 29 free.
+
+**What the audit turned up: Variant and SubVariant select a MOBIL.** A block variant's
+`Mobils` is a table, and the extractor exported `[0][0]` only:
+
+- `Variant` = the ROW. `StructurePillar` / `DecoWallCurve1Pillar`: `Air, (empty), Air2, Air3,
+  Air4, Air8, Air16, Air32` — the pillar's height piece, one row drawing nothing at all.
+- `SubVariant` = the COLUMN, an alternative build: `TopCornerOut10m_Air / _AirB / _AirBv2`
+  (another shape), `Curve1_Air / _Airv2` (other materials).
+
+About 2,000 blocks on the cached maps name one (984 + 147 on RHEVARA). Now: the extractor
+writes every mobil that differs from what it would fall back to as `<tag>@<row>_<col>.obj`
+(same dedupe as variants; mobils without any geometry are listed as `emptyMobils`) plus the
+table's shape (`mobils`); `placementMobil` reads the two fields (grid and free blocks), the
+renderer asks for `<variant>@<row>_<col>`, and the provider falls back mobil -> variant ->
+base. `npm run variantcheck` checks every named mobil lies inside its variant's table.
+Needs a block re-extraction to show.
+
+**Still to do** (the tool lists them): block `Skin` (sign images, and the surface of deco
+walls and pillars — `Skin.Text` like `PlatformIce\`), item `PackDesc` / `ForegroundPackDesc`
+(item skins), item `Scale` (1 on every item seen). And from 5j: a baked clip block's own
+`Variant` picks the bottom / middle / top piece of a post.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

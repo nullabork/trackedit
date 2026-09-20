@@ -78,6 +78,19 @@ describe("blockIsGround", () => {
     expect(placementVariant({ ...moved, coord: [1, 9, 1], meta }, true, true)).toBe("air2"); // its layer is tilted
   });
 
+  it("a block names a mobil of its variant: Variant = row, SubVariant = column", async () => {
+    const { placementMobil } = await import("./layer");
+    const block = (flags: number) => ({ id: "b", kind: "block" as const, block: "StructurePillar", coord: [1, 12, 1] as [number, number, number], dir: 0 as const, meta: { flags } });
+    expect(placementMobil(block(0))).toBe("");
+    expect(placementMobil(block(0x10000000 | (1 << 21)))).toBe(""); // ghost, variant index 1: neither is a mobil
+    expect(placementMobil(block(5))).toBe("5_0"); // a pillar's 8 m piece
+    expect(placementMobil(block(1 << 6))).toBe("0_1"); // the "v2" / "B" build
+    expect(placementMobil(block(2 | (1 << 6)))).toBe("2_1");
+    const free = { id: "f", kind: "free" as const, block: "DecoCliffTopCornerOut10m", pos: [0, 0, 0] as [number, number, number], rot: [0, 0, 0] as [number, number, number], isItem: false, meta: { flags: 0x20000000 | (2 << 6) } };
+    expect(placementMobil(free)).toBe("0_2");
+    expect(placementMobil({ ...free, isItem: true, meta: { flags: 5889 } })).toBe(""); // item flags mean something else
+  });
+
   it("a free block names its variant like a grid block, and is never ground; items have none", async () => {
     const { placementVariant } = await import("./layer");
     // RHEVARA: StructureSupportCurve1Out placed free with variant 1 (the bare curved rail) was

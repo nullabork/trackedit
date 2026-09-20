@@ -14,7 +14,8 @@
     "roundtrip": "tsx tools/roundtrip_check.ts",
     "variantcheck": "tsx tools/variant_check.ts",
     "capcheck": "python tools/cap_check.py",
-    "cliptruth": "tsx tools/clip_truth.ts"
+    "cliptruth": "tsx tools/clip_truth.ts",
+    "fieldaudit": "tsx tools/field_audit.ts"
   },
   "dependencies": {
     "three": "^0.168.0"

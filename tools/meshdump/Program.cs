@@ -88,6 +88,9 @@ switch (args[0])
         }
         var dumper = new Dumper(args[1], args[2], args.Length > 3 ? args[3] : null);
         return args[0] == "blocks" ? dumper.DumpBlocks() : dumper.DumpItems();
+    case "fieldaudit":
+        // meshdump fieldaudit <map.Map.Gbx> [out.json] — see FieldAudit.cs.
+        return FieldAudit.Run(args[1], args.Length > 2 ? args[2] : null);
     case "baked":
         {
             // meshdump baked <map.Map.Gbx> [out.json] — the blocks the GAME generated and stored
@@ -1388,6 +1391,39 @@ sealed class Dumper(string root, string outDir, string? filter)
                 // every one that differs from its base as air1.obj, air2.obj,
                 // ground1.obj … (docs/NOTES-block-import-fixes.md).
                 var extraVariants = new List<string>();
+                // A placed block also names a MOBIL of its variant: Variant (flag bits 0-5) is the
+                // row, SubVariant (bits 6-11) the column of the variant's Mobils table. Rows are
+                // e.g. a pillar's height pieces (Air, Air2, Air3, Air4, Air8, Air16, Air32 — and an
+                // EMPTY row that draws nothing), columns alternative builds (a "B" shape, a "v2"
+                // with other materials). Each one that differs from [0][0] rides along as
+                // "<tag>@<row>_<col>.obj"; empty ones are listed so the editor draws nothing
+                // instead of falling back to the base.
+                var emptyMobils = new List<string>();
+                static bool SameFile(string a, string b) => File.Exists(a) && File.Exists(b)
+                    && new FileInfo(a).Length == new FileInfo(b).Length && File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
+                void Drop(string path)
+                {
+                    File.Delete(path);
+                    if (File.Exists(path + ".src.json")) File.Delete(path + ".src.json");
+                }
+                void ExportMobils(CGameCtnBlockInfoVariant? variant, string tag)
+                {
+                    var rows = variant?.Mobils;
+                    if (rows is null) return;
+                    // What a missing file falls back to: the variant's own mesh, else its base's.
+                    var own = Path.Combine(blockDir, tag + ".obj");
+                    var fallback = File.Exists(own) ? own : Path.Combine(blockDir, (tag.StartsWith("ground") ? "ground" : "air") + ".obj");
+                    for (var r = 0; r < rows.Length; r++)
+                        for (var c = 0; c < Math.Max(rows[r].Length, 1); c++)
+                        {
+                            if (r == 0 && c == 0) continue;
+                            var mobilTag = $"{tag}@{r}_{c}";
+                            var path = ExportVariant(variant, blockDir, mobilTag, r, c);
+                            if (path is null) { emptyMobils.Add(mobilTag); continue; }
+                            if (SameFile(fallback, path)) { Drop(path); continue; }
+                            extraVariants.Add(mobilTag);
+                        }
+                }
                 try
                 {
                     air = ExportVariant(info.VariantBaseAir, blockDir, "air");
@@ -1398,15 +1434,12 @@ sealed class Dumper(string root, string outDir, string? filter)
                         var path = ExportVariant(variant, blockDir, tag);
                         if (path is null) continue;
                         // Most additional variants look exactly like their base: keep one file.
-                        if (File.Exists(basePath) && new FileInfo(basePath).Length == new FileInfo(path).Length
-                            && File.ReadAllBytes(basePath).AsSpan().SequenceEqual(File.ReadAllBytes(path)))
-                        {
-                            File.Delete(path);
-                            if (File.Exists(path + ".src.json")) File.Delete(path + ".src.json");
-                            continue;
-                        }
+                        if (SameFile(basePath, path)) { Drop(path); continue; }
                         extraVariants.Add(tag);
                     }
+                    ExportMobils(info.VariantBaseAir, "air");
+                    ExportMobils(info.VariantBaseGround, "ground");
+                    foreach (var (tag, variant) in AdditionalVariants(info)) ExportMobils(variant, tag);
                 }
                 finally
                 {
@@ -1425,8 +1458,10 @@ sealed class Dumper(string root, string outDir, string? filter)
                     ["ground"] = ground is null ? null : $"{name}/ground.obj",
                     ["units"] = UnitTable(info),
                     ["clips"] = ClipTable(info),
+                    ["mobils"] = MobilTable(info),
                 };
                 foreach (var tag in extraVariants) blocks[name]![tag] = $"{name}/{tag}.obj";
+                if (emptyMobils.Count > 0) blocks[name]!["emptyMobils"] = new JsonArray(emptyMobils.Select(t => (JsonNode)t).ToArray());
                 ok++;
             }
             catch (Exception ex)
@@ -1764,15 +1799,37 @@ sealed class Dumper(string root, string outDir, string? filter)
         return [mx + 1, my + 1, mz + 1];
     }
 
-    private string? ExportVariant(CGameCtnBlockInfoVariant? variant, string blockDir, string tag)
+    /// <summary>
+    /// The shape of each variant's Mobils table — columns per row — for variants that have more
+    /// than the single [0][0]: what a placed block's Variant (row) and SubVariant (column) may
+    /// name. A mobil missing from the index then means "looks like its fallback", not "unknown".
+    /// </summary>
+    private static JsonObject MobilTable(CGameCtnBlockInfo info)
+    {
+        var table = new JsonObject();
+        void Add(string tag, CGameCtnBlockInfoVariant? v)
+        {
+            var rows = v?.Mobils;
+            if (rows is null || (rows.Length <= 1 && (rows.Length == 0 || rows[0].Length <= 1))) return;
+            table[tag] = new JsonArray(rows.Select(r => (JsonNode)r.Length).ToArray());
+        }
+        Add("air", info.VariantBaseAir);
+        Add("ground", info.VariantBaseGround);
+        foreach (var (tag, variant) in AdditionalVariants(info)) Add(tag, variant);
+        return table;
+    }
+
+    private string? ExportVariant(CGameCtnBlockInfoVariant? variant, string blockDir, string tag, int row = 0, int col = 0)
     {
         if (variant?.Mobils is null || variant.Mobils.Length == 0) return null;
         var builder = new ObjBuilder();
 
-        // Mobils[variant][subVariant] are alternative appearances, not parts —
-        // exporting them all overlays duplicate geometry. Base look = [0][0].
-        var mobil = variant.Mobils[0].Length > 0 ? variant.Mobils[0][0] : null;
-        if (mobil is null) return null;
+        // Mobils[row][col] are alternative appearances, not parts — exporting them all
+        // into one mesh overlays duplicate geometry. One mesh per mobil; the base look is
+        // [0][0], the others are what a placed block's Variant / SubVariant select.
+        var mobil = row < variant.Mobils.Length && col < variant.Mobils[row].Length ? variant.Mobils[row][col] : null;
+        // An empty mobil (a pillar's empty row) has no body; its unit clips, if any, still show.
+        if (mobil is null && row == 0 && col == 0) return null;
 
         if (tag.StartsWith("ground"))
         {
@@ -1784,7 +1841,7 @@ sealed class Dumper(string root, string outDir, string? filter)
             builder.ClipBox = (new Vector3(0f, float.MinValue, 0f),
                                new Vector3(c[0] * 32f, float.MaxValue, c[2] * 32f));
         }
-        AddMobil(builder, mobil, Quaternion.Identity, Vector3.Zero);
+        if (mobil is not null) AddMobil(builder, mobil, Quaternion.Identity, Vector3.Zero);
         builder.ClipBox = null;
 
         // The game fills exposed faces with per-unit CLIPS: bottom clips are

@@ -2,6 +2,7 @@ import {
   AdditiveBlending,
   CanvasTexture,
   DoubleSide,
+  Group,
   Mesh,
   MeshLambertMaterial,
   Object3D,
@@ -69,7 +70,12 @@ interface MeshIndexEntry {
   units?: Record<string, [number, number, number][] | null> | null;
   /** Clips per unit face per variant (meshdump ClipTable). */
   clips?: Record<string, UnitClip[] | null> | null;
+  /** "<variant>@<row>_<col>" mobils that have no geometry at all: nothing is drawn. */
+  emptyMobils?: string[] | null;
 }
+
+/** "air1@2_0" -> "air1": the variant a mobil belongs to (units, clips and fallback mesh are per variant). */
+const variantOfMobil = (variant: string): string => (variant.includes("@") ? variant.slice(0, variant.indexOf("@")) : variant);
 
 /** Additional variants that differ from their base ride along as air1, air2, ground1, … -> OBJ path. */
 const variantPath = (entry: MeshIndexEntry | undefined, variant: string): string | null =>
@@ -456,6 +462,7 @@ export class MeshProvider implements GeometryProvider {
   blockClips(name: string, variant: MeshVariant): BlockClipInfo | undefined {
     const entry = this.index?.blocks[name];
     if (!entry) return undefined;
+    variant = variantOfMobil(variant);
     const cached = this.clipInfos.get(name + KEY_SEP + variant);
     if (cached) return cached;
     // A variant without its own table borrows its base's, then the other
@@ -481,6 +488,11 @@ export class MeshProvider implements GeometryProvider {
    * when no ground OBJ exists (and vice versa), so nothing loads twice. */
   private variantKey(base: string, variant: MeshVariant): string {
     const entry = this.index?.blocks[base];
+    // A mobil with a mesh of its own (or with none at all); otherwise whatever its variant shows.
+    if (variant.includes("@")) {
+      if (variantPath(entry, variant) || entry?.emptyMobils?.includes(variant)) return base + KEY_SEP + variant;
+      variant = variantOfMobil(variant);
+    }
     // An additional variant with a mesh of its own; otherwise its base.
     if (variant !== "air" && variant !== "ground" && variantPath(entry, variant)) return base + KEY_SEP + variant;
     if (baseVariant(variant) !== "ground") return base;
@@ -497,6 +509,12 @@ export class MeshProvider implements GeometryProvider {
     const key = this.variantKey(base, variant);
     const cached = this.cache.get(key);
     if (cached) return cached;
+    if (this.index?.blocks[base]?.emptyMobils?.includes(variant)) {
+      // e.g. the empty row of a pillar: the game draws nothing, and so do we.
+      const nothing = new Group();
+      this.cache.set(key, nothing);
+      return nothing;
+    }
     if (load) this.requestLoad(def, name, variant);
     return this.fallback.getTemplate(def, name);
   }

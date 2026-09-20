@@ -114,6 +114,20 @@ export function placementVariant(p: Placement, stadiumBase: boolean, lifted = fa
   return index ? `${base}${index}` : base;
 }
 
+/**
+ * Which MOBIL of its variant a placed block shows, as "<row>_<col>", or "" for the base
+ * [0][0]. Row = the block's Variant (flag bits 0-5): e.g. which height piece of a pillar,
+ * one of them empty. Column = SubVariant (bits 6-11): an alternative build — another shape
+ * ("B"), other materials ("v2"). Items have none. tools/variant_check.ts verifies every
+ * named mobil exists in the block's definition.
+ */
+export function placementMobil(p: Placement): string {
+  if (p.kind !== "block" && !(p.kind === "free" && !p.isItem)) return "";
+  const flags = Number((p.meta as { flags?: number } | undefined)?.flags ?? 0);
+  const row = flags & 0x3f, col = (flags >>> 6) & 0x3f;
+  return row || col ? `${row}_${col}` : "";
+}
+
 export function blockVariantIndex(p: { readonly meta?: Readonly<Record<string, unknown>> }): number {
   return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
 }

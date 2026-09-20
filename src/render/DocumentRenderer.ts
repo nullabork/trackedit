@@ -29,7 +29,7 @@ import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, hiddenClipFaces } from "./clipFaces";
 import type { ClipFace } from "./clipFaces";
-import { isPlacementVisible, placementVariant } from "@core/layer";
+import { isPlacementVisible, placementMobil, placementVariant } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -821,7 +821,10 @@ export class DocumentRenderer {
     // Pitch/roll or a vertical shift of the layer lifts its blocks off the terrain; yaw doesn't.
     const t = layer?.transform;
     const lifted = !!t && (t.rotDeg[0] !== 0 || t.rotDeg[2] !== 0 || t.translate[1] !== 0);
-    return placementVariant(p, baseTypeOf(this.doc.decorationBase) === "stadium", lifted);
+    // "<variant>@<row>_<col>" when the block names a mobil other than the base one.
+    const mobil = placementMobil(p);
+    const variant = placementVariant(p, baseTypeOf(this.doc.decorationBase) === "stadium", lifted);
+    return mobil ? `${variant}@${mobil}` : variant;
   }
 
   /** Build the visual for a placement. Shared with tools for ghost previews. */
