@@ -142,6 +142,13 @@ export function placementSkin(p: Placement): string {
   return skin.text.replace(/[\\/]+$/, "");
 }
 
+/** An item's uniform scale (CGameCtnAnchoredObject.Scale); 1 unless the map says otherwise. */
+export function placementScale(p: Placement): number {
+  if (p.kind !== "free" || !p.isItem) return 1;
+  const scale = Number((p.meta as { scale?: number } | undefined)?.scale ?? 1);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
 export function blockVariantIndex(p: { readonly meta?: Readonly<Record<string, unknown>> }): number {
   return (Number((p.meta as { flags?: number } | undefined)?.flags ?? 0) >>> 21) & 0x3f;
 }

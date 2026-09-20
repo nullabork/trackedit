@@ -30,7 +30,7 @@ import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells, wallSegments } from "./clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, hiddenClipFaces } from "./clipFaces";
 import type { ClipFace } from "./clipFaces";
-import { isPlacementVisible, placementMobil, placementSkin, placementVariant } from "@core/layer";
+import { isPlacementVisible, placementMobil, placementScale, placementSkin, placementVariant } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
 import { CATEGORY_COLORS } from "./PlaceholderProvider";
@@ -915,11 +915,14 @@ export class DocumentRenderer {
       obj.add(clone);
       obj.position.set(...p.pos);
       obj.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
+      // The game scales an item about its anchor, pivot offset included.
+      obj.scale.setScalar(placementScale(p));
       obj.userData.originOffset = [...p.pivot];
       return obj;
     }
     clone.position.set(...p.pos);
     clone.rotation.set(p.rot[1], p.rot[0], p.rot[2], GAME_EULER_ORDER);
+    clone.scale.setScalar(placementScale(p));
     return clone;
   }
 

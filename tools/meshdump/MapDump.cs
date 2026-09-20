@@ -96,6 +96,12 @@ public static class MapDump
             color = i.Color.ToString(),
             lightmapQuality = i.LightmapQuality.ToString(),
             waypoint = Waypoint(i.WaypointSpecialProperty),
+            // An item's skin: the image on a sign or screen (a game file or a URL).
+            skin = i.PackDesc is null && i.ForegroundPackDesc is null ? null : new
+            {
+                pack = Pack(i.PackDesc),
+                foregroundPack = Pack(i.ForegroundPackDesc),
+            },
         }),
     });
 

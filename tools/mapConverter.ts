@@ -12,7 +12,7 @@ import { join } from "node:path";
 export const DUMP_FIELDS = {
   map: ["mapName", "mapUid", "decoration", "colorPalette", "blocks", "items"],
   block: ["idx", "name", "coord", "dir", "isGround", "isClip", "isFree", "absPos", "yawPitchRoll", "flags", "variant", "subVariant", "color", "lightmapQuality", "waypoint", "skin"],
-  item: ["idx", "name", "itemAuthor", "absPos", "yawPitchRoll", "pivotPos", "scale", "flags", "color", "lightmapQuality", "waypoint"],
+  item: ["idx", "name", "itemAuthor", "absPos", "yawPitchRoll", "pivotPos", "scale", "flags", "color", "lightmapQuality", "waypoint", "skin"],
 } as const;
 
 export function dumpProblems(dump: Record<string, unknown> & { blocks?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> }): string[] {

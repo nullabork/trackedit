@@ -564,6 +564,20 @@ Free blocks keep the per-block answer.
 Horizontal clips use the same field as a neighbour bitmask (`WaterHFCLeft`: rows 0, 4, 8, 12
 of 16; `WaterHFCRight`: 0..3) — not read yet.
 
+## 5n. Item scale and item skins
+
+- **Scale.** `placementScale`: the renderer scales an item uniformly about its anchor (pivot
+  offset included). It is 1 on all 13,038 items of the cached maps, so this is unverified
+  against a map that really uses it.
+- **Item skins** (`PackDesc`, `ForegroundPackDesc`) are now in the map dump (`skin` on items).
+  On RHEVARA 153 of 159 are light COLOURS — `Skins\Stadium\LightColors\White.dds`, `Coral`,
+  `Orange`, `WhiteCold`, `Off`, and `LightTube\Orange.zip` — on `ShowLights`, `Lamp`,
+  `LightSphere`, `LightTube*`; the rest are screens showing a game image or a URL, one with a
+  `.webm` foreground. NOT drawn: the `Skins` pack is outside what the Openplanet plugin
+  extracts (`GameData` only), and guessing a colour from a file name is not reading it. To do:
+  add the skin files to the extract list, take each light skin's colour from its image,
+  tint the item's emissive material by it.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
