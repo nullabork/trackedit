@@ -492,7 +492,11 @@ writes every mobil that differs from what it would fall back to as `<tag>@<row>_
 table's shape (`mobils`); `placementMobil` reads the two fields (grid and free blocks), the
 renderer asks for `<variant>@<row>_<col>`, and the provider falls back mobil -> variant ->
 base. `npm run variantcheck` checks every named mobil lies inside its variant's table.
-Needs a block re-extraction to show.
+After the re-extraction: 1,057 blocks have a mobil table, 4,600 mobil meshes differ from
+their fallback (+2.7 GB of OBJ, +16%), 3,093 mobils are empty; 3,336 placed blocks on the 7
+cached maps name a mobil and none lies outside its table. Seen in the editor: a
+`DecoCliffTopCornerOut10m` naming `[0][2]` loads 2,217 vertices (`air@0_2.obj`), not the
+base's 1,050.
 
 **Still to do** (the tool lists them): block `Skin` (sign images, and the surface of deco
 walls and pillars — `Skin.Text` like `PlatformIce\`), item `PackDesc` / `ForegroundPackDesc`
