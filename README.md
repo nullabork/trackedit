@@ -347,7 +347,8 @@ part of the import): the models are whole folders under `GameData/Skins/Models/C
 which the extract plugin now pulls as well (its full run, or the quick **car model only**
 entry) — Snow, Rally and Desert each with a `MainBody.Mesh.gbx`, the Stadium body under
 `Stadium/Prestige/Ranked` with its textures in `Stadium/Common`. The second LOD is
-converted, damage-decal layers and the prestige skin's medal and gems left out, and the
+converted, only the prestige skin's gems left out (its "medal" material is body panels,
+and the "…DmgDecal…" parts are panels whose shader takes stickers, not overlays), and the
 body is tinted in the line's hue. Without it a box the size of a car stands in. **Hide
 line** in the bar takes the tube out of view while playing or following, so only the car
 is left; it comes back when you pause and stop following (nothing is saved — the line

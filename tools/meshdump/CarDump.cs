@@ -66,7 +66,6 @@ static class CarDump
         {
             if ((geom.LodMask & lod) == 0) continue;
             if (model.Visuals[geom.VisualIndex] is not CPlugVisualIndexedTriangles visual) continue;
-            // "…Decal…" layers are damage overlays: nothing to show on an undamaged car.
             var material = MaterialName(model, geom.MaterialIndex);
             if (material is null) continue;
             used.Add(material);
@@ -109,8 +108,11 @@ static class CarDump
 
     /// <summary>
     /// The texture set a car material draws from — "Skin", "Details", "Wheels", "Glass", "Gem"… —
-    /// which is the last word of its name ("_SkinDmg_Skin", "_DetailsDmgNormal_Wheels"). Null
-    /// for the damage decal layers.
+    /// which is the last word of its name ("_SkinDmg_Skin", "_DetailsDmgNormal_Wheels"). The
+    /// middle word is the SHADER, not a kind of part: "…DmgDecal…" parts are ordinary panels
+    /// whose shader also takes stickers — "_SkinDmgDecal_Skin" is the cover over the engine
+    /// bay, "_DetailsDmgDecal_Details" the rear grille. Leaving them out leaves holes. Null
+    /// only for the prestige skin's gems.
     /// </summary>
     static string? MaterialName(CPlugSolid2Model model, int i)
     {
@@ -122,10 +124,12 @@ static class CarDump
         var stem = Path.GetFileName(raw.Replace('\\', '/'));
         var dot = stem.IndexOf('.');
         var name = new string((dot > 0 ? stem[..dot] : stem).Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
-        if (name.Contains("Decal", StringComparison.OrdinalIgnoreCase)) return null;
         var set = name[(name.LastIndexOf('_') + 1)..];
         // The Stadium body comes from the ranked prestige skin, the only place it ships as a
-        // mesh: its medal and gems are that skin's ornaments, not the car.
-        return set.StartsWith("Gem", StringComparison.Ordinal) || set.StartsWith("Prestige", StringComparison.Ordinal) ? null : set;
+        // mesh. Its GEMS are that skin's ornaments and are left out. "PrestigeMedal" is NOT an
+        // ornament, whatever the name says: 21,000 vertices spanning the whole car — the rear
+        // cover and other body panels the skin draws in its medal metal. Without it the car has
+        // holes; it has no base-colour texture, the editor paints it like the body.
+        return set.StartsWith("Gem", StringComparison.Ordinal) ? null : set;
     }
 }

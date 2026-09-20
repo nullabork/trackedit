@@ -53,7 +53,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       if (!model) return;
       for (const child of [...car.children]) car.remove(child);
       car.add(model.object);
-      car.userData.body = model.body;
+      car.userData.tinted = model.tinted;
       car.userData.lift = 0; // the model's origin is on the road under it, like the ghost's position
     });
 
@@ -159,7 +159,10 @@ export const ghostPlayerPlugin: EditorPlugin = {
       car.quaternion.copy(turn);
       car.position.set(s.pos[0], s.pos[1] + ((car.userData.lift as number | undefined) ?? CAR_LIFT), s.pos[2]);
       car.visible = !(follow && firstPerson);
-      (car.userData.body as MeshLambertMaterial).color.set(lineHue(c.index));
+      // Body in the line's hue, its untextured panels a shade darker.
+      const [body, panels] = car.userData.tinted as MeshLambertMaterial[];
+      body.color.set(lineHue(c.index));
+      panels?.color.set(lineHue(c.index)).multiplyScalar(0.72);
 
       if (follow) {
         // The camera works in world space; the line may sit in a moved or turned layer.
@@ -194,7 +197,7 @@ const CAR_LIFT = 0.4;
  * The game's car (meshdump car -> meshes/car/): the Stadium model, its body tinted in the
  * line's hue through `body`. Null when the import has none — the box stays.
  */
-async function loadCarModel(): Promise<{ object: Group; body: MeshLambertMaterial } | null> {
+async function loadCarModel(): Promise<{ object: Group; tinted: MeshLambertMaterial[] } | null> {
   try {
     const res = await fetch("meshes/car/index.json");
     if (!res.ok) return null;
@@ -203,11 +206,15 @@ async function loadCarModel(): Promise<{ object: Group; body: MeshLambertMateria
     if (!entry) return null;
     const textures = new TextureLoader();
     const body = new MeshLambertMaterial({ color: 0x2dd4bf, side: DoubleSide });
+    // Body panels that come without a base-colour texture (the prestige skin's "medal" metal:
+    // the rear cover and more) are painted like the body.
+    const panels = new MeshLambertMaterial({ color: 0x2dd4bf, side: DoubleSide });
     const materialFor = (name: string): MeshLambertMaterial => {
       const file = entry.materials[name];
       const map = file ? textures.load("meshes/" + file) : null;
       if (map) map.colorSpace = SRGBColorSpace;
       if (name === "Skin") { body.map = map; return body; }
+      if (name.startsWith("Prestige")) return panels;
       if (name.startsWith("Glass")) return new MeshLambertMaterial({ color: 0x0b1116, transparent: true, opacity: 0.75, side: DoubleSide });
       return new MeshLambertMaterial({ map, color: map ? 0xffffff : 0x3a4350, side: DoubleSide });
     };
@@ -222,7 +229,7 @@ async function loadCarModel(): Promise<{ object: Group; body: MeshLambertMateria
       mesh.raycast = () => {};
     });
     object.name = "ghost-car-model";
-    return { object, body };
+    return { object, tinted: [body, panels] };
   } catch {
     return null;
   }
@@ -239,7 +246,7 @@ function buildCar(): Group {
   cabin.position.set(0, 0.8, -0.4);
   car.add(hull, nose, cabin);
   car.name = "ghost-car";
-  car.userData.body = body;
+  car.userData.tinted = [body];
   car.traverse((o) => { o.raycast = () => {}; });
   return car;
 }
