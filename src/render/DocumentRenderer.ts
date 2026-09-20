@@ -27,6 +27,8 @@ import { CELL, degToRad } from "@core/math";
 import { baseTypeOf } from "@core/mapbase";
 import { GAME_EULER_ORDER } from "@core/math";
 import { cellKey, hiddenClipParts, occupiedCells } from "./clipAdjacency";
+import { ClipFaceIndex, freeClipFaces, hiddenClipFaces } from "./clipFaces";
+import type { ClipFace } from "./clipFaces";
 import { isPlacementVisible, placementVariant } from "@core/layer";
 import type { ClipSubject } from "./clipAdjacency";
 import type { GeometryProvider, MeshVariant } from "./GeometryProvider";
@@ -535,6 +537,8 @@ export class DocumentRenderer {
       this.cellsOf.delete(id);
     }
     this.cellIndex.delete(layerId);
+    this.freeFaceIndex.delete(layerId);
+    for (const [id, f] of [...this.freeFacesOf]) if (f.layerId === layerId) this.freeFacesOf.delete(id);
     this.batcher.clearHost(g);
     this.proxyGroups.delete(layerId);
     this.layerTransformSig.delete(layerId);
@@ -610,6 +614,39 @@ export class DocumentRenderer {
   /** Placement id -> the cells it was registered under. */
   private readonly cellsOf = new Map<string, { layerId: string; keys: string[] }>();
 
+  /**
+   * Free blocks join their clips too, but only with each other, by where their unit faces
+   * meet (render/clipFaces; measured against the game's baked clips). Layer id -> faces.
+   */
+  private readonly freeFaceIndex = new Map<string, ClipFaceIndex>();
+  private readonly freeFacesOf = new Map<string, { layerId: string; faces: ClipFace[] }>();
+
+  private registerFreeFaces(layer: Layer, p: Placement): void {
+    if (p.kind !== "free" || p.isItem) return;
+    const info = this.geometry.blockClips?.(p.block, this.variantOf(p, layer));
+    if (!info?.clips.length) return;
+    let index = this.freeFaceIndex.get(layer.id);
+    if (!index) this.freeFaceIndex.set(layer.id, (index = new ClipFaceIndex()));
+    const faces = freeClipFaces(p.id, p.pos, p.rot, info);
+    for (const f of faces) index.add(f);
+    this.freeFacesOf.set(p.id, { layerId: layer.id, faces });
+  }
+
+  /** Re-evaluate the free blocks whose clips look at this one's (after it appeared or went). */
+  private refreshFreeClipsFacing(layerId: string, faces: readonly ClipFace[]): void {
+    const layer = this.doc.getLayer(layerId);
+    const index = this.freeFaceIndex.get(layerId);
+    if (!layer || !index) return;
+    const seen = new Set<string>();
+    for (const f of faces) for (const o of index.facing(f)) {
+      if (seen.has(o.owner)) continue;
+      seen.add(o.owner);
+      const q = layer.placements.get(o.owner);
+      const obj = this.placementObjects.get(o.owner);
+      if (q && obj && this.applyClips(layer, q, obj)) this.repark(o.owner);
+    }
+  }
+
   private clipSubject(layer: Layer, p: Placement): ClipSubject | null {
     if (p.kind !== "block") return null;
     const info = this.geometry.blockClips?.(p.block, this.variantOf(p, layer));
@@ -646,6 +683,8 @@ export class DocumentRenderer {
 
   /** Toggle a placed block's clip parts by what its neighbours join. True when anything flipped. */
   private applyClips(layer: Layer, p: Placement, obj: Object3D): boolean {
+    const free = this.freeFacesOf.get(p.id);
+    if (free) return this.showClipParts(obj, hiddenClipFaces(free.faces, this.freeFaceIndex.get(free.layerId)!));
     const s = this.clipSubject(layer, p);
     if (!s || !s.info.clips.length) return false;
     const cells = this.cellIndex.get(layer.id);
@@ -659,6 +698,10 @@ export class DocumentRenderer {
       }
       return out;
     });
+    return this.showClipParts(obj, hidden);
+  }
+
+  private showClipParts(obj: Object3D, hidden: ReadonlySet<string>): boolean {
     let changed = false;
     obj.traverse((o) => {
       if (!o.name.startsWith("clip:")) return;
@@ -697,6 +740,9 @@ export class DocumentRenderer {
     this.timed("cells", () => this.registerCells(layer, p));
     const reg = this.cellsOf.get(p.id);
     if (reg) this.timed("clips", () => this.refreshClipsAround(layer.id, reg.keys));
+    this.registerFreeFaces(layer, p);
+    const free = this.freeFacesOf.get(p.id);
+    if (free) this.timed("clips", () => this.refreshFreeClipsFacing(layer.id, free.faces));
 
     const [lx, ly, lz] = this.localPosition(p);
     const info: LodInfo = { layerId: layer.id, block: p.block, lx, ly, lz };
@@ -751,6 +797,12 @@ export class DocumentRenderer {
     this.live.delete(placementId);
     const reg = this.unregisterCells(placementId);
     if (reg) this.refreshClipsAround(reg.layerId, reg.keys);
+    const free = this.freeFacesOf.get(placementId);
+    if (free) {
+      this.freeFacesOf.delete(placementId);
+      this.freeFaceIndex.get(free.layerId)?.remove(placementId, free.faces);
+      this.refreshFreeClipsFacing(free.layerId, free.faces);
+    }
     if (this.isolatedIds?.delete(placementId) && this.isolatedIds.size === 0) this.setIsolation(null);
     const info = this.lodInfo.get(placementId);
     if (info) {

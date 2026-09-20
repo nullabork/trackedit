@@ -33,6 +33,8 @@ import { baseTypeOf } from "../src/core/mapbase";
 import { importDump, type MapDump } from "../src/io/trackoJson";
 import { FACE_NORMAL, cellKey, clipHiddenBy, clipPartName, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, withClipDefs } from "../src/render/clipAdjacency";
 import type { BlockClipInfo, ClipDefs, ClipSubject, UnitClip } from "../src/render/clipAdjacency";
+import { ClipFaceIndex, freeClipFaces, gridClipFaces, hiddenClipFaces } from "../src/render/clipFaces";
+import type { ClipFace } from "../src/render/clipFaces";
 
 const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
   join(process.cwd(), "tools", "meshdump", "bin", "Release", "net8.0", process.platform === "win32" ? "meshdump.exe" : "meshdump");
@@ -77,13 +79,16 @@ const brief = process.argv.includes("--brief");
 const work = mkdtempSync(join(tmpdir(), "trackedit-truth-"));
 let doc: MapDocument;
 let truth: Truth;
+const bakedFree = new Map<string, number>();
 try {
   const dumpPath = join(work, "dump.json");
   execFileSync(MESHDUMP, ["map", mapPath, dumpPath], { stdio: "ignore" });
   const bakedPath = join(work, "baked.json");
   execFileSync(MESHDUMP, ["baked", mapPath, bakedPath], { stdio: "ignore" });
-  const baked = JSON.parse(readFileSync(bakedPath, "utf-8")) as { mapName: string; baked: Array<{ name: string; coord: GridCoord; dir: number; isGhost: boolean }> };
-  truth = { mapName: baked.mapName, clips: baked.baked.map((b) => ({ name: b.name, coord: b.coord, dir: b.dir, ghost: b.isGhost })) };
+  const baked = JSON.parse(readFileSync(bakedPath, "utf-8")) as { mapName: string; baked: Array<{ name: string; coord: GridCoord; dir: number; isGhost: boolean; isFree: boolean }> };
+  // Clips of free blocks are baked without a cell: compared by name and count further down.
+  truth = { mapName: baked.mapName, clips: baked.baked.filter((b) => !b.isFree).map((b) => ({ name: b.name, coord: b.coord, dir: b.dir, ghost: b.isGhost })) };
+  for (const b of baked.baked) if (b.isFree) bakedFree.set(b.name, (bakedFree.get(b.name) ?? 0) + 1);
   doc = new MapDocument();
   const imported = importDump(JSON.parse(readFileSync(dumpPath, "utf-8")) as MapDump);
   doc.reset(imported.layers, { name: imported.name, decoration: imported.decoration });
@@ -226,6 +231,46 @@ for (const c of all) {
     m.set(rel, (m.get(rel) ?? 0) + 1);
   }
 }
+// --- free blocks: no cell to compare by, so per clip name, how many the game baked vs how many we show ---
+const freeFaces = new Map<string, ClipFace[]>(), gridFaces: ClipFace[] = [];
+for (const layer of doc.layers) for (const p of layer.placements.values()) {
+  if (p.kind === "free" && !p.isItem) {
+    const info = clipInfo(p.block, placementVariant(p, stadium));
+    if (info?.clips.length) freeFaces.set(p.id, freeClipFaces(p.id, p.pos, p.rot, info));
+  } else if (p.kind === "block") {
+    const info = clipInfo(p.block, placementVariant(p, stadium));
+    if (info) gridFaces.push(...gridClipFaces(p.id, { coord: p.coord, dir: p.dir }, info));
+  }
+}
+let freeWrong = 0, freeTotal = 0;
+if (freeFaces.size || bakedFree.size) {
+  const score = (withGrid: boolean) => {
+    const index = new ClipFaceIndex();
+    for (const faces of freeFaces.values()) for (const f of faces) index.add(f);
+    if (withGrid) for (const f of gridFaces) index.add(f);
+    const shown = new Map<string, number>();
+    for (const faces of freeFaces.values()) {
+      const gone = hiddenClipFaces(faces, index);
+      for (const f of faces) if (!gone.has(clipPartName(f.clip))) shown.set(f.clip.id, (shown.get(f.clip.id) ?? 0) + 1);
+    }
+    let diff = 0;
+    const rows: string[] = [];
+    for (const name of new Set([...shown.keys(), ...bakedFree.keys()])) {
+      const ours = shown.get(name) ?? 0, game = bakedFree.get(name) ?? 0;
+      diff += Math.abs(ours - game);
+      if (ours !== game) rows.push(`${name}: game ${game}, ours ${ours}`);
+    }
+    return { diff, rows };
+  };
+  freeTotal = [...freeFaces.values()].reduce((n, f) => n + f.length, 0);
+  const alone = score(false), mixed = score(true);
+  freeWrong = alone.diff;
+  const gameTotal = [...bakedFree.values()].reduce((a, b) => a + b, 0);
+  console.log(`  free blocks: ${freeFaces.size} with clips, ${freeTotal} clip pieces; the game baked ${gameTotal}`);
+  console.log(`     off by ${alone.diff} when free clips join each other only (the editor's rule), by ${mixed.diff} if they joined grid blocks too, by ${Math.abs(freeTotal - gameTotal)} if nothing joined`);
+  for (const r of alone.rows.sort().slice(0, brief ? 4 : 20)) console.log(`       ${r}`);
+}
+
 const unclaimed = new Map<string, number>();
 for (const g of truth.clips) if (!claimed.has(g)) bump(unclaimed, g.name);
 

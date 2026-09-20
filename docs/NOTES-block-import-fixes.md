@@ -427,6 +427,34 @@ it is a material / colouring difference rather than a wrong-looking block — bu
 unverified across the block set, and wants the same treatment: export per mobil, pick by
 the file's field, check editor against file.
 
+## 5j. Free blocks join their clips too — with each other (RHEVARA, a floor of reset gates)
+
+**Report.** Sixteen free-placed `GateExpandableSpecialReset` blocks laid flat as a floor each
+showed their own black frame; "these kinds of effect blocks should join together".
+
+**Truth.** The gate's frame IS clips (`...RightVFC`, `...LeftVFC`, `...FCT`, `...FCB`), and
+the editor never hid a free block's clips: no cell, no neighbours. But the game bakes clips
+for free blocks as well — 1,355 of RHEVARA's 31,648 baked blocks carry the free flag, with a
+pose in metres instead of a cell (`meshdump baked` now dumps `absPos`/`yawPitchRoll`). For
+the four gates of one column it baked one top bar, one foot and four posts on the outer
+side: the rest joined.
+
+**Rule** (`src/render/clipFaces.ts`). Orientation-free: two clips face each other when the
+centres of their unit faces coincide (0.5 m) and their outward normals are opposite; whether
+that hides them is the same definition-field rule as for grid blocks (5h). Scored by clip
+name against the baked free clips (`npm run cliptruth`), 2,029 free clip pieces on RHEVARA:
+
+| free clips join... | off by |
+|---|---|
+| nothing (the editor until now) | 674 |
+| free AND grid blocks | 50 |
+| **each other only** (shipped) | **12** |
+
+So free blocks live in a world of their own, like ghost blocks do NOT. The baked clips also
+show the next thing to read: a vertical clip's `Variant` (0/1/2) picks the bottom, middle
+or top piece of a post by what stands above and below it — the extractor guesses one row
+(`DensestWallRow`).
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

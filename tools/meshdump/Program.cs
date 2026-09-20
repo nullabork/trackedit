@@ -98,6 +98,10 @@ switch (args[0])
             {
                 ["name"] = b.Name, ["coord"] = new[] { b.Coord.X, b.Coord.Y, b.Coord.Z }, ["dir"] = (int)b.Direction,
                 ["flags"] = b.Flags, ["isGround"] = b.IsGround, ["isGhost"] = b.IsGhost, ["isClip"] = b.IsClip, ["variant"] = b.Variant, ["subVariant"] = b.SubVariant,
+                // Clips of FREE blocks are baked too: no cell, a pose in metres (same frame as a free block's).
+                ["isFree"] = b.IsFree,
+                ["absPos"] = b.AbsolutePositionInMap is { } ap ? new[] { ap.X, ap.Y, ap.Z } : null,
+                ["yawPitchRoll"] = b.YawPitchRoll is { } r ? new[] { r.X, r.Y, r.Z } : null,
             }).ToList();
             var extra = (map.BakedClipsAdditionalData ?? []).Select(c => new Dictionary<string, object?>
             {
