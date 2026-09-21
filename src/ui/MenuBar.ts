@@ -6,6 +6,8 @@ import { openTmxDialog } from "./TmxDialog";
 import { openLiveDialog } from "./LiveDialog";
 import { getLiveSession } from "@plugins/liveSession";
 import { openControlSettings } from "./ControlSettingsDialog";
+import { openRoomDialog } from "./RoomDialog";
+import { getRoomTracker } from "@plugins/roomTracker";
 
 interface MenuEntry {
   label: string;
@@ -19,6 +21,7 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
     { label: "New…", action: () => void newMapGuarded(ctx) },
     { label: "Open…", action: () => openMapBrowser(ctx) },
     { label: "Open from TMX…", action: () => openTmxDialog(ctx) },
+    { label: "Track a server…", action: () => openRoomDialog(ctx) },
     { label: "", divider: true },
     { label: "Import JSON…", action: () => importJsonFlow(ctx) },
     { label: "Export JSON", action: () => exportJsonFlow(ctx) },
@@ -87,12 +90,25 @@ export function buildMenuBar(ctx: EditorContext, host: HTMLElement): void {
     syncStatus.textContent = message;
     syncStatus.title = message;
   });
+  // Shown only while a server is tracked: tracking outlives its dialog, so it has to be visible.
+  const tracker = getRoomTracker(ctx);
+  const roomButton = el("button", { class: "menu-btn", onclick: () => openRoomDialog(ctx) });
+  const refreshRoom = () => {
+    roomButton.hidden = !tracker.tracked;
+    roomButton.textContent = tracker.tracked
+      ? `Tracking ${tracker.tracked.name}${tracker.state ? ` \u00B7 ${tracker.state.playerCount} players` : ""}${tracker.loading ? " \u00B7 opening map\u2026" : ""}`
+      : "";
+    roomButton.title = tracker.note;
+  };
+  tracker.events.on("changed", refreshRoom);
+  refreshRoom();
   host.append(
     el("span", { class: "menu-brand" }, "trackedit"),
     menuButton("File", fileEntries),
     el("button", { class: "menu-btn", onclick: () => openControlSettings(ctx) }, "Controls"),
     liveButton,
     syncStatus,
+    roomButton,
     el("span", { class: "menu-spacer" }),
     title,
   );

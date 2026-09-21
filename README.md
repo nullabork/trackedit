@@ -691,6 +691,34 @@ account and TIME (a new personal best is a new entry), a TMX replay by its
 replay id; the newest 300 lines are kept. It is only a cache — lines shown on a
 layer are saved with the map as before, and "reload line" always fetches.
 
+#### Track a server: open whatever a club room is playing
+
+File ▸ **Track a server…** searches the game's club rooms by name (any part of
+it, all clubs, busiest first), and **Start tracking** on one opens the map it is
+playing — and every map it moves to, by itself. Tracking outlives the dialog and
+a reload; while it runs the menu bar says "Tracking <room> · n players" (click it
+for the dialog and **Stop tracking**). Same server account as the records.
+
+- The room is asked for every 15 s (`POLL_MS` in `src/core/roomTracking.ts`), every
+  60 s while its server is off (a Nadeo-hosted room stops when it is empty), and
+  errors back off to 2 min. Nadeo publishes no rate limit; the community guideline
+  (webservices.openplanet.dev, "Responsible usage") is about 2 requests/second for
+  short bursts and less for monitoring. One poll is ONE request, and the bridge
+  shares a room's answer for 10 s, so more tabs do not mean more requests.
+- A map opens when THE SERVER changes map. Open something else meanwhile and it
+  stays open until the server's next map.
+- A map uid names one exact file. A track you already have under that identity
+  opens from your tracks, lines and edits included — a cycling playlist never
+  overwrites them. Else, if TMX has the uid, it opens as that TMX map (card,
+  replays); else the file comes from Nadeo's storage as `nadeo-<uid>`, its
+  original kept in `maps/gbx` as the template for "Save to Trackmania".
+- Rooms on a player's own dedicated server ("own server" in the list) cannot be
+  tracked: Nadeo does not know what they are playing.
+
+Bridge: `GET /api/nadeo/rooms?name=`, `/api/nadeo/room/:clubId/:activityId`,
+`/api/nadeo/map/:uid[?load=1]`. Gotcha: the room list's filter is `name=`;
+`nameFilter=` and friends are silently ignored and return every room.
+
 Embedded items GBX.NET cannot parse get two rescue attempts: Mesh Modeler
 items whose crystal carries chunks or modifier layers the reader stumbles on
 are repaired by dropping the lightmap chunk and, if needed, trailing

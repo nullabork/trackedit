@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createMapConverter } from "./tools/mapConverter";
+import { createMapLoader } from "./tools/mapLoader";
 import { liveBridge } from "./tools/liveBridge";
 import { nadeoBridge } from "./tools/nadeoBridge";
 import { gameBridge, tmxTemplatePath } from "./tools/gameBridge";
@@ -25,6 +25,9 @@ const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
   join(process.cwd(), "tools", "meshdump", "bin", "Release", "net8.0",
     process.platform === "win32" ? "meshdump.exe" : "meshdump");
 
+/** Downloaded map file -> editor dump; shared by the TMX and the Nadeo (club room) bridges. */
+const loadMapFile = createMapLoader({ root: process.cwd(), meshdump: MESHDUMP, gbxdump: gbxdumpPath });
+
 /**
  * Dev-server bridge to TrackmaniaExchange: the browser can't call TMX (CORS)
  * or run the .NET converter, but the dev server can do both.
@@ -42,7 +45,6 @@ const MESHDUMP = process.env.TRACKEDIT_MESHDUMP ??
  *                                   map's own validation ghost instead
  */
 function tmxBridge(): Plugin {
-  const convertMap = createMapConverter(process.cwd());
   const TMX_HEADERS = { "User-Agent": "trackedit-dev" };
   /** `meshdump ghost`: the path JSON, or null when the file holds no ghost. */
   const extractGhost = (gbx: string, out: string) =>
@@ -200,63 +202,19 @@ function tmxBridge(): Plugin {
       });
 
       server.middlewares.use("/api/tmx/load", async (req, res) => {
-        let dir: string | null = null;
         try {
           const id = (req.url ?? "").split("/").filter(Boolean).pop();
           if (!id || !/^\d+$/.test(id)) throw new Error("bad map id");
-          const GBXDUMP = gbxdumpPath();
           const upstream = await fetch(`https://trackmania.exchange/maps/download/${id}`, {
             headers: { "User-Agent": "trackedit-dev" },
           });
           if (!upstream.ok) throw new Error(`TMX download ${upstream.status}`);
-          dir = await mkdtemp(join(tmpdir(), "trackedit-tmx-"));
-          const gbx = join(dir, "map.Map.Gbx");
-          const out = join(dir, "map.json");
-          await writeFile(gbx, Buffer.from(await upstream.arrayBuffer()));
-          // Keep the original: it is the template when this track is saved
-          // back to the game (tools/gameBridge.ts).
-          await mkdir(join(process.cwd(), "maps", "gbx"), { recursive: true });
-          await copyFile(gbx, tmxTemplatePath(id));
-          try {
-            await convertMap(gbx, out, GBXDUMP);
-          } catch (err) {
-            const kept = join(tmpdir(), `trackedit-tmx-failed-${id}.Map.Gbx`);
-            await copyFile(gbx, kept);
-            throw new Error(`${err instanceof Error ? err.message : String(err)} (map kept at ${kept})`);
-          }
-          // Best-effort: pull the map's embedded custom blocks/items into the
-          // mesh library so they render (meshdump joins names for us).
-          await new Promise<void>((resolve) => {
-            execFile(
-              MESHDUMP,
-              ["embedded", gbx, join(process.cwd(), "public", "meshes")],
-              { timeout: 120_000, windowsHide: true },
-              (err, stdout) => {
-                if (err) console.warn("[tmx] embedded extraction failed:", err.message);
-                else if (stdout.trim()) console.log("[tmx]", stdout.trim());
-                resolve();
-              },
-            );
-          });
-          // Attach the map's mod (custom texture pack) reference, if any.
-          const mod = await new Promise<{ url?: string } | null>((resolve) => {
-            execFile(MESHDUMP, ["modinfo", gbx], { timeout: 60_000, windowsHide: true }, (err, stdout) => {
-              if (err) return resolve(null);
-              try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
-            });
-          });
-          const dump = JSON.parse(await readFile(out, "utf-8"));
-          if (mod?.url) dump.mod = mod;
-          // The map's own validation ghost, when the author left one in.
-          const ghost = await extractGhost(gbx, join(dir, "ghost.json"));
-          if (ghost) dump.ghost = { source: "map", ...ghost };
+          const dump = await loadMapFile(Buffer.from(await upstream.arrayBuffer()), { keepAs: tmxTemplatePath(id), label: `tmx-${id}` });
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify(dump));
         } catch (err) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: String(err) }));
-        } finally {
-          if (dir) void rm(dir, { recursive: true, force: true });
         }
       });
     },
@@ -863,7 +821,7 @@ function debugBridge(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tmxBridge(), nadeoBridge(MESHDUMP), gameBridge(MESHDUMP), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
+  plugins: [tmxBridge(), nadeoBridge(MESHDUMP, loadMapFile), gameBridge(MESHDUMP), mapStoreBridge(), debugBridge(), modsBridge(), setupBridge(), liveBridge()],
   resolve: {
     alias: {
       "@core": fileURLToPath(new URL("./src/core", import.meta.url)),

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MapLoader } from "./mapLoader";
 
 /**
  * Dev-server bridge to Nadeo's record services — the leaderboard the game
@@ -14,6 +15,10 @@ import { join } from "node:path";
  *   GET /api/nadeo/ghost/:mapUid?account=<id>   -> the record's driving path (meshdump ghost JSON)
  *   GET /api/nadeo/finishes/:mapUid             -> { finishes } — how many players hold a world record (max 10000)
  *   GET /api/nadeo/search/:mapUid?name=<text>   -> { records, via } — records of players whose name contains the text
+ *   GET /api/nadeo/rooms?name=<text>            -> { rooms, total } — club rooms ("servers") whose name contains the text, busiest first
+ *   GET /api/nadeo/room/:clubId/:activityId     -> the room now: players, the map being played, its playlist
+ *   GET /api/nadeo/map/:mapUid                  -> the map's name, author, medals and the TMX id when TMX has it
+ *   GET /api/nadeo/map/:mapUid?load=1           -> downloads the map from Nadeo and returns the editor dump
  *
  * Nadeo requires authentication. A dedicated server account (free, created
  * at https://www.trackmania.com/player/dedicated-servers) goes in the
@@ -40,6 +45,51 @@ export interface NadeoRecord {
   zone: string;
 }
 
+/** A club room — what the game lists as a server to join. */
+export interface NadeoRoom {
+  clubId: number;
+  activityId: number;
+  name: string;
+  clubName: string;
+  playerCount: number;
+  maxPlayers: number;
+  /** false: a player's own dedicated server — Nadeo does not know what it is playing. */
+  nadeoHosted: boolean;
+  /** The room's playlist (map uids). */
+  maps: string[];
+}
+
+export interface NadeoRoomState extends NadeoRoom {
+  /** The server is up. A Nadeo-hosted room shuts down when empty. */
+  running: boolean;
+  /** The map being played now; null when the server is off or is not Nadeo's. */
+  currentMapUid: string | null;
+  /** When this answer was fetched from Nadeo (ms) — answers are shared for ROOM_TTL_MS. */
+  at: number;
+}
+
+export interface NadeoMapInfo {
+  mapUid: string;
+  name: string;
+  authorAccountId: string;
+  authorTime: number;
+  goldTime: number;
+  /** TrackmaniaExchange id when the same file (same uid) is on TMX, else null. */
+  tmxId: number | null;
+}
+
+/**
+ * Nadeo publishes no rate limit; the community guideline (webservices.openplanet.dev,
+ * "Responsible usage") is about two requests a second for short bursts and LESS for
+ * semi-live monitoring. A tracked room is polled every 15 s by the editor; whatever the
+ * clients do, one room is asked of Nadeo at most this often (every tab shares the answer).
+ */
+const ROOM_TTL_MS = 10_000;
+
+/** Trackmania text formatting ($fff, $o, $l[...]) off a name. */
+export const stripFormat = (s: string | null | undefined): string =>
+  (s ?? "").replace(/\$[lh]\[[^\]]*\]/gi, "").replace(/\$[0-9a-f]{3}/gi, "").replace(/\$[a-z<>$]/gi, "").trim();
+
 const CORE = "https://prod.trackmania.core.nadeo.online";
 const LIVE = "https://live-services.trackmania.nadeo.live";
 const OAUTH = "https://api.trackmania.com/api";
@@ -50,6 +100,14 @@ const USER_AGENT = "trackedit-dev / https://github.com/nullabork/trackedit";
 const TOKEN_TTL_MS = 50 * 60_000;
 /** Downloaded record files (small: tens of KB) — reused for names and lines. */
 const CACHE_DIR = join(tmpdir(), "trackedit-nadeo-records");
+
+/** A room's playlist: an array — or, rarely, an object keyed "0", "1", … (documented quirk). */
+const mapList = (maps: unknown): string[] =>
+  (Array.isArray(maps) ? maps : maps && typeof maps === "object" ? Object.values(maps) : []).filter((m): m is string => typeof m === "string");
+
+/** A map opened from Nadeo (not on TMX) keeps its original here: the save-back template. */
+export const nadeoTemplatePath = (mapUid: string): string =>
+  join(process.cwd(), "maps", "gbx", `nadeo-${mapUid}.Map.Gbx`);
 
 type Audience = "NadeoServices" | "NadeoLiveServices";
 
@@ -171,6 +229,89 @@ export class NadeoClient {
     }
     this.finishes.set(mapUid, { n: lo + 1, at: Date.now() });
     return lo + 1;
+  }
+
+  /** Club rooms whose name contains the text (any club), busiest first — Nadeo's own order. */
+  async searchRooms(name: string, length = 30): Promise<{ rooms: NadeoRoom[]; total: number }> {
+    type Row = { clubId: number; activityId: number; name: string; clubName: string; nadeo: boolean; room?: { playerCount?: number; maxPlayers?: number; maps?: unknown } };
+    // `name` is the filter (as on the club search); "nameFilter" and the like are silently ignored.
+    const json = await this.get<{ clubRoomList?: Row[]; itemCount?: number }>("NadeoLiveServices",
+      `${LIVE}/api/token/club/room?length=${length}&offset=0&name=${encodeURIComponent(name)}`);
+    const rooms = (json.clubRoomList ?? []).map((r) => ({
+      clubId: r.clubId,
+      activityId: r.activityId,
+      name: stripFormat(r.name),
+      clubName: stripFormat(r.clubName),
+      playerCount: r.room?.playerCount ?? 0,
+      maxPlayers: r.room?.maxPlayers ?? 0,
+      nadeoHosted: !!r.nadeo,
+      maps: mapList(r.room?.maps),
+    }));
+    return { rooms, total: json.itemCount ?? rooms.length };
+  }
+
+  private roomStates = new Map<string, { state: Promise<NadeoRoomState>; at: number }>();
+
+  /** A room now. One request to Nadeo per room per ROOM_TTL_MS, however many ask. */
+  room(clubId: number, activityId: number): Promise<NadeoRoomState> {
+    const key = `${clubId}/${activityId}`;
+    const cached = this.roomStates.get(key);
+    if (cached && Date.now() - cached.at < ROOM_TTL_MS) return cached.state;
+    type Details = {
+      name: string; clubName: string; nadeo: boolean;
+      room?: { name?: string; playerCount?: number; maxPlayers?: number; maps?: unknown; serverInfo?: { currentMapUid?: string; playerCount?: number } | null };
+    };
+    const state = this.get<Details>("NadeoLiveServices", `${LIVE}/api/token/club/${clubId}/room/${activityId}`).then((d) => ({
+      clubId,
+      activityId,
+      name: stripFormat(d.room?.name || d.name), // a player-hosted room's own name is ""
+      clubName: stripFormat(d.clubName),
+      playerCount: d.room?.serverInfo?.playerCount ?? d.room?.playerCount ?? 0,
+      maxPlayers: d.room?.maxPlayers ?? 0,
+      nadeoHosted: !!d.nadeo,
+      maps: mapList(d.room?.maps),
+      running: !!d.room?.serverInfo,
+      currentMapUid: d.room?.serverInfo?.currentMapUid || null,
+      at: Date.now(),
+    }));
+    this.roomStates.set(key, { state, at: Date.now() });
+    // A failed answer is not worth sharing.
+    state.catch(() => { if (this.roomStates.get(key)?.state === state) this.roomStates.delete(key); });
+    return state;
+  }
+
+  private mapInfos = new Map<string, NadeoMapInfo & { fileUrl: string }>();
+
+  /** What Nadeo (and TMX) know of a map uid. A uid names one exact file, so this never goes stale. */
+  async mapInfo(mapUid: string): Promise<NadeoMapInfo & { fileUrl: string }> {
+    const cached = this.mapInfos.get(mapUid);
+    if (cached) return cached;
+    type CoreMap = { mapId: string; mapUid: string; name: string; author: string; authorScore: number; goldScore: number; fileUrl: string };
+    const maps = await this.get<CoreMap[]>("NadeoServices", `${CORE}/maps/?mapUidList=${encodeURIComponent(mapUid)}`);
+    const m = maps[0];
+    if (!m) throw new Error("Nadeo does not know this map");
+    this.mapIds.set(mapUid, m.mapId);
+    // The same uid on TMX is the same file, and a TMX identity brings the card and the replays.
+    let tmxId: number | null = null;
+    try {
+      const res = await fetch(`https://trackmania.exchange/api/maps?uid=${encodeURIComponent(mapUid)}&fields=MapId`, { headers: { "User-Agent": USER_AGENT } });
+      if (res.ok) tmxId = ((await res.json()) as { Results?: { MapId?: number }[] }).Results?.[0]?.MapId ?? null;
+    } catch { /* TMX down: the map still loads from Nadeo */ }
+    const info = { mapUid, name: stripFormat(m.name), authorAccountId: m.author, authorTime: m.authorScore, goldTime: m.goldScore, tmxId, fileUrl: m.fileUrl };
+    // An unknown TMX id may only mean TMX was unreachable: ask again next time.
+    if (tmxId !== null) this.mapInfos.set(mapUid, info);
+    return info;
+  }
+
+  /** The map file as Nadeo serves it to the game. */
+  async mapFile(mapUid: string): Promise<Buffer> {
+    const { fileUrl } = await this.mapInfo(mapUid);
+    let res = await fetch(fileUrl, { headers: { "User-Agent": USER_AGENT } });
+    if (res.status === 401 || res.status === 403) {
+      res = await fetch(fileUrl, { headers: { Authorization: `nadeo_v1 t=${await this.token("NadeoServices")}`, "User-Agent": USER_AGENT } });
+    }
+    if (!res.ok) throw new Error(`map download ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
   }
 
   private async mapId(mapUid: string): Promise<string> {
@@ -398,7 +539,7 @@ const readConfig = (root: string): NadeoConfig => {
   }
 };
 
-export function nadeoBridge(meshdump: string): Plugin {
+export function nadeoBridge(meshdump: string, loadMapFile: MapLoader): Plugin {
   return {
     name: "nadeo-bridge",
     configureServer(server) {
@@ -449,6 +590,48 @@ export function nadeoBridge(meshdump: string): Plugin {
           const c = getClient();
           if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
           send(res, 200, await c.searchRecords(mapUid, name));
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      server.middlewares.use("/api/nadeo/rooms", async (req, res) => {
+        try {
+          const name = (new URL(req.url ?? "", "http://x").searchParams.get("name") ?? "").trim();
+          if (name.length < 2) return send(res, 400, { error: "type at least two characters of the server's name" });
+          const c = getClient();
+          if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
+          send(res, 200, await c.searchRooms(name));
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      server.middlewares.use("/api/nadeo/room", async (req, res) => {
+        try {
+          const [clubId, activityId] = new URL(req.url ?? "", "http://x").pathname.split("/").filter(Boolean).map(Number);
+          if (!Number.isInteger(clubId) || !Number.isInteger(activityId)) return send(res, 400, { error: "club id and activity id required" });
+          const c = getClient();
+          if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
+          send(res, 200, await c.room(clubId, activityId));
+        } catch (err) {
+          send(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      server.middlewares.use("/api/nadeo/map", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://x");
+          const mapUid = url.pathname.split("/").filter(Boolean).pop();
+          if (!mapUid || !/^[\w-]{20,40}$/.test(mapUid)) return send(res, 400, { error: "map uid required" });
+          const c = getClient();
+          if (!c.configured) return send(res, 404, { error: "Nadeo account not configured", configured: false });
+          if (!url.searchParams.has("load")) {
+            const { fileUrl: _file, ...info } = await c.mapInfo(mapUid);
+            return send(res, 200, info);
+          }
+          const dump = await loadMapFile(await c.mapFile(mapUid), { keepAs: nadeoTemplatePath(mapUid), label: `nadeo-${mapUid}` });
+          send(res, 200, dump);
         } catch (err) {
           send(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }

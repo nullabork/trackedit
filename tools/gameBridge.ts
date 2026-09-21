@@ -290,10 +290,14 @@ export function gameBridge(meshdump: string): Plugin {
           const tm = trackmaniaDir();
           if (!tm) return send(res, 404, { error: "Trackmania's Documents folder was not found — set trackmaniaDir in .trackedit.local.json" });
 
-          // Template: the TMX original, else the configured base map.
+          // Template: the TMX original, the original kept when the map was opened from
+          // Nadeo (maps/gbx/<docId>.Map.Gbx), else the configured base map.
           let template: string | null = null;
+          const keptOriginal = /^[\w-]+$/.test(body.docId) ? join(process.cwd(), "maps", "gbx", `${body.docId}.Map.Gbx`) : "";
           if (body.tmxId) {
             template = await tmxMapFile(body.tmxId);
+          } else if (keptOriginal && existsSync(keptOriginal)) {
+            template = keptOriginal;
           } else {
             template = localCfg().templateMap ?? null;
             if (!template || !existsSync(template))
