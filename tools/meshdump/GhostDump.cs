@@ -41,6 +41,8 @@ public static class GhostDump
         // path, the two agree to a degree while the car grips and part by 60 degrees and more
         // in a drift (full steer held at 180 km/h), which is exactly what it should show.
         var rot = new List<int>();
+        var wheelRot = new List<int>();
+        var damper = new List<int>();
 
         // Older format: decoded samples with a position per record.
         var data = ghost.SampleData;
@@ -80,10 +82,34 @@ public static class GhostDump
                     var q = v.Rotation;
                     rot.Add((int)MathF.Round(q.X * 1000f)); rot.Add((int)MathF.Round(q.Y * 1000f));
                     rot.Add((int)MathF.Round(q.Z * 1000f)); rot.Add((int)MathF.Round(q.W * 1000f));
+                    // Each wheel's angle (radians, cumulative over the run: at speed a wheel turns more
+                    // than half a turn between samples, so a wrapped angle could not be interpolated)
+                    // and its damper's extension (metres: ~0.03 on the road, ~0.19 hanging in the air).
+                    foreach (var a in new[] { v.FLWheelRot, v.FRWheelRot, v.RLWheelRot, v.RRWheelRot }) wheelRot.Add((int)MathF.Round(a * 1000f));
+                    foreach (var len in new[] { v.FLDampenLen, v.FRDampenLen, v.RLDampenLen, v.RRDampenLen }) damper.Add((int)MathF.Round(len * 1000f));
                 }
             }
         }
         var hasInputs = steer.Count == path.Count && path.Count > 0;
+        var hasWheels = wheelRot.Count == path.Count * 4 && path.Count > 0;
+        if (Environment.GetEnvironmentVariable("MESHDUMP_GHOST_PROBE") == "1" && ghost.RecordData is not null)
+        {
+            var vehicle = ghost.RecordData.EntList.OrderByDescending(e => e.Samples.Count(s => s.Data?.Length >= 59)).First();
+            var vs = vehicle.Samples.OfType<GBX.NET.Engines.Scene.CSceneVehicleVis.EntRecordDelta>().ToList();
+            Console.WriteLine($"probe: {vs.Count} samples; dt {(vs.Count > 1 ? (vs[1].Time - vs[0].Time).TotalMilliseconds : 0)} ms");
+            Console.WriteLine($"  FLWheelRot min {vs.Min(v => v.FLWheelRot)} max {vs.Max(v => v.FLWheelRot)}; RLWheelRot min {vs.Min(v => v.RLWheelRot)} max {vs.Max(v => v.RLWheelRot)}");
+            Console.WriteLine($"  FLDampenLen min {vs.Min(v => v.FLDampenLen)} max {vs.Max(v => v.FLDampenLen)}; RL min {vs.Min(v => v.RLDampenLen)} max {vs.Max(v => v.RLDampenLen)}");
+            var air = vs.Where(v => !v.IsGroundContact).ToList();
+            var gnd = vs.Where(v => v.IsGroundContact).ToList();
+            Console.WriteLine($"  in the air {air.Count}: FLDampen avg {(air.Count > 0 ? air.Average(v => v.FLDampenLen) : 0):0.###}; on the ground {gnd.Count}: avg {(gnd.Count > 0 ? gnd.Average(v => v.FLDampenLen) : 0):0.###}");
+            Console.WriteLine($"  Gear min {vs.Min(v => v.Gear)} max {vs.Max(v => v.Gear)}; RPM min {vs.Min(v => v.RPM)} max {vs.Max(v => v.RPM)}; SideSpeed max {vs.Max(v => MathF.Abs(v.SideSpeed))}");
+            Console.WriteLine($"  FLSlipCoef true {vs.Count(v => v.FLSlipCoef)}; IsTurbo {vs.Count(v => v.IsTurbo)}; TurboTime max {vs.Max(v => v.TurboTime)}");
+            for (var i = 100; i < Math.Min(vs.Count, 130); i++)
+            {
+                var v = vs[i];
+                Console.WriteLine($"  t {v.Time.TotalMilliseconds} speed {v.Speed:0.#} FLrot {v.FLWheelRot:0.###} RLrot {v.RLWheelRot:0.###} FLdamp {v.FLDampenLen:0.####} RLdamp {v.RLDampenLen:0.####} gnd {v.IsGroundContact} steer {v.Steer:0.##} gas {v.Gas:0.##} brake {v.Brake:0.##}");
+            }
+        }
 
         Console.WriteLine($"ghost: {ghost.GhostNickname}, time {ghost.RaceTime}, samples {path.Count}");
         var json = JsonSerializer.Serialize(new
@@ -97,6 +123,8 @@ public static class GhostDump
             path,
             times,
             steer = hasInputs ? steer : null,
+            wheelRot = hasWheels ? wheelRot : null,
+            damper = hasWheels ? damper : null,
             gas = hasInputs ? gas : null,
             brake = hasInputs ? brake : null,
             speed = hasInputs ? speed : null,

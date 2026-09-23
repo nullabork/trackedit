@@ -230,6 +230,12 @@ export interface GhostPath {
    * flattened (4 per sample); forward is +z. Not the direction of travel — they part in a drift.
    */
   rot?: number[];
+  /**
+   * Per wheel (FL, FR, RL, RR; 4 per sample): the wheel's angle in milliradians, cumulative (the game wraps it every 256 turns)
+   * over the run, and its damper's extension in mm (~30 on the road, ~190 in the air).
+   */
+  wheelRot?: number[];
+  damper?: number[];
   /** Who drove it, when the source said. */
   driver?: string;
   /** Editor only: false hides the line without unloading it. */

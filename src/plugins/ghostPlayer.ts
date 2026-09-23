@@ -1,4 +1,4 @@
-import { BoxGeometry, DoubleSide, Group, Matrix4, Mesh, MeshLambertMaterial, Quaternion, SRGBColorSpace, TextureLoader, Vector3 } from "three";
+import { BoxGeometry, DoubleSide, Group, Matrix4, Mesh, MeshLambertMaterial, Object3D, Quaternion, SRGBColorSpace, TextureLoader, Vector3 } from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { lineHue } from "@core/layer";
 import type { GhostPath, Layer } from "@core/layer";
@@ -50,6 +50,8 @@ export const ghostPlayerPlugin: EditorPlugin = {
 
     const car = buildCar();
     car.visible = false;
+    /** The model's wheels, each about its own axle, in FL, FR, RL, RR order — the ghost's order. */
+    let wheels: CarWheel[] = [];
     // The real car replaces the box once it has loaded (when the import has one).
     void loadCarModel().then((model) => {
       if (!model) return;
@@ -57,6 +59,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       car.add(model.object);
       car.userData.tinted = model.tinted;
       car.userData.lift = 0; // the model's origin is on the road under it, like the ghost's position
+      wheels = model.wheels;
     });
 
     const current = (): { layer: Layer; ghost: GhostPath; index: number } | null => {
@@ -178,6 +181,15 @@ export const ghostPlayerPlugin: EditorPlugin = {
       car.quaternion.copy(turn);
       car.position.set(s.pos[0], s.pos[1] + ((car.userData.lift as number | undefined) ?? CAR_LIFT), s.pos[2]);
       car.visible = !(follow && firstPerson);
+      // The wheels as the game recorded them: each turns by its own angle (locked under braking,
+      // spinning on ice), the front pair steers, and each hangs from its damper — down when
+      // the car flies, pushed up on a landing. The mesh is modelled at rest on the road, where
+      // the damper reads DAMPER_REST.
+      for (let w = 0; w < wheels.length; w++) {
+        const wheel = wheels[w];
+        wheel.mesh.rotation.set(s.wheelRot ? s.wheelRot[w] : 0, wheel.front && s.steer !== null ? -s.steer * STEER_LOCK : 0, 0, "YXZ");
+        wheel.mesh.position.y = wheel.center.y - (s.damper ? s.damper[w] - DAMPER_REST : 0);
+      }
       // Body in the line's hue, its untextured panels a shade darker.
       const [body, panels] = car.userData.tinted as MeshLambertMaterial[];
       body.color.set(lineHue(c.index));
@@ -215,16 +227,28 @@ export const ghostPlayerPlugin: EditorPlugin = {
 
 /** The stand-in box is centred on its middle; lift it so it sits on the road rather than in it. */
 const CAR_LIFT = 0.4;
+/** The damper's extension (m) when the car stands on the road — where the model's wheels are drawn. */
+const DAMPER_REST = 0.03;
+/** How far the front wheels turn at full steer (rad). */
+const STEER_LOCK = 0.35;
+
+interface CarWheel {
+  mesh: Object3D;
+  /** The axle in car space; the mesh's own vertices are about it. */
+  center: Vector3;
+  front: boolean;
+}
 
 /**
  * The game's car (meshdump car -> meshes/car/): the Stadium model, its body tinted in the
  * line's hue through `body`. Null when the import has none — the box stays.
  */
-async function loadCarModel(): Promise<{ object: Group; tinted: MeshLambertMaterial[] } | null> {
+async function loadCarModel(): Promise<{ object: Group; tinted: MeshLambertMaterial[]; wheels: CarWheel[] } | null> {
   try {
     const res = await fetch("meshes/car/index.json");
     if (!res.ok) return null;
-    const index = (await res.json()) as Record<string, { obj: string; materials: Record<string, string | null> } | undefined>;
+    type Entry = { obj: string; materials: Record<string, string | null>; wheels?: Record<string, { center: [number, number, number]; radius: number }> };
+    const index = (await res.json()) as Record<string, Entry | undefined>;
     const entry = index.Stadium ?? Object.values(index)[0];
     if (!entry) return null;
     const textures = new TextureLoader();
@@ -244,15 +268,28 @@ async function loadCarModel(): Promise<{ object: Group; tinted: MeshLambertMater
     const cache = new Map<string, MeshLambertMaterial>();
     const named = (name: string) => cache.get(name) ?? cache.set(name, materialFor(name)).get(name)!;
     const object = await new OBJLoader().loadAsync("meshes/" + entry.obj);
+    // A wheel's rim is in the prestige skin's "medal" metal too; on the wheels it stays metal, not body paint.
+    const rim = new MeshLambertMaterial({ color: 0x2a2e33, side: DoubleSide });
     object.traverse((o) => {
       const mesh = o as Mesh;
       if (!mesh.isMesh) return;
       mesh.geometry.computeVertexNormals();
-      mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => named(m.name)) : named(mesh.material.name);
+      const onWheel = mesh.name.startsWith("wheel:") || mesh.parent?.name.startsWith("wheel:");
+      const pick = (name: string) => (onWheel && name.startsWith("Prestige") ? rim : named(name));
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => pick(m.name)) : pick(mesh.material.name);
       mesh.raycast = () => {};
     });
     object.name = "ghost-car-model";
-    return { object, tinted: [body, panels] };
+    // The exporter writes each wheel as "wheel:<FL|FR|RL|RR>" about its own axle.
+    const wheels: CarWheel[] = [];
+    for (const name of ["FL", "FR", "RL", "RR"]) {
+      const at = entry.wheels?.[name];
+      const mesh = object.children.find((o) => o.name === `wheel:${name}`);
+      if (!at || !mesh) continue;
+      mesh.position.set(at.center[0], at.center[1], at.center[2]);
+      wheels.push({ mesh, center: new Vector3(at.center[0], at.center[1], at.center[2]), front: name.startsWith("F") });
+    }
+    return { object, tinted: [body, panels], wheels: wheels.length === 4 ? wheels : [] };
   } catch {
     return null;
   }

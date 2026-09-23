@@ -64,6 +64,8 @@ export interface DumpGhost {
   brake?: number[] | null;
   speed?: number[] | null;
   rot?: number[] | null;
+  wheelRot?: number[] | null;
+  damper?: number[] | null;
 }
 
 export interface MapDump {
@@ -122,6 +124,7 @@ export function ghostToLayer(g: DumpGhost, yOffsetCells = DEFAULT_Y_OFFSET): Gho
       ? { steer: [...g.steer], gas: [...g.gas], brake: [...g.brake] } : {}),
     ...(g.speed?.length === g.path.length ? { speed: [...g.speed] } : {}),
     ...(g.rot?.length === g.path.length * 4 ? { rot: [...g.rot] } : {}),
+    ...(g.wheelRot?.length === g.path.length * 4 && g.damper?.length === g.path.length * 4 ? { wheelRot: [...g.wheelRot], damper: [...g.damper] } : {}),
     ...(g.nickname ? { driver: g.nickname } : {}),
   };
 }

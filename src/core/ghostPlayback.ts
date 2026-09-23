@@ -42,6 +42,9 @@ export interface PlaybackSample {
   brake: number | null;
   /** km/h */
   speed: number | null;
+  /** Per wheel (FL, FR, RL, RR): angle in radians (cumulative) and damper extension in metres; null without the data. */
+  wheelRot: [number, number, number, number] | null;
+  damper: [number, number, number, number] | null;
   /** The race clock at this point (ms). */
   raceTime: number;
   /** How many checkpoints have been taken by now. */
@@ -49,6 +52,9 @@ export interface PlaybackSample {
   /** Entry of the timeline at or before the cursor. */
   entry: number;
 }
+
+/** The game keeps a wheel's angle modulo 256 turns (milliradians here). */
+const WHEEL_WRAP = 256 * 2 * Math.PI * 1000;
 
 /** Ghosts are sampled at 20 Hz; without sample times, assume that. */
 const DEFAULT_STEP_MS = 50;
@@ -95,7 +101,7 @@ export function entryAt(timeline: PlaybackTimeline, ms: number): number {
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
 export function sampleTimeline(
-  ghost: Pick<GhostPath, "path" | "times" | "checkpoints" | "steer" | "gas" | "brake" | "speed" | "rot">,
+  ghost: Pick<GhostPath, "path" | "times" | "checkpoints" | "steer" | "gas" | "brake" | "speed" | "rot" | "wheelRot" | "damper">,
   timeline: PlaybackTimeline,
   ms: number,
 ): PlaybackSample | null {
@@ -133,11 +139,22 @@ export function sampleTimeline(
     const norm = Math.hypot(q[0], q[1], q[2], q[3]);
     if (norm > 1e-6) quat = [q[0] / norm, q[1] / norm, q[2] / norm, q[3] / norm];
   }
+  const four = (arr: number[] | undefined, scale: number, wrap = 0): [number, number, number, number] | null => {
+    if (arr?.length !== ghost.path.length * 4) return null;
+    const one = (c: number) => {
+      let b = arr[4 * j + c];
+      // A wheel's angle wraps every 256 turns: a sample pair across the seam must not spin it back.
+      if (wrap && Math.abs(b - arr[4 * i + c]) > wrap / 2) b += b < arr[4 * i + c] ? wrap : -wrap;
+      return lerp(arr[4 * i + c], b, k) / scale;
+    };
+    return [one(0), one(1), one(2), one(3)];
+  };
   const timed = ghost.times?.length === ghost.path.length;
   const raceTime = timed ? lerp(ghost.times![i], ghost.times![j], k) : clamped;
   return {
     pos, forward: f, quat,
     steer: at(ghost.steer, 100), gas: at(ghost.gas, 100), brake: at(ghost.brake, 100), speed: at(ghost.speed, 1),
+    wheelRot: four(ghost.wheelRot, 1000, WHEEL_WRAP), damper: four(ghost.damper, 1000),
     raceTime,
     checkpointsTaken: timeline.checkpoints.filter((c) => c <= clamped).length,
     entry: e,

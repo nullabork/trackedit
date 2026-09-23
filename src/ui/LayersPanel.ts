@@ -264,8 +264,8 @@ export function createLayersPanel(ctx: EditorContext): { element: HTMLElement; a
   const upgradeLine = (layer: Layer, ghost: GhostPath) => {
     const key = `${layer.id}
 ${ghost.key}`;
-    // …and lines loaded before the driver's inputs were kept: the playback bar shows them.
-    if ((ghost.checkpoints?.length && ghost.steer?.length && ghost.rot?.length) || upgraded.has(key)) return;
+    // …and lines loaded before the driver's inputs, the body's attitude or the wheels were kept.
+    if ((ghost.checkpoints?.length && ghost.steer?.length && ghost.rot?.length && ghost.wheelRot?.length) || upgraded.has(key)) return;
     upgraded.add(key);
     void reloadGhost(ctx, layer.id, ghost).then((msg) => ctx.ui.setStatus(msg));
   };

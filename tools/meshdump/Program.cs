@@ -120,6 +120,9 @@ switch (args[0])
     case "car":
         // meshdump car <GameDataRoot> <meshesDir> — see CarDump.cs.
         return CarDump.Run(args[1], args[2]);
+    case "carprobe":
+        // meshdump carprobe <MainBody.Mesh.gbx> — what the car mesh is made of: visuals, bones, joints.
+        return CarDump.Probe(args[1]);
     case "skins":
         // meshdump skins <GameDataRoot> <meshesDir> — (re)write skins.json and the materials it
         // names alone; a block extraction writes them too.
@@ -3396,7 +3399,7 @@ sealed class ObjBuilder
     /// is written as its own OBJ group so the editor can hide clips whose
     /// side is joined to a neighbour.</summary>
     private readonly Dictionary<(string Part, string Mat), StringBuilder> facesByPart = [];
-    private string Part => source.StartsWith("clip:", StringComparison.Ordinal) ? source : "body";
+    private string Part => source.StartsWith("clip:", StringComparison.Ordinal) || source.StartsWith("wheel:", StringComparison.Ordinal) ? source : "body";
     private StringBuilder FacesFor(string material)
     {
         if (!facesByPart.TryGetValue((Part, material), out var f))
@@ -3714,6 +3717,44 @@ sealed class ObjBuilder
     private void RecordSource(int start, int count)
     {
         if (count > 0) Sources.Add((source, start, count));
+    }
+
+    /// <summary>
+    /// Some of a visual's triangles (<paramref name="tris"/>: the first index of each), written
+    /// compactly — only the vertices they use — with <paramref name="offset"/> subtracted, so a
+    /// part can be written about its own pivot (a wheel about its axle).
+    /// </summary>
+    public void AddVisualTriangles(CPlugVisualIndexedTriangles visual, IEnumerable<int> tris, string material, Vector3 offset)
+    {
+        var stream = visual.VertexStreams.FirstOrDefault();
+        var indices = visual.IndexBuffer?.Indices;
+        if (stream?.Positions is null || indices is null) return;
+        Vec2[]? uvs = stream.UVs.Count > 0 && stream.UVs.TryGetValue(0, out var uvSet) ? uvSet : null;
+        var remap = new Dictionary<int, int>();
+        var f = FacesFor(material);
+        var start = vertCount;
+        foreach (var t in tris)
+        {
+            var ids = new int[3];
+            for (var k = 0; k < 3; k++)
+            {
+                var src = indices[t + k];
+                if (!remap.TryGetValue(src, out var dst))
+                {
+                    var p = stream.Positions[src];
+                    var w = new Vector3(p.X, p.Y, p.Z) - offset;
+                    Grow(w);
+                    v.Append("v ").Append(N(w.X)).Append(' ').Append(N(w.Y)).Append(' ').Append(N(w.Z)).Append('\n');
+                    var uv = uvs is not null && src < uvs.Length ? uvs[src] : default;
+                    vt.Append("vt ").Append(N(uv.X)).Append(' ').Append(N(uv.Y)).Append('\n');
+                    vertCount++;
+                    remap[src] = dst = vertCount; // 1-based
+                }
+                ids[k] = dst;
+            }
+            f.Append("f ").Append(F(ids[0])).Append(' ').Append(F(ids[1])).Append(' ').Append(F(ids[2])).Append('\n');
+        }
+        RecordSource(start + 1, vertCount - start);
     }
 
     public void AddMesh(Vector3[] positions, int[] indices, string material)
