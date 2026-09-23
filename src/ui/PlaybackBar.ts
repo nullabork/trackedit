@@ -26,6 +26,8 @@ export interface PlaybackView {
   firstPerson: boolean;
   /** "Hide line" is ticked: the tube goes away while playing or following. */
   hideLine: boolean;
+  /** "Repeat" is ticked: the run starts over when it ends. */
+  repeat: boolean;
   /** -1..1, 0..1, 0..1, km/h; null when the ghost carries no inputs. */
   steer: number | null;
   gas: number | null;
@@ -43,6 +45,7 @@ export interface PlaybackHandlers {
   onFollow(on: boolean): void;
   onFirstPerson(on: boolean): void;
   onHideLine(on: boolean): void;
+  onRepeat(on: boolean): void;
   onClose(): void;
 }
 
@@ -122,6 +125,7 @@ export function createPlaybackBar(handlers: PlaybackHandlers): { element: HTMLEl
   const follow = toggle("Follow", "Camera follows the car: drag to look around it, scroll to zoom. Moving away switches it off.", handlers.onFollow);
   const first = toggle("1st person", "See the run from the driver's seat (drag to look around)", handlers.onFirstPerson);
   const hide = toggle("Hide line", "Take the line's tube out of view while playing or following, so only the car is left; it comes back when you pause and stop following", handlers.onHideLine);
+  const repeat = toggle("Repeat", "Start the run over when it ends", handlers.onRepeat);
   const close = btn("✕", "Close playback", "pb-close");
   close.addEventListener("click", () => handlers.onClose());
 
@@ -141,7 +145,7 @@ export function createPlaybackBar(handlers: PlaybackHandlers): { element: HTMLEl
 
   const element = el("div", { class: "playback-bar", role: "toolbar", "aria-label": "Driving line playback" },
     el("div", { class: "pb-main" },
-      el("div", { class: "pb-row" }, swatch, name, time, cp, el("span", { class: "grow" }), speed, follow, first, hide, close),
+      el("div", { class: "pb-row" }, swatch, name, time, cp, el("span", { class: "grow" }), speed, follow, first, hide, repeat, close),
       el("div", { class: "pb-row" }, prevCp, stepBack, play, stepFwd, nextCp, scrub),
     ),
     el("div", { class: "pb-inputs" }, pad, kmh),
@@ -172,6 +176,7 @@ export function createPlaybackBar(handlers: PlaybackHandlers): { element: HTMLEl
       follow.setAttribute("aria-pressed", String(v.follow));
       first.setAttribute("aria-pressed", String(v.firstPerson));
       hide.setAttribute("aria-pressed", String(v.hideLine));
+      repeat.setAttribute("aria-pressed", String(v.repeat));
       range.max = String(Math.max(1, Math.round(v.duration)));
       if (!dragging) range.value = String(Math.round(v.time));
       range.style.setProperty("--played", `${v.duration ? (100 * v.time) / v.duration : 0}%`);

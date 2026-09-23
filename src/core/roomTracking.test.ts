@@ -9,15 +9,16 @@ const room = (over: Partial<RoomState> = {}): RoomState => ({
 
 describe("decide", () => {
   it("opens the server's map on the first answer", () => {
-    expect(decide(room(), null, "other")).toMatchObject({ load: "A", seenUid: "A", nextPollMs: POLL_MS });
+    expect(decide(room(), null, "other")).toMatchObject({ load: "A", arrived: "A", seenUid: "A", nextPollMs: POLL_MS });
   });
 
   it("does not reopen the map that is already open", () => {
-    expect(decide(room(), null, "A")).toMatchObject({ load: null, seenUid: "A" });
+    expect(decide(room(), null, "A")).toMatchObject({ load: null, arrived: "A", seenUid: "A" });
   });
 
   it("opens the next map when the server moves on", () => {
-    expect(decide(room({ currentMapUid: "B" }), "A", "A")).toMatchObject({ load: "B", seenUid: "B" });
+    expect(decide(room({ currentMapUid: "B" }), "A", "A")).toMatchObject({ load: "B", arrived: "B", seenUid: "B" });
+    expect(decide(room(), "A", "A")).toMatchObject({ load: null, arrived: null });
   });
 
   it("leaves a map the user opened meanwhile alone until the server moves", () => {

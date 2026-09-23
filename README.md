@@ -714,6 +714,12 @@ for the dialog and **Stop tracking**). Same server account as the records.
   original kept in `maps/gbx` as the template for "Save to Trackmania".
 - Rooms on a player's own dedicated server ("own server" in the list) cannot be
   tracked: Nadeo does not know what they are playing.
+- **When a map opens** (checkboxes in the dialog, kept across reloads, all off by
+  default): *Load the fastest line* — TMX's fastest replay when the map is on TMX,
+  else Nadeo's world record — onto the active layer, selected in the playback bar;
+  and on that line *Watch it in 1st person*, *Drive it* (play) and *Repeat* (the
+  bar's new Repeat toggle: the run starts over when it ends). Ticking "Load the
+  fastest line" while the tracked server's map is already open applies at once.
 
 Bridge: `GET /api/nadeo/rooms?name=`, `/api/nadeo/room/:clubId/:activityId`,
 `/api/nadeo/map/:uid[?load=1]`. Gotcha: the room list's filter is `name=`;

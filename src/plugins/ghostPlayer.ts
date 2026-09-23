@@ -36,6 +36,8 @@ export const ghostPlayerPlugin: EditorPlugin = {
     let firstPerson = false;
     /** "Hide line": the tube is out of view while playing or following (not saved; the line stays loaded). */
     let hideLine = false;
+    /** "Repeat": the run starts over when it ends. */
+    let repeat = false;
     let hidden: { layerId: string; key: string } | null = null;
     const setHidden = (line: { layerId: string; key: string } | null) => {
       if (hidden && (!line || line.layerId !== hidden.layerId || line.key !== hidden.key))
@@ -102,6 +104,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
       onFollow: (on) => setFollow(on),
       onFirstPerson: (on) => { firstPerson = on; if (on) follow = true; },
       onHideLine: (on) => { hideLine = on; },
+      onRepeat: (on) => { repeat = on; },
       onClose: () => ctx.events.emit("lineSelected", { line: null }),
     });
     bar.element.hidden = true;
@@ -114,6 +117,19 @@ export const ghostPlayerPlugin: EditorPlugin = {
       time = 0;
       playing = false;
       setFollow(false);
+    });
+    // Server tracking (and anything else) drives the bar's buttons without the bar.
+    ctx.events.on("playbackCommand", (cmd) => {
+      const c = current();
+      if (!c) return;
+      if (cmd.repeat !== undefined) repeat = cmd.repeat;
+      if (cmd.hideLine !== undefined) hideLine = cmd.hideLine;
+      if (cmd.follow !== undefined) setFollow(cmd.follow);
+      if (cmd.firstPerson !== undefined) { firstPerson = cmd.firstPerson; if (cmd.firstPerson) follow = true; }
+      if (cmd.play !== undefined) {
+        if (cmd.play && time >= timelineOf(c.ghost).duration) time = 0;
+        playing = cmd.play;
+      }
     });
 
     const up = new Vector3(0, 1, 0), x = new Vector3(), y = new Vector3(), z = new Vector3();
@@ -134,7 +150,10 @@ export const ghostPlayerPlugin: EditorPlugin = {
       const tl = timelineOf(c.ghost);
       if (playing) {
         time += dt * speed;
-        if (time >= tl.duration) { time = tl.duration; playing = false; }
+        if (time >= tl.duration) {
+          if (repeat) time = 0;
+          else { time = tl.duration; playing = false; }
+        }
       }
       const s = sampleTimeline(c.ghost, tl, time);
       if (!s) return;
@@ -187,7 +206,7 @@ export const ghostPlayerPlugin: EditorPlugin = {
         hue: lineHue(c.index),
         time, duration: tl.duration, raceTime: s.raceTime,
         checkpoints: tl.checkpoints, checkpointsTaken: s.checkpointsTaken,
-        playing, speed, follow, firstPerson, hideLine,
+        playing, speed, follow, firstPerson, hideLine, repeat,
         steer: s.steer, gas: s.gas, brake: s.brake, kmh: s.speed,
       });
     });

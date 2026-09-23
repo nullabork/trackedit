@@ -25,6 +25,8 @@ export interface AppEvents extends Record<string, unknown> {
   lineSelected: { line: { layerId: string; key: string } | null };
   /** Playback wants a line's tube out of the way (or back): not saved, the line stays loaded and "shown". */
   linePlaybackHidden: { layerId: string; key: string; hidden: boolean };
+  /** Drive the playback of the selected line (what the bar's buttons do): each field given is set. */
+  playbackCommand: { play?: boolean; follow?: boolean; firstPerson?: boolean; repeat?: boolean; hideLine?: boolean };
   /** The attempt-opacity slider of a driving line is being dragged (not saved yet). */
   attemptOpacityPreview: { layerId: string; key: string; opacity: number };
   status: { text: string };

@@ -1,5 +1,5 @@
 import type { EditorContext } from "@plugins/api";
-import type { Room, RoomRef } from "@core/roomTracking";
+import type { ArrivalOptions, Room, RoomRef } from "@core/roomTracking";
 import { POLL_MS } from "@core/roomTracking";
 import { fetchRoom, getRoomTracker, searchRooms } from "@plugins/roomTracker";
 import { clear, el } from "./dom";
@@ -23,6 +23,27 @@ export function openRoomDialog(ctx: EditorContext): void {
   const status = el("div", { class: "tmx-status" }, "Search the game's club rooms by name — any part of it (\"night together\").");
   const list = el("div", { class: "tmx-list rows room-list" });
   const card = el("div", { class: "room-card" });
+  // "When a map opens": kept with the tracker, so they apply to the next map whether or not this dialog is open.
+  const option = (name: keyof ArrivalOptions, label: string, title: string) => {
+    const input = el("input", { type: "checkbox" }) as HTMLInputElement;
+    input.addEventListener("change", () => tracker.setOptions({ [name]: input.checked }));
+    return { name, input, row: el("label", { class: "room-option", title }, input, " ", label) };
+  };
+  const options = [
+    option("loadFastest", "Load the fastest line", "TMX's fastest replay when the map is on TMX, else Nadeo's world record — onto the active layer, selected"),
+    option("firstPerson", "Watch it in 1st person", "Playback follows the car from the driver's seat"),
+    option("drive", "Drive it", "Playback starts by itself"),
+    option("repeat", "Repeat", "The run starts over when it ends"),
+  ];
+  const syncOptions = () => {
+    for (const o of options) {
+      o.input.checked = tracker.options[o.name];
+      // The other three act on the loaded line: nothing to do without it.
+      o.input.disabled = o.name !== "loadFastest" && !tracker.options.loadFastest;
+      o.row.classList.toggle("disabled", o.input.disabled);
+    }
+  };
+  const optionsBox = el("div", { class: "room-options" }, el("div", { class: "tmx-section" }, "When a map opens"), ...options.map((o) => o.row));
   let selected: RoomRef | null = tracker.tracked;
   let cardGen = 0;
   let busy = false;
@@ -30,7 +51,7 @@ export function openRoomDialog(ctx: EditorContext): void {
 
   const dialog = openDialog({
     title: "Track a server",
-    content: el("div", { class: "tmx-dialog" }, el("div", { class: "tmx-search" }, search, goBtn), status, list, card),
+    content: el("div", { class: "tmx-dialog" }, el("div", { class: "tmx-search" }, search, goBtn), status, list, card, optionsBox),
     width: 560,
   });
 
@@ -119,8 +140,10 @@ export function openRoomDialog(ctx: EditorContext): void {
   const off = tracker.events.on("changed", () => {
     if (!card.isConnected) { off(); return; }
     renderCard();
+    syncOptions();
   });
   renderCard();
+  syncOptions();
   queueMicrotask(() => search.focus());
   void dialog;
 }
