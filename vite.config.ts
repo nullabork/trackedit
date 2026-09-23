@@ -492,6 +492,13 @@ function setupBridge(): Plugin {
     if (!(await isFile(join(meshesDir, "skins.json")))) missing.push("surface skins");
     if (!(await isFile(join(meshesDir, "waypoints.json")))) missing.push("waypoint types");
     if (!(await isFile(join(meshesDir, "car", "index.json")))) missing.push("the car model (run Trackedit Extract in the game again first)");
+    else {
+      // The car's wheels became their own parts (they turn): an older export has no axles.
+      try {
+        const car = JSON.parse(await readFile(join(meshesDir, "car", "index.json"), "utf-8")) as Record<string, { wheels?: unknown }>;
+        if (!Object.values(car).some((c) => c?.wheels)) missing.push("the car's wheels");
+      } catch { missing.push("the car model"); }
+    }
     if (gameDirKnown && !(await isFile(join(meshesDir, "lightcolors.json")))) missing.push("light colours");
     try {
       const idx = await readFile(join(meshesDir, "index.json"), "utf-8");

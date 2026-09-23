@@ -520,6 +520,24 @@ ourselves would mean reproducing the game's lightmap UVs, atlas allocator,
 GI sampler and encoding with no way to check the result outside the game, so
 the editor leaves it to the game.
 
+#### Throttle and brake on the line; the car's wheels
+
+The line's tube is split down its length into the car's left and right halves. Along
+the stretches where the car GAINED speed the left half turns green (by how hard —
+18 km/h per second is full green; the gas pedal itself is no use, it is held nearly
+the whole run), and where the brake was down the right half turns red (by how much).
+Everywhere else both halves stay the line's colour. The split follows the world's up,
+so it stays the car's left and right through loops and wall rides.
+
+The car's wheels turn, steer and ride their suspension as the ghost recorded them:
+each sample carries every wheel's angle and its damper's extension (`meshdump ghost`
+writes `wheelRot` and `damper`, 4 per sample). The car export splits the model into a
+body and four wheels found from the geometry (the tyres are the biggest "Wheels"-
+textured piece in each quarter; everything within a tyre's box turns with it), each
+written about its own axle. An older car export has no wheels: the setup dialog asks
+for the import again. Lines loaded before this are fetched again when selected.
+`meshdump carprobe <MainBody.Mesh.gbx>` lists what a car model is made of.
+
 ### Driving lines in the layer list, and the checkpoints they take
 
 Every loaded line (validation ghost, TMX replay, Nadeo record) is a row under
