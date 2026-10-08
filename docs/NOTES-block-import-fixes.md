@@ -754,6 +754,13 @@ alone; cells 9 m above a block's low quartile are structures, not deck; driving 
 `clipgeom` 1,480 (1.0%), `cliptruth` 99.49% over 103 maps (99.7% over the first 8),
 `variantcheck` clean but for one screen skin ("!4") skins.json does not know.
 
+**Library audit after 5r** (`npm run blockaudit`, 17,783 variant meshes): 23 blocks flagged,
+down from 1,089 — no cap on the wrong side of its body any more (was 2,355 findings), no
+top cap under one (was 196). What is left: 38 "flat" (one ice-checkpoint decal,
+`DecalSponsor1x1BigAOnRoadIce`, converts without an image), 5 "surface" on
+`OpenDirtRoadToRoadInGrass*` (named for the grass it runs into, drawn in dirt — the name
+rule, not the mesh), and the two Stage top plates 7.8 m clear of their frame (to look at).
+
 ## 5t. Mirrored lettering on projected side textures (TrackWall bands)
 
 The "TRACKMANIA TRACKMANIA" band of the deco walls (`TrackWall`, source `TrackWallPxz_D`)
