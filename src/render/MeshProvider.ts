@@ -31,35 +31,6 @@ async function loadBitmap(url: string): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob());
 }
 
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const dd = max - min;
-  const s = l > 0.5 ? dd / (2 - max - min) : dd / (max + min);
-  let h;
-  if (max === r) h = (g - b) / dd + (g < b ? 6 : 0);
-  else if (max === g) h = (b - r) / dd + 2;
-  else h = (r - g) / dd + 4;
-  return [h / 6, s, l];
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  if (s === 0) return [l * 255, l * 255, l * 255];
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const f = (t: number) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
-}
-
 interface MeshIndexEntry {
   size?: [number, number, number] | null;
   air?: string | null;
@@ -404,21 +375,28 @@ export class MeshProvider implements GeometryProvider {
         const img = ctx.getImageData(0, 0, w, h);
         const d = img.data;
 
-        // Game-style repaint: masked pixels take the tint's HUE but keep
-        // their own saturation (gray asphalt stays gray, colored trims
-        // recolor) and their own brightness scaled by the shade — so one
-        // paint yields bright borders, tinted skirts AND dark panels.
-        const [th, , tl] = rgbToHsl(
-          parseInt(hex.slice(1, 3), 16),
-          parseInt(hex.slice(3, 5), 16),
-          parseInt(hex.slice(5, 7), 16),
-        );
+        // The material's colour table says what a painted pixel BECOMES — the tables
+        // are per material (asphalt's "Sport" red is a dark #8f291b, a trim's "Default"
+        // red a bright #c51818, white asphalt a light grey) — and the texture under the
+        // mask is its detail: nearly every paintable texture is grey (structure, trims,
+        // clips, asphalt all sit at 1–7 % saturation), so a hue shift that kept the
+        // texture's own saturation painted nothing (a red tunnel support stayed black).
+        // Masked pixels take the table colour scaled by their brightness relative to the
+        // masked area's mean, so the average painted texel is exactly the table colour
+        // and the texture's shading survives; the mask value blends it in.
+        const tr = parseInt(hex.slice(1, 3), 16), tg = parseInt(hex.slice(3, 5), 16), tb = parseInt(hex.slice(5, 7), 16);
+        let lumSum = 0, lumN = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (maskData[i + 1] / 255 <= 0.02) continue;
+          lumSum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          lumN++;
+        }
+        const lumRef = lumN ? Math.max(8, lumSum / lumN) : 128;
         for (let i = 0; i < d.length; i += 4) {
           const s = maskData[i + 1] / 255;
           if (s <= 0.02) continue;
-          const [, baseS, baseL] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
-          const outL = Math.min(1, baseL * tl * 2);
-          const [r, g, b] = hslToRgb(th, baseS, outL);
+          const k = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / lumRef;
+          const r = Math.min(255, tr * k), g = Math.min(255, tg * k), b = Math.min(255, tb * k);
           d[i] = d[i] * (1 - s) + r * s;
           d[i + 1] = d[i + 1] * (1 - s) + g * s;
           d[i + 2] = d[i + 2] * (1 - s) + b * s;

@@ -17,7 +17,8 @@
     "cliptruth": "tsx tools/clip_truth.ts",
     "fieldaudit": "tsx tools/field_audit.ts",
     "capfit": "python tools/cap_fit_check.py",
-    "clipgeom": "python tools/clip_geometry_check.py"
+    "clipgeom": "python tools/clip_geometry_check.py",
+    "blockaudit": "python tools/block_audit.py"
   },
   "dependencies": {
     "three": "^0.168.0"

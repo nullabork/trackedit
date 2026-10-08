@@ -653,6 +653,44 @@ block out, unanimous evidence only) is right 95.3% of the time — worse than th
 a clip's turn belongs to the block's layout, not to the clip. Harvest more maps
 (`cliptruth --harvest`) and the fit's share shrinks further.
 
+## 5p. An underside on top of the road; a red arch drawn black (tmx-361934) — and the block audit
+
+**Report.** `RoadTechChicaneX2TiltLeft`: "the bottom is rendering above the top".
+`TunnelSupportHalfArch16m` painted Red: "supposed to be red not black".
+
+**1. Block-space caps.** The tilt-left chicane lists its underside
+(`TrackWallChicaneX2TiltLeftFCB`) on unit (0,1,0) alone, and the plate's own heights run
+0..16 m — it is modelled in BLOCK space, the way the whole 2x2 tilted underside has to be.
+The unit's 8 m were added on top, and the plate came out 8 m above the road, exactly the
+road's shape. The game bakes that clip at the block's base cell (`meshdump baked` on the
+map: the FCB at the chicane's own y). Rule: a top/bottom cap taller than one unit (> 8.5 m)
+sits at the block's base whichever unit lists it; unit-sized caps keep their unit. The cap
+turn table grew with it: `cliptruth --harvest` over the 103 cached maps now knows 1,724
+caps (was 761 from 8 maps), this chicane's among them.
+
+**2. Paint.** The colour table is what a painted texel BECOMES: the tables are per
+material (asphalt's "Sport" red is a dark #8f291b, a trim's "Default" red a bright
+#c51818, "White" asphalt a light #e1e1e1) and the texture under the hue mask is only its
+detail — measured over every paintable texture, the structure, trims, clips, decals and
+asphalt all sit at 1–7 % saturation. The old bake shifted the texture's HUE and kept its
+own saturation, which on grey paints nothing: a red tunnel support stayed black. Now a
+masked texel = table colour x (its brightness / the masked area's mean brightness),
+blended by the mask value — the average painted texel is exactly the table colour.
+The masks themselves are often strips (RoadTech's is 128x4096: constant across the
+texture, 1.0 on the borders and 0.84 on the asphalt): sampled stretched, as the game does.
+Checked: the arch's painted texture averages #8d291b, and the beam renders dark red.
+A consequence to confirm against the game: painted asphalt is now the table colour too
+(a red chicane has dark-red asphalt), which the tables' light "White" entries suggest.
+
+**3. `npm run blockaudit`** (`tools/block_audit.py`): per block variant, by rules a track
+piece obeys — a bottom cap on the wrong side of the body (cell by cell: a tilted plate is
+low on one side), a top cap under it, a part floating clear of the rest, a block named
+Dirt/Grass/Ice/Snow/Plastic/Water/Wood with no material of that family (the surface drawn
+in another colour), a material with no texture. `--map <id>` limits to a map's blocks.
+It flags the lifted chicane underside (100 % of its cells) and passes the fixed one.
+The debug inspector now reports a painted texture's mean colour (`canvasMean`), so a
+paint complaint can be split into "the bake is wrong" and "the lighting is dark".
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

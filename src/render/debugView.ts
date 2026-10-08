@@ -65,6 +65,18 @@ export function captureDebugSubject(ctx: EditorContext, target: string, options:
   }
 }
 
+/** Mean RGB of a canvas, as hex (null for anything that is not a canvas). */
+function canvasMean(canvas: HTMLCanvasElement | undefined): string | null {
+  if (!canvas || typeof canvas.getContext !== "function") return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < data.length; i += 4 * 64) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
+  const hx = (v: number) => Math.round(v / Math.max(1, n)).toString(16).padStart(2, "0");
+  return `#${hx(r)}${hx(g)}${hx(b)}`;
+}
+
 export function inspectDebugSubject(ctx: EditorContext, options: DebugViewOptions) {
   const { ids, objects, bounds } = debugSubject(ctx, options);
   const meshes: Record<string, unknown>[] = [];
@@ -76,6 +88,8 @@ export function inspectDebugSubject(ctx: EditorContext, options: DebugViewOption
         const map = "map" in mat ? mat.map as import("three").Texture | null : null;
         return { name: mat.userData.matName ?? mat.name, side: mat.side,
           texture: map ? (map.image?.src ?? "canvas") : null, flipY: map?.flipY ?? null,
+          // A baked (painted) texture's average colour: what the paint actually produced.
+          canvasMean: map && !map.image?.src ? canvasMean(map.image as HTMLCanvasElement | undefined) : null,
           paint: mat.userData?.paintHex ?? null, table: mat.userData?.paintTable ?? null, color: "#" + ((mat as { color?: { getHexString(): string } }).color?.getHexString() ?? "") };
       }) });
   });

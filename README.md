@@ -755,6 +755,23 @@ both with `salvaged`.
 inspection; `meshdump iteminfo <file.Item.Gbx>` prints an item's model,
 mesh and material bindings.
 
+### Auditing the block library
+
+`npm run blockaudit [-- --map <id> | --only <text> | --names A B]` goes through every
+exported block variant and lists what breaks the rules a track piece obeys: a bottom cap
+on the wrong side of the body (an underside drawn over the road), a top cap under it, a
+part floating clear of the rest, a block whose name says Dirt / Grass / Ice / Snow /
+Plastic / Water / Wood but carries no material of that family (its surface drawn in
+another colour), a material with no texture. Findings are per block so one report finds
+the rest of its class; `docs/NOTES-block-import-fixes.md` 5p has the first two classes
+it was built on.
+
+Painting: a block's colour slot resolves, per material, through the colour tables
+(`colortables.json`); masked texels take that colour scaled by the texture's brightness,
+so grey structure, trims, clips and asphalt all paint (the tables give asphalt its own
+dark reds and light whites). The debug inspector reports each painted texture's mean
+colour (`canvasMean`).
+
 ### Inspecting rendering problems
 
 Select a block and click **Frame** in the status bar to move the camera around

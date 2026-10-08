@@ -2264,6 +2264,18 @@ sealed class Dumper(string root, string outDir, string? filter)
                         "top" => new Vector3(0, rawMax.Y <= 2f ? 8f : 0f, 0),
                         _ => extra,
                     };
+                    // A cap taller than one unit (a tilted chicane's underside rises 16 m across
+                    // its two units) is modelled in BLOCK space: its heights are the block's own,
+                    // so it sits at the block's base whichever unit lists it — the tilt-left
+                    // chicane lists its underside on unit (0,1,0) alone, and the unit's 8 m put
+                    // the whole plate on top of the road. The game bakes that clip at the
+                    // block's base cell (maps/gbx: TrackWallChicaneX2TiltLeftFCB at the block's y).
+                    var blockSpaceCap = face is "bottom" or "top" && rawMax.Y - rawMin.Y > 8.5f;
+                    if (blockSpaceCap)
+                    {
+                        off = new Vector3(off.X, 0f, off.Z);
+                        extraEff = new Vector3(extraEff.X, 0f, extraEff.Z);
+                    }
 
                     // TALL caps (loop shells, slope undersides) are
                     // asymmetric and the attachment stores no direction —
