@@ -185,12 +185,14 @@ def body_tops_world(meshes, index, p, cache):
         z -= size[2] * 16
         k = (int((x * c + z * s + ox) // 4), int((-x * s + z * c + oz) // 4))
         tops[k] = max(tops.get(k, -1e9), y + oy)
-    # The deck, not what stands on it: cells whose top is 9 m or more above the block's
-    # low quartile (a start gate's arch, a checkpoint's frame) are left out; a tilt is 8 m.
+    # The deck, not what stands on it: cells whose top is 6.5 m or more above the block's
+    # low quartile (a start gate's posts, a checkpoint's frame) are left out. A tilt rises
+    # 8 m across a block, so a tilted deck loses its high edge here — that costs coverage,
+    # never a false flag.
     if tops:
         ys = sorted(tops.values())
         deck = ys[len(ys) // 4]
-        tops = {k: v for k, v in tops.items() if v < deck + 9}
+        tops = {k: v for k, v in tops.items() if v < deck + 6.5}
     return tops, (p["coord"][0], p["coord"][2], sx, sz)
 
 
