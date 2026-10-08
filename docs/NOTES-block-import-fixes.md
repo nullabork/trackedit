@@ -754,6 +754,17 @@ alone; cells 9 m above a block's low quartile are structures, not deck; driving 
 `clipgeom` 1,480 (1.0%), `cliptruth` 99.49% over 103 maps (99.7% over the first 8),
 `variantcheck` clean but for one screen skin ("!4") skins.json does not know.
 
+## 5t. Mirrored lettering on projected side textures (TrackWall bands)
+
+The "TRACKMANIA TRACKMANIA" band of the deco walls (`TrackWall`, source `TrackWallPxz_D`)
+read mirrored on every other wall. The Pxz shader projects the texture from world axes;
+the exporter reproduced that per face but took U = +Z on every X-facing face and U = +X on
+every Z-facing one, whatever way the face looked. For someone facing a wall, left-to-right
+is the viewer's right: -Z on a face looking +X, +Z looking -X, +X looking +Z, -X looking
+-Z. Fixed in `AddVisual`'s projection; checked on `DecoWallBasePillar` (the band reads
+right on the faces shot). Py (floor) projections keep U = +X, V = +Z — the floor's own
+reading direction is the game's choice and has not been checked against it.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

@@ -3533,9 +3533,13 @@ sealed class ObjBuilder
                 var w2 = Vector3.Transform(positions[indices[i + 2]], q) + t;
                 var n = Vector3.Cross(w1 - w0, w2 - w0);
                 var (ax, ay, az) = (MathF.Abs(n.X), MathF.Abs(n.Y), MathF.Abs(n.Z));
+                // A side face reads left-to-right for someone FACING it: U runs along the
+                // viewer's right, which is -Z on a face looking +X, +Z on one looking -X,
+                // +X on one looking +Z and -X on one looking -Z. Without the sign, the
+                // band's lettering read mirrored on every other wall (NOTES 5t).
                 Vector2 Proj(Vector3 w) => (ay >= ax && ay >= az ? new Vector2(w.X, w.Z)
-                    : ax >= az ? new Vector2(w.Z, w.Y)
-                    : new Vector2(w.X, w.Y)) * s;
+                    : ax >= az ? new Vector2(n.X > 0 ? -w.Z : w.Z, w.Y)
+                    : new Vector2(n.Z > 0 ? w.X : -w.X, w.Y)) * s;
                 var tri = new List<(Vector3 P, Vector2 UV)> { (w0, Proj(w0)), (w1, Proj(w1)), (w2, Proj(w2)) };
                 EmitPolygon(pf, ClipTriangle(tri[0], tri[1], tri[2]) ?? tri);
             }
