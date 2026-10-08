@@ -193,8 +193,15 @@ function tmxBridge(): Plugin {
           const query = idMatch ? `id=${idMatch[1]}` : `name=${encodeURIComponent(q)}&count=25`;
           const api = `https://trackmania.exchange/api/maps?${query}&fields=${encodeURIComponent("MapId,Name,Uploader.Name,AwardCount,Medals.Author")}`;
           const upstream = await fetch(api, { headers: { "User-Agent": "trackedit-dev" } });
+          const body = await upstream.text();
+          // TMX answers an outage with plain text ("The service is unavailable."), not JSON.
+          if (!upstream.ok || !body.trimStart().startsWith("{")) {
+            res.statusCode = 502;
+            res.setHeader("content-type", "application/json");
+            return res.end(JSON.stringify({ error: `TrackmaniaExchange is not answering (${upstream.status}${body.length < 80 ? `: ${body.trim()}` : ""}) — try again in a while` }));
+          }
           res.setHeader("content-type", "application/json");
-          res.end(await upstream.text());
+          res.end(body);
         } catch (err) {
           res.statusCode = 502;
           res.end(JSON.stringify({ error: String(err) }));
