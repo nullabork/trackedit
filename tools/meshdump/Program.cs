@@ -378,6 +378,29 @@ switch (args[0])
             }
             return 0;
         }
+    case "maskprobe":
+        // meshdump maskprobe <file.dds> — RGBA of a texture by row bands: what a hue mask really holds.
+        {
+            using var dds = Pfim.Pfimage.FromFile(args[1]);
+            Console.WriteLine($"{args[1]}: {dds.Width}x{dds.Height} {dds.Format} stride {dds.Stride} bpp {dds.BitsPerPixel}");
+            var bands = Math.Min(16, dds.Height);
+            for (var b = 0; b < bands; b++)
+            {
+                var y0 = b * dds.Height / bands; var y1 = (b + 1) * dds.Height / bands;
+                long r = 0, g = 0, bl = 0, a = 0, n = 0;
+                for (var y = y0; y < y1; y += Math.Max(1, (y1 - y0) / 8))
+                    for (var x = 0; x < dds.Width; x += Math.Max(1, dds.Width / 64))
+                    {
+                        var o = y * dds.Stride + x * dds.BitsPerPixel / 8;
+                        if (dds.Format == Pfim.ImageFormat.Rgba32) { bl += dds.Data[o]; g += dds.Data[o + 1]; r += dds.Data[o + 2]; a += dds.Data[o + 3]; }
+                        else if (dds.Format == Pfim.ImageFormat.Rgb24) { bl += dds.Data[o]; g += dds.Data[o + 1]; r += dds.Data[o + 2]; a += 255; }
+                        else { r += dds.Data[o]; a += 255; }
+                        n++;
+                    }
+                Console.WriteLine($"  rows {y0}-{y1}: R {r / n} G {g / n} B {bl / n} A {a / n}");
+            }
+            return 0;
+        }
     case "modinfo":
         {
             // Print a map's mod (custom texture pack) reference as JSON.
@@ -3145,23 +3168,13 @@ sealed class Dumper(string root, string outDir, string? filter)
                 var maskPath = Path.Combine(outDir, maskRel);
                 try
                 {
-                    if (!File.Exists(maskPath))
-                    {
-                        ConvertDds(mask, maskPath);
-                        // The mask value rides in the GREEN channel; alpha is
-                        // often 0, which canvas compositing would erase —
-                        // flatten it so the browser can read the channel.
-                        using var img = SixLabors.ImageSharp.Image.Load<Rgba32>(maskPath);
-                        img.ProcessPixelRows(rows =>
-                        {
-                            for (var y = 0; y < rows.Height; y++)
-                            {
-                                var row = rows.GetRowSpan(y);
-                                for (var x = 0; x < row.Length; x++) row[x].A = 255;
-                            }
-                        });
-                        img.SaveAsPng(maskPath);
-                    }
+                    // The mask IS the alpha channel: 0 on asphalt and dirt, 255 on structure
+                    // and trims, part-way on border lights; the RGB is a near-constant green.
+                    // An earlier version flattened alpha to 255 and had the editor read the
+                    // green — which painted the asphalt and the dirt along with the trims.
+                    // Written with alpha; tools/hue_masks.py converts an older import in place.
+                    // Always rewritten: an import made before alpha was kept must not keep its flat masks.
+                    ConvertDds(mask, maskPath);
                     entry["hueMask"] = maskRel;
                 }
                 catch (Exception ex)

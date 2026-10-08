@@ -691,6 +691,34 @@ It flags the lifted chicane underside (100 % of its cells) and passes the fixed 
 The debug inspector now reports a painted texture's mean colour (`canvasMean`), so a
 paint complaint can be split into "the bake is wrong" and "the lighting is dark".
 
+## 5q. The hue mask is the ALPHA channel (painted asphalt, blue dirt)
+
+**Report.** With 5p's paint rule the Fall 2026 - 20 chicane's asphalt went red; the map's
+own thumbnail (the game's render, in the .Map.Gbx header) shows red arches and red road
+trims over plain grey asphalt. The user's "dirt is often blue" is the same class.
+
+**Cause.** `<Texture>_D_HueMask.dds` is DXT5. Its RGB is a near-constant green (255 / 243
+/ 214 by row on RoadTech) and its ALPHA is the mask: RoadTech asphalt rows 0, border
+lights 255; TrackWallClips ~0 throughout; Structure (an 8x2 TGA) 255; TechnicsTrims 253;
+DirtPy (the dirt roads' texture) 252. meshdump flattened alpha to 255 — its comment even
+said "alpha is often 0" — and the editor read the green, so everything was masked and the
+only thing keeping asphalt grey was the hue-shift rule, which in turn painted nothing on
+grey structure. Decoded with `tools/hue_masks.py` (DXT1/DXT5 in numpy; `--stats` lists
+every mask's alpha by quarter) and `meshdump maskprobe <dds>`.
+
+**Fix.** meshdump keeps the mask's alpha (and always rewrites the mask PNGs, so an older
+import does not keep its flat ones); the bake reads alpha for where and the colour table
+for what (5p). `npm run huemasks` converts an existing import in place. Checked against
+the thumbnail: grey asphalt, red trims, dark-red structure (the gantry top samples
+(93,24,26) — the Sport table's #8f291b, so the structure table is right too).
+Painted DIRT keeps its full mask (DirtPy alpha 252): the game does colour dirt — but with
+the table's steel blue #376088 scaled by the dirt's own shading, not the vivid blue the
+hue shift made of a 52 %-saturated brown.
+
+**Also measured.** Without a rebuild, the converter runs with the cap table it was BUILT
+with (cap_turns.json is copied at build): the first re-extraction after the 103-map
+harvest still placed 858 caps by the game's direction. Rebuild before extracting.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

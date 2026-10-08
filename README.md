@@ -767,10 +767,11 @@ the rest of its class; `docs/NOTES-block-import-fixes.md` 5p has the first two c
 it was built on.
 
 Painting: a block's colour slot resolves, per material, through the colour tables
-(`colortables.json`); masked texels take that colour scaled by the texture's brightness,
-so grey structure, trims, clips and asphalt all paint (the tables give asphalt its own
-dark reds and light whites). The debug inspector reports each painted texture's mean
-colour (`canvasMean`).
+(`colortables.json`); the texels the game's hue mask selects — its ALPHA channel: 0 on
+asphalt, 255 on structure and trims, partial on border lights — take that colour scaled
+by the texture's brightness. `npm run huemasks` rewrites the mask PNGs of an existing
+import with their alpha (`--stats` lists what each mask holds); the debug inspector
+reports each painted texture's mean colour (`canvasMean`).
 
 ### Inspecting rendering problems
 

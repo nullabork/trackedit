@@ -366,7 +366,9 @@ export class MeshProvider implements GeometryProvider {
         const ctx = canvas.getContext("2d");
         if (!ctx) return null;
 
-        // Mask strength rides in the GREEN channel (meshdump flattens alpha).
+        // The mask is the ALPHA channel of the game's _HueMask texture: 0 on asphalt and
+        // dirt, 255 on structure and trims, part-way on border lights. (Its RGB is a
+        // near-constant green; reading that painted the asphalt and the dirt too.)
         ctx.drawImage(mask, 0, 0, w, h);
         const maskData = ctx.getImageData(0, 0, w, h).data;
 
@@ -387,13 +389,13 @@ export class MeshProvider implements GeometryProvider {
         const tr = parseInt(hex.slice(1, 3), 16), tg = parseInt(hex.slice(3, 5), 16), tb = parseInt(hex.slice(5, 7), 16);
         let lumSum = 0, lumN = 0;
         for (let i = 0; i < d.length; i += 4) {
-          if (maskData[i + 1] / 255 <= 0.02) continue;
+          if (maskData[i + 3] / 255 <= 0.02) continue;
           lumSum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
           lumN++;
         }
         const lumRef = lumN ? Math.max(8, lumSum / lumN) : 128;
         for (let i = 0; i < d.length; i += 4) {
-          const s = maskData[i + 1] / 255;
+          const s = maskData[i + 3] / 255;
           if (s <= 0.02) continue;
           const k = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / lumRef;
           const r = Math.min(255, tr * k), g = Math.min(255, tg * k), b = Math.min(255, tb * k);
