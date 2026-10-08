@@ -762,8 +762,10 @@ exported block variant and lists what breaks the rules a track piece obeys: a bo
 on the wrong side of the body (an underside drawn over the road), a top cap under it, a
 part floating clear of the rest, a block whose name says Dirt / Grass / Ice / Snow /
 Plastic / Water / Wood but carries no material of that family (its surface drawn in
-another colour), a material with no texture. Findings are per block so one report finds
-the rest of its class; `docs/NOTES-block-import-fixes.md` 5p has the first two classes
+another colour), a material with no texture; and with `--map`, deck continuity: two
+placed driving pieces whose decks touch along a shared edge but part by 2 m elsewhere
+along it (a piece turned the wrong way, or the wrong variant). Findings are per block so
+one report finds the rest of its class; `docs/NOTES-block-import-fixes.md` 5p has the first two classes
 it was built on.
 
 Painting: a block's colour slot resolves, per material, through the colour tables

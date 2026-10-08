@@ -734,6 +734,26 @@ the base, the loop end's -32..0 at 0..32. 24 sample blocks re-extracted: 98 vari
 no cap finding (the previous rule: 2,355 over the library). Lesson: an audit over the
 whole library is the fitness function for a placement rule; a hand-picked family is not.
 
+## 5s. "Rotated wrong": the document, not the mesh — and a continuity check for the class
+
+`RoadTechTiltTransition2DownRight` at (27,19,18): its flat end met the tilted checkpoint
+and its tilted end the raised narrow road. A fresh `meshdump map` of the file says the
+block is dir 3; the open document had dir 1; every other grid block (10,282) matched the
+file. The game's baked underside at that cell is dir 3 too. So the block had been turned
+in the editor. Measured, not eyeballed: `tools/block_audit.py --map` now places every
+driving piece with the editor's own transform and compares deck heights along each
+shared footprint edge; the twin `…DownLeft` at dir 1 lines up with its neighbours to the
+decimetre (the rotation convention is right), this one parts by 4 m (flagged at both
+sides of the joint). Rule: flag when two decks touch somewhere along an edge (<= 1 m) but
+part by >= 2 m elsewhere along it; decks never within 1 m are not joined and are left
+alone; cells 9 m above a block's low quartile are structures, not deck; driving pieces
+(Road / Platform / Open) only — stands step and cliffs slope by design.
+
+**Library after the faced-cell rule and the 103-map cap table** (5609 blocks, 0 failed):
+2,077 caps placed by the game's direction (was 858; the fit agrees on 95.4% of them),
+`clipgeom` 1,480 (1.0%), `cliptruth` 99.49% over 103 maps (99.7% over the first 8),
+`variantcheck` clean but for one screen skin ("!4") skins.json does not know.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

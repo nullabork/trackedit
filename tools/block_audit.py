@@ -13,6 +13,9 @@ a class can be found once one is reported:
   flat           a material drawn without a texture (plain colour), unless it is translucent,
                  water or self-lit by design
 
+  continuity   (--map only) two placed decks that touch along a shared edge but part by 2 m
+                 elsewhere along it — a piece turned the wrong way, or the wrong variant
+
 usage: python tools/block_audit.py [--map <id>] [--only <substring>] [--names A B ...]
        (npm run blockaudit)   --map limits to the blocks a stored map uses; default: all.
 """
@@ -149,6 +152,81 @@ def audit_variant(name, path, materials):
     return out
 
 
+# --- deck continuity between neighbouring placements of a map (the editor's own transform) ---
+
+def body_tops_world(meshes, index, p, cache):
+    """Per 4 m world cell, the highest body vertex of a placed block, placed as the editor places it."""
+    e = index.get(p["block"])
+    if not e:
+        return None, None
+    flags = p.get("meta", {}).get("flags") or 0
+    v = (flags >> 21) & 63
+    base = "ground" if p.get("meta", {}).get("isGround") else "air"
+    tag = f"{base}{v}" if v else base
+    path = e.get(tag) if isinstance(e.get(tag), str) else e.get("air")
+    if not isinstance(path, str):
+        return None, None
+    if path not in cache:
+        verts, faces = parse_obj(os.path.join(meshes, path))
+        cache[path] = (verts, sorted({i for (g, _m), ids in faces.items() if g == "body" for i in ids}))
+    verts, body = cache[path]
+    size = e.get("size", [1, 1, 1])
+    d = p["dir"]
+    rotated = d % 2 == 1
+    sx, sz = (size[2], size[0]) if rotated else (size[0], size[2])
+    ox, oy, oz = p["coord"][0] * 32 + sx * 16, p["coord"][1] * 8, p["coord"][2] * 32 + sz * 16
+    import math
+    a = -d * math.pi / 2
+    c, s = math.cos(a), math.sin(a)
+    tops = {}
+    for i in body:
+        x, y, z = verts[i]
+        x -= size[0] * 16
+        z -= size[2] * 16
+        k = (int((x * c + z * s + ox) // 4), int((-x * s + z * c + oz) // 4))
+        tops[k] = max(tops.get(k, -1e9), y + oy)
+    # The deck, not what stands on it: cells whose top is 9 m or more above the block's
+    # low quartile (a start gate's arch, a checkpoint's frame) are left out; a tilt is 8 m.
+    if tops:
+        ys = sorted(tops.values())
+        deck = ys[len(ys) // 4]
+        tops = {k: v for k, v in tops.items() if v < deck + 9}
+    return tops, (p["coord"][0], p["coord"][2], sx, sz)
+
+
+def continuity(meshes, index, placements):
+    """
+    Where two placed road pieces meet along a footprint edge, their decks should agree:
+    flagged when the two decks touch somewhere along the edge (within 1 m) but part by 2 m
+    or more elsewhere along it — a piece turned the wrong way, or the wrong variant. Two
+    decks that never come within 1 m are not joined at all and are left alone.
+    """
+    cache = {}
+    tops = {}
+    # Driving pieces only: a grandstand's steps or a cliff's slope part from a road by design.
+    placements = [p for p in placements if re.match(r"(Road|Platform|Open)", p["block"].rsplit("\\", 1)[-1])]
+    for p in placements:
+        t, fp = body_tops_world(meshes, index, p, cache)
+        if t:
+            tops[p["id"]] = (p, t, fp)
+    out = []
+    for pid, (p, mine, (x0, z0, sx, sz)) in tops.items():
+        sides = [
+            ("-x", [((x0 * 8, t), (x0 * 8 - 1, t)) for t in range(z0 * 8, (z0 + sz) * 8, 2)]),
+            ("+x", [(((x0 + sx) * 8 - 1, t), ((x0 + sx) * 8, t)) for t in range(z0 * 8, (z0 + sz) * 8, 2)]),
+            ("-z", [((t, z0 * 8), (t, z0 * 8 - 1)) for t in range(x0 * 8, (x0 + sx) * 8, 2)]),
+            ("+z", [((t, (z0 + sz) * 8 - 1), (t, (z0 + sz) * 8)) for t in range(x0 * 8, (x0 + sx) * 8, 2)]),
+        ]
+        for side, pairs in sides:
+            for qid, (q, theirs, _fp) in tops.items():
+                if qid == pid:
+                    continue
+                diffs = [abs(mine[a] - theirs[b]) for a, b in pairs if a in mine and b in theirs]
+                if len(diffs) >= 2 and min(diffs) <= 1.0 and max(diffs) >= 2.0:
+                    out.append((p, side, q, min(diffs), max(diffs)))
+    return out
+
+
 def map_blocks(map_id):
     doc = json.load(open(os.path.join("maps", map_id + ".json"), encoding="utf-8"))
     wanted = set()
@@ -176,6 +254,26 @@ def main():
     index = json.load(open(os.path.join(a.meshes, "index.json"), encoding="utf-8"))["blocks"]
     materials = json.load(open(os.path.join(a.meshes, "materials.json"), encoding="utf-8"))
     wanted = map_blocks(a.map) if a.map else None
+    if a.map and not a.names and not a.only:
+        doc = json.load(open(os.path.join("maps", a.map + ".json"), encoding="utf-8"))
+        placements = []
+
+        def collect(o):
+            if isinstance(o, dict):
+                if o.get("kind") == "block" and "coord" in o and "id" in o:
+                    placements.append(o)
+                for v in o.values():
+                    collect(v)
+            elif isinstance(o, list):
+                for v in o:
+                    collect(v)
+        collect(doc)
+        joins = continuity(a.meshes, index, placements)
+        if joins:
+            print(f"deck continuity: {len(joins)} edges where two decks touch but part along the edge")
+            for p, side, q, lo, hi in joins[:60]:
+                print(f"   {p['id']} {p['block']} {p['coord']} dir {p['dir']} side {side} vs {q['block']} {q['coord']} dir {q['dir']}: {lo:.1f}..{hi:.1f} m apart")
+
     if a.names:
         wanted = set(a.names)
     counts = collections.Counter()
