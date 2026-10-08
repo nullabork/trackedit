@@ -719,6 +719,21 @@ hue shift made of a 52 %-saturated brown.
 with (cap_turns.json is copied at build): the first re-extraction after the 103-map
 harvest still placed 858 caps by the game's direction. Rebuild before extracting.
 
+## 5r. Where a cap's geometry lives: the cell it faces (the audit catches a regression)
+
+The first library-wide `npm run blockaudit` (17,784 variant meshes) flagged 887 official
+blocks with a bottom cap above the body and 66 with a top cap under it — and the biggest
+classes were 5p's own doing: "a cap taller than one unit sits at the block's base" put
+every platform slope's underside (drawn at 8..24) 6 m above its deck and dropped the loop
+ends' 32 m top shells (drawn at -32..0 on unit (0,3,0)) to -32. Three cases that each
+broke one guess fix the rule together: a cap's geometry is in the frame of the cell it
+FACES — a bottom cap of unit y in cell y-1, a top cap in cell y+1 — which is where the
+game bakes the cap as a clip block. Flat undersides at y=8 land on the floor, flat tops
+at 0 on the ceiling, the slope's 8..24 at 0..16 under the deck, the chicane's 0..16 at
+the base, the loop end's -32..0 at 0..32. 24 sample blocks re-extracted: 98 variants,
+no cap finding (the previous rule: 2,355 over the library). Lesson: an audit over the
+whole library is the fitness function for a placement rule; a hand-picked family is not.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

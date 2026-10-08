@@ -121,18 +121,23 @@ def audit_variant(name, path, materials):
         if share is not None and share >= 0.5:
             out.append(("bottom-above" if face == "bottom" else "top-below", f"{g}: {share:.0%} of its cells on the wrong side of the body"))
 
-    # floating parts (alternates "~a/~b/~ab" are hidden until a neighbour wants them)
+    # floating parts (alternates "~a/~b/~ab" are hidden until a neighbour wants them).
+    # Only blocks with a body: a mesh-less block (a deco cliff ring, a stage support) is
+    # nothing but clips around an empty cell, and those are meant to stand apart.
     shown = [g for g in boxes if "~" not in g]
-    if len(shown) > 1:
+    if len(shown) > 1 and body:
         for g in shown:
             nearest = min(gap(boxes[g], boxes[o]) for o in shown if o != g)
             if nearest > GAP:
                 out.append(("floating", f"{g} is {nearest:.1f} m clear of the rest"))
 
-    # surface family by name
-    for token, fams in SURFACES.items():
-        if re.search(token, name) and not any(any(f in m for f in fams) for m in mats_used):
-            out.append(("surface", f"name says {token}, materials are {', '.join(sorted(mats_used))}"))
+    # surface family by name — driving pieces only (Road*, Platform*, Open*): a wall clip
+    # named "...Water..." or "...ToGrass..." is named after what it joins, not what it is
+    short = name.rsplit("\\", 1)[-1]
+    if re.match(r"(Road|Platform|Open)", short) and not re.search(r"(FC|VFC|HFC)", short):
+        for token, fams in SURFACES.items():
+            if re.search(token, short) and not any(any(f in m for f in fams) for m in mats_used):
+                out.append(("surface", f"name says {token}, materials are {', '.join(sorted(mats_used))}"))
 
     # flat materials
     for m in sorted(mats_used):

@@ -2279,26 +2279,23 @@ sealed class Dumper(string root, string outDir, string? filter)
                         $"{clip.Ident.Id}|{preferGround}|{(isWall ? $"w{(above ? 1 : 0)}{(below ? 1 : 0)}{(unit.RelativeOffset.Y == 0 ? "g" : "a")}" : "m")}", emitRaw);
                     if (rawMin.X > rawMax.X) { GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} is empty"); continue; }
 
-                    // Vertical caps: shift only when the clip follows the
-                    // "flat cap at the opposite face" convention.
+                    // Top and bottom caps are modelled about the cell they FACE — the game bakes
+                    // a cap as a clip block in that cell (a bottom cap of unit y in cell y-1, a
+                    // top cap in cell y+1), and the clip's geometry is in that cell's frame. One
+                    // rule covers every case seen: a flat underside drawn at y=8 lands on the
+                    // unit's floor; a flat top drawn at y=0 on its ceiling; a slope's 16 m
+                    // underside drawn at 8..24 lands 0..16 under the deck; a tilted chicane's
+                    // underside drawn at 0..16 on unit (0,1,0) lands at the block's base (the
+                    // baked clip's cell); a loop end's 32 m top shell drawn at -32..0 on unit
+                    // (0,3,0) rises 0..32. Two earlier guesses — "shift by 8 when the cap is
+                    // drawn at the far face" and "a tall cap sits at the block's base" — each
+                    // put a family of caps a unit off (NOTES 5p, 5r; `npm run blockaudit`).
                     var extraEff = face switch
                     {
-                        "bottom" => new Vector3(0, rawMin.Y >= 6f ? -8f : 0f, 0),
-                        "top" => new Vector3(0, rawMax.Y <= 2f ? 8f : 0f, 0),
+                        "bottom" => new Vector3(0, -8f, 0),
+                        "top" => new Vector3(0, 8f, 0),
                         _ => extra,
                     };
-                    // A cap taller than one unit (a tilted chicane's underside rises 16 m across
-                    // its two units) is modelled in BLOCK space: its heights are the block's own,
-                    // so it sits at the block's base whichever unit lists it — the tilt-left
-                    // chicane lists its underside on unit (0,1,0) alone, and the unit's 8 m put
-                    // the whole plate on top of the road. The game bakes that clip at the
-                    // block's base cell (maps/gbx: TrackWallChicaneX2TiltLeftFCB at the block's y).
-                    var blockSpaceCap = face is "bottom" or "top" && rawMax.Y - rawMin.Y > 8.5f;
-                    if (blockSpaceCap)
-                    {
-                        off = new Vector3(off.X, 0f, off.Z);
-                        extraEff = new Vector3(extraEff.X, 0f, extraEff.Z);
-                    }
 
                     // TALL caps (loop shells, slope undersides) are
                     // asymmetric and the attachment stores no direction —
