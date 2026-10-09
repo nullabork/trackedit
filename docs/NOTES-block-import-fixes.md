@@ -791,9 +791,10 @@ face ((32+minZ)-z -> 24..32), a rule that equals the game's (64-z) only for bodi
 start at the face (minZ = 32, the TrackWallVFC family it was written for). 43 clips start
 past their plane: the ten DecoCliff* faces (56..64), the stage supports (40..160), the
 penalty strips (34.7..61.3, horizontal clips, already on the default path), two water
-walls. Now one rule: 64-z. The stage supports' bodies land inside their 3x3 blocks (the
-two "floating" Stage findings of the library audit go with it); the cliff face sits on
-the wall side, as the game draws it.
+walls. Now one rule: 64-z. The stage supports' bodies land inside their 3x3 blocks; the
+cliff face sits on the wall side, as the game draws it. Library after the re-extraction:
+23 blocks flagged as before (the two "floating" Stage findings are top plates, untouched
+by this), cap fit 95.5 % where the game is known, clipgeom 1,482 (1.0 %).
 
 ## 6. Lessons
 
