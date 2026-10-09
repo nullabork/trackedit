@@ -15,11 +15,18 @@ from PIL import Image
 
 
 def sheet_silhouette(path: Path, tile_w: int = 640) -> np.ndarray | None:
+    """Foreground of the tile's first 640 px: whatever differs from the background.
+    Catalog sheets are drawn on white; map tiles (tools/map_sheets.py) on the map's sky,
+    a gradient that is constant along a row — so a pixel is background when it matches
+    its row's left and right edges (the subject is framed in the middle)."""
     im = np.asarray(Image.open(path).convert("RGB"))[28:, :tile_w].astype(int)
     r, g, b = im[..., 0], im[..., 1], im[..., 2]
     white = (r > 235) & (g > 235) & (b > 235)
     greenish = (g > r + 25) & (g > b + 25) & (g > 120)   # placement outlines
-    return ~white & ~greenish
+    edges = np.concatenate([im[:, :6], im[:, -6:]], axis=1)          # per row: the sky
+    row_bg = np.median(edges, axis=1)[:, None, :]
+    sky = np.abs(im - row_bg).max(axis=2) < 18
+    return ~white & ~greenish & ~sky
 
 
 def icon_silhouette(path: Path) -> np.ndarray:
@@ -43,8 +50,8 @@ def main():
     rows = []
     for p in sorted(Path(a.sheets).glob("*.png")):
         name = p.stem.split("_", 1)[1]
-        ic = Path(a.icons) / f"{name}.webp"
-        if not ic.exists(): continue
+        ic = next((c for c in (Path(a.icons) / f"{name}{ext}" for ext in (".png", ".webp")) if c.exists()), None)
+        if ic is None: continue
         im = icon_silhouette(ic)
         if im.mean() < 0.08:
             continue  # blank or wireframe-only icon: nothing to compare against

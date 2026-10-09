@@ -81,6 +81,9 @@ interface LayerXf {
  * matrices are refreshed by hand: `refresh()` for all of them (the layer
  * moved), or the object's own `updateMatrixWorld(true)` when it is parked.
  */
+/** The renderer's own helpers on a layer group (by name): never isolation's business. */
+const RENDERER_OWNED = new Set(["layerPlane", "layerGrid", "farPool", "batch"]);
+
 class ParkingGroup extends Group {
   private refreshing = false;
 
@@ -208,7 +211,27 @@ export class DocumentRenderer {
     }
     for (const [id, obj] of this.placementObjects) this.setShown(id, obj);
     for (const pool of this.pools.values()) pool.visible = !this.isolatedIds;
+    // Plugins hang their own objects on the layer groups (ghost lines and
+    // their markers). An isolated capture is of the placements alone, so
+    // those go too — and only what isolation hid comes back afterwards: a
+    // line playback hid stays hidden.
+    if (this.isolatedIds) {
+      const placements = new Set<Object3D>(this.placementObjects.values());
+      for (const group of this.layerGroups.values())
+        for (const child of group.children)
+          if (child.visible && !placements.has(child) && !(child instanceof ParkingGroup) &&
+              !RENDERER_OWNED.has(child.name)) {
+            child.visible = false;
+            this.isolationHidden.add(child);
+          }
+    } else {
+      for (const child of this.isolationHidden) child.visible = true;
+      this.isolationHidden.clear();
+    }
   }
+
+  /** Plugin objects on the layer groups that isolation hid, to restore afterwards. */
+  private isolationHidden = new Set<Object3D>();
 
   /** Show or hide a built placement per the filters; its batch follows. */
   private setShown(id: string, obj: Object3D): void {
