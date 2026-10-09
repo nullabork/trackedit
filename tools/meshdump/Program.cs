@@ -159,6 +159,7 @@ switch (args[0])
         return new Dumper(args[1], Path.GetTempPath(), null).ClipInfo(args[2]);
     case "embedded":
         {
+            // TRACKEDIT_EXTRACT_ROOT, else the default Openplanet extract, for game materials by id.
             // Extract a map's embedded custom blocks/items into the editor's
             // mesh library so they render like everything else.
             if (args.Length < 3)
@@ -934,7 +935,9 @@ sealed class EmbeddedDumper(string outDir)
         var items = index["items"]!.AsObject();
 
         // Pass 1: export every embedded asset, remembering it by zip path.
-        var helper = new Dumper(".", outDir, null);
+        // Game materials an embedded item names by id (ItemPillar, …) live in the extract,
+        // not beside the map: without the root they came out textureless (NOTES 5v).
+        var helper = new Dumper(Dumper.ExtractRoot(), outDir, null);
         var assets = new List<(string zipPath, JsonObject entry, bool isBlock)>();
         using var archive = new ZipArchive(new MemoryStream(zip), ZipArchiveMode.Read);
         int ok = 0, skipped = 0, failed = 0;
@@ -1088,6 +1091,9 @@ sealed class EmbeddedDumper(string outDir)
         }
 
         File.WriteAllText(indexPath, index.ToJsonString());
+        // The game materials these items named (ItemPillar, …) are registered in the helper: write them,
+        // or an embedded item draws in a flat stand-in colour (NOTES 5v).
+        helper.WriteMaterials();
         Console.WriteLine($"embedded: {ok} exported, {mapped}/{mapNames.Count} map names mapped, {skipped} skipped, {failed} failed");
         return 0;
     }
@@ -1351,6 +1357,22 @@ static class Fs
 
 sealed class Dumper(string root, string outDir, string? filter)
 {
+    /// <summary>The Openplanet extract's Stadium folder: TRACKEDIT_EXTRACT_ROOT, else the default install, else the cwd.</summary>
+    public static string ExtractRoot()
+    {
+        var env = Environment.GetEnvironmentVariable("TRACKEDIT_EXTRACT_ROOT");
+        if (!string.IsNullOrEmpty(env) && Directory.Exists(env)) return env;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var def = Path.Combine(home, "OpenplanetNext", "Extract", "GameData", "Stadium");
+        return Directory.Exists(def) ? def : ".";
+    }
+    /// <summary>Texture references by path are relative to GameData: remember its root for every dumper made.</summary>
+    private readonly bool rootNoted = NoteRoot(root);
+    private static bool NoteRoot(string root)
+    {
+        try { var gd = Path.GetFullPath(Path.Combine(root, "..")); if (Directory.Exists(gd)) gameDataRoot = gd; } catch { }
+        return true;
+    }
     /// <summary>[filter] is a name substring, or "@file" naming a file with
     /// one exact block name per line (re-export a hand-picked set).</summary>
     private readonly HashSet<string>? filterNames = filter is { Length: > 1 } && filter[0] == '@'
@@ -1374,6 +1396,74 @@ sealed class Dumper(string root, string outDir, string? filter)
     /// <summary>"Null" materials (no shader, no textures) — the game draws
     /// nothing for these, e.g. the platform edge strip on special blocks.</summary>
     private readonly HashSet<string> materialInvisible = [];
+    /// <summary>Per material, the hue mask its own slots bind (null: not paintable).</summary>
+    private readonly Dictionary<string, string?> materialHueMask = [];
+
+    /// <summary>
+    /// The hue mask a material BINDS — "BaseColorHueMask" beside "BaseColor", "PyBaseColorHueMask"
+    /// beside "PyBaseColor" — or null when it binds none or the blank Rgba0000. That is the game's
+    /// own word on whether paint touches it: RoadDirt binds Rgba0000 on its dirt (dirt roads do
+    /// not take paint) while PlatformDirt binds DirtPy_D_HueMask; a mask FILE lying beside the
+    /// texture says nothing (NOTES 5v).
+    /// </summary>
+    private static string? HueMaskOf(CPlugMaterial? mat, string? diffuseSlot)
+    {
+        var textures = mat?.CustomMaterial?.Textures;
+        if (textures is null) return null;
+        string? Of(Func<string?, bool> match)
+        {
+            foreach (var x in textures.Where(x => match(x.Name)))
+            {
+                var p = (x.Texture as CPlugBitmap)?.ImageFile?.GetFullPath() ?? ResolveTextureFile(x.TextureFile?.FilePath);
+                if (p is null) continue;
+                p = Fs.Fix(p);
+                if (!File.Exists(p)) continue;
+                return Path.GetFileName(p).StartsWith("Rgba0000", StringComparison.OrdinalIgnoreCase) ? null : p;
+            }
+            return null;
+        }
+        if (diffuseSlot is not null)
+        {
+            var own = textures.Any(x => x.Name == diffuseSlot + "HueMask");
+            if (own) return Of(n => n == diffuseSlot + "HueMask");
+        }
+        return Of(n => n is not null && n.EndsWith("HueMask", StringComparison.Ordinal));
+    }
+
+    /// <summary>The GameData root (the parent of the Stadium folder), for texture references given by path.</summary>
+    private static string? gameDataRoot;
+
+    /// <summary>
+    /// A texture slot whose bitmap node was not loaded still names its .Texture.Gbx
+    /// ("Stadium\Media\Texture\GateGameplayScreen.Texture.Gbx"): parse that file for its image.
+    /// Without this a gate's screen fell back to its LED backdrop and drew a white disc (NOTES 5v).
+    /// </summary>
+    private static string? ResolveTextureFile(string? rel)
+    {
+        if (string.IsNullOrEmpty(rel) || gameDataRoot is null) return null;
+        try
+        {
+            var path = Fs.Fix(Path.Combine(gameDataRoot, rel.Replace('\\', Path.DirectorySeparatorChar)));
+            if (!File.Exists(path)) return null;
+            try
+            {
+                if ((Gbx.ParseNode(path) as CPlugBitmap)?.ImageFile?.GetFullPath() is string viaNode) return viaNode;
+            }
+            catch { /* GBX.NET cannot read some texture files (CPlugFileGen v6): fall through to the image beside it */ }
+            // The image lies in Image\ beside the texture, named after it (GateGameplayScreen.Texture.Gbx -> Image\GateGameplayScreen.dds).
+            var stem = Path.GetFileName(path);
+            stem = stem[..stem.IndexOf('.')];
+            var dir = Path.GetDirectoryName(path) ?? "";
+            foreach (var suffix in new[] { "", "_D", "_I" })
+                foreach (var ext in new[] { ".dds", ".tga", ".png" })
+                {
+                    var candidate = Fs.Fix(Path.Combine(dir, "Image", stem + suffix + ext));
+                    if (File.Exists(candidate)) return candidate;
+                }
+            return null;
+        }
+        catch { return null; }
+    }
     /// <summary>Terrain modifiers of the block being exported, in application
     /// order (MaterialModifier, then MaterialModifier2 — the later wins).</summary>
     private readonly List<TerrainModifier> activeModifiers = [];
@@ -1578,6 +1668,11 @@ sealed class Dumper(string root, string outDir, string? filter)
                 if (gbx.Node is not CGameItemModel item) { skipped++; continue; }
                 var name = item.Ident.Id;
                 if (!MatchesFilter(name)) { skipped++; continue; }
+                // An item's own material modifier is its skin: a GateSpecial8mReset names
+                // Media\Modifier\Reset.TerrainModifier.Gbx, which swaps the gate's sign, decal
+                // and effect materials to Reset's — without it every special gate drew the
+                // Turbo sign (NOTES 5v). The same mechanism blocks use.
+                SetModifiers(item.MaterialModifierFile?.FilePath);
 
                 var builder = new ObjBuilder();
                 AddItemEntityModel(builder, item.EntityModel);
@@ -3014,6 +3109,7 @@ sealed class Dumper(string root, string outDir, string? filter)
                 }
                 var (img, slot) = FindDiffuse(mat);
                 materialImages[name] = img;
+                materialHueMask[name] = HueMaskOf(mat, slot);
                 // MESHDUMP_TRACE_MATERIAL=<name>: which block/reference first
                 // registered a material (for "wrong texture on X" hunts).
                 if (string.Equals(Environment.GetEnvironmentVariable("MESHDUMP_TRACE_MATERIAL"), name, StringComparison.OrdinalIgnoreCase))
@@ -3077,7 +3173,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         {
             foreach (var x in bitmaps.Where(x => match(x.Name)))
             {
-                var p = (x.Texture as CPlugBitmap)?.ImageFile?.GetFullPath();
+                var p = (x.Texture as CPlugBitmap)?.ImageFile?.GetFullPath() ?? ResolveTextureFile(x.TextureFile?.FilePath);
                 if (p is not null)
                 {
                     p = Fs.Fix(p);
@@ -3100,7 +3196,7 @@ sealed class Dumper(string root, string outDir, string? filter)
         return r;
     }
 
-    private void WriteMaterials()
+    public void WriteMaterials()
     {
         var texDir = Path.Combine(outDir, "textures");
         Directory.CreateDirectory(texDir);
@@ -3163,7 +3259,7 @@ sealed class Dumper(string root, string outDir, string? filter)
             // (block color painting). The mask is per-pixel: only masked
             // texels change color in-game — export it so the editor can
             // tint exactly those.
-            var mask = FindHueMask(image);
+            var mask = materialHueMask.GetValueOrDefault(name);
             if (mask is not null)
             {
                 entry["colorable"] = true;

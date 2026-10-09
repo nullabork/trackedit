@@ -796,6 +796,34 @@ cliff face sits on the wall side, as the game draws it. Library after the re-ext
 23 blocks flagged as before (the two "floating" Stage findings are top plates, untouched
 by this), cap fit 95.5 % where the game is known, clipgeom 1,482 (1.0 %).
 
+## 5v. Joels Odyssey 1 (tmx-359075): four classes from twenty selected placements
+
+**Painted dirt.** "I don't think the dirt should be red." It should not: the material's own
+slots say so. A material binds its hue mask explicitly (`BaseColorHueMask`, or
+`PyBaseColorHueMask` beside `PyBaseColor` on the projected shaders) — and RoadDirt binds the
+blank `Rgba0000` there, so paint never touches dirt roads, while `RoadDirtFullColorize` and
+`PlatformDirt` bind `DirtPy_D_HueMask`. The exporter had decided "colorable" by whether a
+`*_HueMask` FILE lay beside the diffuse, which also made plain `TechnicsTrims` paintable
+(it binds no mask; `TechnicsTrimsColorize` does). Now `colorable` and the mask come from
+the slot (`meshdump matinfo <Material.Gbx>` lists a material's slots).
+
+**Gate signs.** Every `GateSpecial8m*` item drew the Turbo sign. The item's model names
+its skin: `MaterialModifierFile = Media\Modifier\Reset.TerrainModifier.Gbx`, the same
+modifier mechanism blocks use, which swaps `SpecialSignOff -> Reset.Sign`, `SpecialFXTurbo
+-> Reset.SpecialFX`, … The item export now applies it (Reset: green X; NoSteering: purple
+wheel; NoEngine likewise).
+
+**Gate screens.** `GateGameplayScreen`'s content slot (`MulInside`) names a texture file
+GBX.NET cannot parse (CPlugFileGen v6), so the slot resolved to nothing and the diffuse
+fell back to the LED backdrop: a white disc. Texture references by file now resolve by
+name to the image beside them (`Image\GateGameplayScreen.dds`).
+
+**Custom items' game materials.** The embedded-item export ran its material helper with
+the map's folder as root, so a game material an embedded item names by id (`ItemPillar`
+on the number stickers) never loaded and drew in a flat stand-in grey — and the helper
+never wrote its materials at all. It now uses the extract root (`TRACKEDIT_EXTRACT_ROOT`,
+else the default Openplanet extract) and writes what it registered.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
