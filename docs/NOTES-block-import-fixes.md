@@ -861,6 +861,52 @@ header when the body fails, so the references of an unreadable node can be inspe
 Still textureless by design: the collision, light and invisible modifier materials, and
 `DecalObstaclePusher`, whose texture files are absent from the extract (`meshdump missing`).
 
+## 5x. Sweeping a whole map's vocabulary (tmx-359075, the rest of the blocks)
+
+`npm run mapsheets` renders one tile per block and item TYPE the open map uses — its first
+placement, isolated, from the icon camera — beside the game's icon (`sheets/map_<id>/`),
+and `tools/icon_match.py` ranks the tiles whose silhouette least resembles the icon.
+Joels Odyssey 1 is 226 grid block types, 38 free block types and 56 item types: 320 tiles,
+twenty minutes, instead of eleven thousand placements.
+
+Two things the sweep needed first. Isolated captures showed the ghost lines (plugins hang
+their objects on the layer groups, which isolation did not touch) — `setIsolation` now hides
+whatever on a layer group is not the renderer's own (placements, batches, pools, grid,
+outline) and restores exactly that afterwards. And the matcher assumed a white background:
+map tiles sit on the sky, a gradient constant along a row, so a pixel is background when it
+matches its row's edges.
+
+**What the ranking flagged that is right.** The worst two silhouettes were EMPTY tiles, and
+both are what the game draws. `TrackWallBranchYShaped2X3Pillar` placed as variant 1: the
+pillar's mobil table (`meshdump mobilinfo`) has eight air variants by height — Air, (none),
+Air2, Air3, Air4, Air8, Air16, Air32 — and variant 1 is the empty one; the editor draws its
+clips and nothing else, as the game does. `DecoWallLoopEndGrass` in the air has no mobil at
+all (`[air] [0][0] - -`): what you see in-game is its clips — the loop's quarter-pipe
+underside (`DecoWallLoopEndFCB`) and the two quarter-disc side panels
+(`DecoWallLoopEndVFCLeft/Right`, 32 m tall from the top unit down). Icons show the base
+variant, so both score 0.3 against them. The lesson for the ranking: an empty tile is a
+question for `mobilinfo`, not a bug.
+
+**Everything is red.** All 11,279 placements carry colour Red, so every hue-masked surface
+(trims, deco-wall sides, pillars, inflatables, stage lights) is red in the tiles while the
+icons show the unpainted tan/grey. That is the paint working (5q), not a material fault.
+
+**Dark faces that are right.** Platform walls (`PlatformTechWallStraight4`, `…WallCurve1x4`)
+and the tech loop end look dark in their tiles while the icons are light grey. Three checks
+settled it: the OBJ loader builds flat normals (OBJLoader output is unindexed, so
+`computeVertexNormals` cannot smooth across a thin slab); the wall's faces are `PlatformTech`
+with sane UVs; and the loop end's dark side is its `PlatformLoopEndFCT` clip — the game's own
+prefab (`LoopEnd_FCT`) is a 32 m convex shell in `TrackWallClips`, the dark panelling every
+ramp and loop shows on its back. The wall's big faces are its VFC panels, hidden here because
+platforms flank it; what remains is the bare core, lit only by the atmosphere's ambient
+(sun 2.2 from above, ambient 1.1) because it faces away from the sun. Turn the camera to the
+concave side of the loop end and it is light grey.
+
+**Still missing from the extract.** `DecoGrass` (the ground skirt under stage supports) has
+no material file outside the dirt/ice modifier folders, and `DecalObstaclePusher`'s textures
+are absent, so both draw flat; `meshdump missing` lists such references for the Openplanet
+extraction plugin.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
