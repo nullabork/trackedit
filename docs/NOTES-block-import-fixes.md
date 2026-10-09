@@ -937,7 +937,11 @@ ratio rule ("a turn must beat no turn by 15 %") picked turn 1 out of float noise
    reads it like a grid cap's (a game direction k is a yaw of -k x 90 degrees, the editor's own
    convention) into the same `cap_turns.json`. On Joels Odyssey 1 alone that is 240 caps the
    grid harvest could not see, including every stage support and expandable gate on the map;
-   where a cap had been seen on grid blocks too, the two agree on 234 of 235.
+   where a cap had been seen on grid blocks too, the two agree on 234 of 235. A sighting is
+   matched by clip name, the unit's corner, and height — the baked free frame's height origin
+   differs from the document's by a constant (64 m on this map), measured from the unambiguous
+   sightings and then used to tell stacked blocks apart — and only level blocks are read: a
+   tilted free block's cap yaw means something else.
 
 **The rule, stated once.** A cap's orientation comes from the game wherever the game has
 shown it — the baked clip blocks of every cached map, grid and free — and from the shape fit

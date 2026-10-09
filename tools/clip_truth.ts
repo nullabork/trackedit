@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MapDocument } from "../src/core/document";
 import { placementVariant } from "../src/core/layer";
+import type { Placement } from "../src/core/layer";
 import type { GridCoord } from "../src/core/math";
 import { baseTypeOf } from "../src/core/mapbase";
 import { importDump, type MapDump } from "../src/io/trackoJson";
@@ -348,8 +349,15 @@ if (bakedFreeClips.length) {
   const byName = new Map<string, typeof bakedFreeClips>();
   for (const b of bakedFreeClips) (byName.get(b.name) ?? byName.set(b.name, []).get(b.name)!).push(b);
   const turnOf = (yaw: number) => ((Math.round(-yaw / (Math.PI / 2)) % 4) + 4) % 4;
+  // Where a cap's baked block sits: the unit's origin corner through the block's rotation,
+  // and a cell above (top) or below (bottom) the unit. The baked free frame's height origin
+  // differs from the document's by a constant (the map's base level): measure it on the
+  // sightings that are unambiguous by name and corner, then use it to tell stacked blocks
+  // apart. Only level blocks (yaw alone) are read: a tilted one's cap yaw means something else.
+  type FreeCap = { p: Placement; variant: string; clip: UnitClip; ax: number; az: number; ay: number };
+  const caps: FreeCap[] = [];
   for (const layer of doc.layers) for (const p of layer.placements.values()) {
-    if (p.kind !== "free" || p.isItem) continue;
+    if (p.kind !== "free" || p.isItem || Math.abs(p.rot[1]) > 1e-3 || Math.abs(p.rot[2]) > 1e-3) continue;
     const variant = placementVariant(p, stadium);
     const info = clipInfo(p.block, variant);
     if (!info) continue;
@@ -357,15 +365,27 @@ if (bakedFreeClips.length) {
     for (const clip of info.clips) {
       if (clip.face !== "top" && clip.face !== "bottom") continue;
       const w = quatRotate(q, [clip.u[0] * CELL[0], clip.u[1] * CELL[1], clip.u[2] * CELL[2]]);
-      const ax = p.pos[0] + w[0], az = p.pos[2] + w[2];
-      const hit = (byName.get(clip.id) ?? []).find((b) => !b.claimed && Math.abs(b.absPos[0] - ax) < 1 && Math.abs(b.absPos[2] - az) < 1);
-      if (!hit) { freeCapsUnmatched++; continue; }
-      hit.claimed = true;
-      freeCapsMatched++;
-      const rel = ((turnOf(hit.yaw) - turnOf(p.rot[0])) % 4 + 4) % 4;
-      const exact = `${p.block}|${variant}|${clip.id}|${clip.face}|${clip.u.join(",")}`;
-      (capObservations[exact] ??= [0, 0, 0, 0])[rel]++;
+      caps.push({ p, variant, clip, ax: p.pos[0] + w[0], az: p.pos[2] + w[2], ay: p.pos[1] + (clip.u[1] + (clip.face === "top" ? 1 : -1)) * CELL[1] });
     }
+  }
+  const atCorner = (c: FreeCap) => (byName.get(c.clip.id) ?? []).filter((b) => Math.abs(b.absPos[0] - c.ax) < 1 && Math.abs(b.absPos[2] - c.az) < 1);
+  const offsets = new Map<number, number>();
+  for (const c of caps) {
+    const cands = atCorner(c);
+    if (cands.length === 1 && caps.filter((o) => o.clip.id === c.clip.id && Math.abs(o.ax - c.ax) < 1 && Math.abs(o.az - c.az) < 1).length === 1) {
+      const k = Math.round(cands[0].absPos[1] - c.ay);
+      offsets.set(k, (offsets.get(k) ?? 0) + 1);
+    }
+  }
+  const yOffset = [...offsets].sort((a, b) => b[1] - a[1])[0]?.[0];
+  for (const c of caps) {
+    const hit = atCorner(c).find((b) => !b.claimed && (yOffset === undefined || Math.abs(b.absPos[1] - c.ay - yOffset) < 1));
+    if (!hit) { freeCapsUnmatched++; continue; }
+    hit.claimed = true;
+    freeCapsMatched++;
+    const rel = ((turnOf(hit.yaw) - turnOf(c.p.rot[0])) % 4 + 4) % 4;
+    const exact = `${c.p.block}|${c.variant}|${c.clip.id}|${c.clip.face}|${c.clip.u.join(",")}`;
+    (capObservations[exact] ??= [0, 0, 0, 0])[rel]++;
   }
   console.log(`  free blocks' caps: ${freeCapsMatched} matched to the game's baked clip blocks by name and corner, ${freeCapsUnmatched} not found`);
 }

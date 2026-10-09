@@ -784,6 +784,13 @@ own icon, into `sheets/map_<id>/` with contact sheets; `python tools/icon_match.
 sheets/map_<id> sheets/icons` then ranks the types whose silhouette least resembles the
 game's render — the way to sweep a whole map's vocabulary in minutes.
 
+A cap's (top/bottom plate's) orientation comes from the game wherever the game has shown
+it: `npm run cliptruth -- --harvest` reads the baked clip blocks of every map under
+`maps/gbx` — grid blocks and free blocks alike — into `tools/meshdump/cap_turns.json`, which
+the extractor uses (rebuild, then re-extract). The shape fit only decides caps no cached map
+has shown; `npm run capfit` reports how often it agrees where the game is known. Loading a
+map into the editor caches it, so harvesting after a batch of maps grows the known share.
+
 ### Inspecting rendering problems
 
 Select a block and click **Frame** in the status bar to move the camera around
