@@ -2434,15 +2434,21 @@ sealed class Dumper(string root, string outDir, string? filter)
                     Action<ObjBuilder, CGameCtnBlockInfoMobil>? emitWall = null;
                     if (isWall && rawMax.Z > 33f)
                     {
-                        // Modular wall compositions (TrackWallVFC family) are
-                        // modeled with the screen toward the cell and the
-                        // body extending OUTWARD past the face — flip in
-                        // place so the farthest extent lands flush on the
-                        // face plane and the body tucks inside:
-                        // (x,y,z) -> (32-x, y, (32+minZ)-z).
+                        // Modular wall compositions (TrackWallVFC family) are modeled with
+                        // the screen toward the cell and the body extending OUTWARD past the
+                        // face. The game places a side clip in the cell it faces, turned to
+                        // point back at the block (measured on grid blocks, NOTES 5h), which
+                        // folds the body into the block's cell: (x,y,z) -> (32-x, y, 64-z).
+                        // A body that starts right at the face plane (minZ = 32) lands flush
+                        // inside it; one modelled further out lands further IN — the deco
+                        // cliffs' stepped face (DecoCliffStraightVFC, z 56..64) sits 24 m
+                        // behind its clip, at the far edge of the cell. An earlier "tuck it
+                        // flush" rule ((32+minZ)-z) drew that face on the open side of a
+                        // cliff instead of against the wall it was placed on (NOTES 5u).
                         var flip = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
                         var qc = Quaternion.Concatenate(flip, q);
-                        var tc = Vector3.Transform(new Vector3(32f, 0f, 32f + rawMin.Z), q) + t;
+                        if (rawMin.Z > 33.5f) GateLog($"{clip.Ident.Id}:{face}:{unit.RelativeOffset} wall body starts {rawMin.Z - 32f:0.#} m past its face: folded to {64f - rawMax.Z:0.#}..{64f - rawMin.Z:0.#}");
+                        var tc = Vector3.Transform(new Vector3(32f, 0f, 64f), q) + t;
                         emitWall = (b, w) =>
                         {
                             // Ground rows of these compositions add terrain

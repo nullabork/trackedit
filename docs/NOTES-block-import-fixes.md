@@ -772,6 +772,29 @@ is the viewer's right: -Z on a face looking +X, +Z looking -X, +X looking +Z, -X
 right on the faces shot). Py (floor) projections keep U = +X, V = +Z — the floor's own
 reading direction is the game's choice and has not been checked against it.
 
+## 5u. A free cliff piece's face on the open side (tmx-359075): side-clip bodies fold into the cell
+
+**Report.** Free `DecoCliffMidStraight` pieces placed along a wall: "the drawn textures
+should be on the left side of the selection block, up against the wall — it's drawn on the
+wrong side of the tile." The stepped cliff face sat at the cell's open edge.
+
+**First, ruled out.** Free-block placement itself: the game's baked clips for four other
+free cliff pieces (yaw 0 and 90) sit exactly where our faces look (corner pivot, same
+rotation sense). The block's definition: the cliff face is the NORTH clip
+(`DecoCliffStraightVFC`), the south a flat quad (`DecoCliffVFC`).
+
+**Cause.** The clip's own mesh is modelled 24–32 m beyond its face plane (raw z 56..64 in
+its cell). The game places a side clip in the cell it faces, turned to point back at the
+block (5h): that folds the mesh to z 0..8 — the FAR edge of the block's cell, against the
+wall. The exporter's "wall composition" case instead tucked such a body flush inside the
+face ((32+minZ)-z -> 24..32), a rule that equals the game's (64-z) only for bodies that
+start at the face (minZ = 32, the TrackWallVFC family it was written for). 43 clips start
+past their plane: the ten DecoCliff* faces (56..64), the stage supports (40..160), the
+penalty strips (34.7..61.3, horizontal clips, already on the default path), two water
+walls. Now one rule: 64-z. The stage supports' bodies land inside their 3x3 blocks (the
+two "floating" Stage findings of the library audit go with it); the cliff face sits on
+the wall side, as the game draws it.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
