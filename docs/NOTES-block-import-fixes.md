@@ -907,6 +907,11 @@ no material file outside the dirt/ice modifier folders, and `DecalObstaclePusher
 are absent, so both draw flat; `meshdump missing` lists such references for the Openplanet
 extraction plugin.
 
+**Library numbers after 5w/5x** (`npm run blockaudit`, 17,787 variant meshes): 5 blocks
+flagged, down from 23 — the 38 "flat" findings on the ice roads went with the decal fix; what
+remains is the 5 surface-rule name limits and the two Stage top plates. `capfit` 1,980/2,074
+known caps (95.5%), `clipgeom` 1,482 of 147,649 clips without geometry (1.0%), both unchanged.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
