@@ -849,6 +849,18 @@ whose replacement folder still lives beside the live ones; the loader now looks 
 when no folder sits beside the file. `MESHDUMP_MOD_PROBE=1` prints every block's modifier
 files and the modifiers that actually loaded.
 
+**A decal with no texture (38 "flat" audit findings).** `DecalSponsor1x1BigAOnRoadIce`, the
+sponsor logo the ice multilap/penalty roads carry, is a layered material (`Tech3 Block
+PyPxzTLayered_Decal`) whose body GBX.NET cannot read (an unknown unskippable chunk), so it
+exported textureless and the audit flagged every road using it. The header still lists the
+material's references: its engine shader and every texture file. `RegisterFromHeader` now
+takes the shader (so `decal`/`TAdd` flags still apply) and the `_D` texture named after the
+material — the longest stem that prefixes the material's name, `DecalSponsor1x1BigA_D` over
+the layered base `RoadIce_D` — and resolves its image. `meshdump refs <file>` reads the
+header when the body fails, so the references of an unreadable node can be inspected.
+Still textureless by design: the collision, light and invisible modifier materials, and
+`DecalObstaclePusher`, whose texture files are absent from the extract (`meshdump missing`).
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

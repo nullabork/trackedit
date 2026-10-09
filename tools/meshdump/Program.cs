@@ -647,7 +647,10 @@ switch (args[0])
         }
     case "refs":
         {
-            var gbx = Gbx.Parse(args[1]);
+            // The ref table lives in the header: readable even when the body is not.
+            Gbx gbx;
+            try { gbx = Gbx.Parse(args[1]); }
+            catch (Exception ex) { Console.WriteLine($"(body unreadable: {ex.Message.Split('\n')[0]} — header only)"); gbx = Gbx.ParseHeader(args[1]); }
             foreach (var f in gbx.RefTable?.Files ?? [])
                 Console.WriteLine($"{f.FilePath}   -> exists: {File.Exists(ResolveRef(args[1], gbx.RefTable!.AncestorLevel, f.FilePath))}");
             return 0;
@@ -1444,25 +1447,31 @@ sealed class Dumper(string root, string outDir, string? filter)
         try
         {
             var path = Fs.Fix(Path.Combine(gameDataRoot, rel.Replace('\\', Path.DirectorySeparatorChar)));
-            if (!File.Exists(path)) return null;
-            try
-            {
-                if ((Gbx.ParseNode(path) as CPlugBitmap)?.ImageFile?.GetFullPath() is string viaNode) return viaNode;
-            }
-            catch { /* GBX.NET cannot read some texture files (CPlugFileGen v6): fall through to the image beside it */ }
-            // The image lies in Image\ beside the texture, named after it (GateGameplayScreen.Texture.Gbx -> Image\GateGameplayScreen.dds).
-            var stem = Path.GetFileName(path);
-            stem = stem[..stem.IndexOf('.')];
-            var dir = Path.GetDirectoryName(path) ?? "";
-            foreach (var suffix in new[] { "", "_D", "_I" })
-                foreach (var ext in new[] { ".dds", ".tga", ".png" })
-                {
-                    var candidate = Fs.Fix(Path.Combine(dir, "Image", stem + suffix + ext));
-                    if (File.Exists(candidate)) return candidate;
-                }
-            return null;
+            return ImageOfTextureFile(path);
         }
         catch { return null; }
+    }
+
+    /// <summary>The image a texture file (*.Texture.gbx) stands for, or null.</summary>
+    private static string? ImageOfTextureFile(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            if ((Gbx.ParseNode(path) as CPlugBitmap)?.ImageFile?.GetFullPath() is string viaNode) return viaNode;
+        }
+        catch { /* GBX.NET cannot read some texture files (CPlugFileGen v6): fall through to the image beside it */ }
+        // The image lies in Image\ beside the texture, named after it (GateGameplayScreen.Texture.Gbx -> Image\GateGameplayScreen.dds).
+        var stem = Path.GetFileName(path);
+        stem = stem[..stem.IndexOf('.')];
+        var dir = Path.GetDirectoryName(path) ?? "";
+        foreach (var suffix in new[] { "", "_D", "_I" })
+            foreach (var ext in new[] { ".dds", ".tga", ".png" })
+            {
+                var candidate = Fs.Fix(Path.Combine(dir, "Image", stem + suffix + ext));
+                if (File.Exists(candidate)) return candidate;
+            }
+        return null;
     }
     /// <summary>Terrain modifiers of the block being exported, in application
     /// order (MaterialModifier, then MaterialModifier2 — the later wins).</summary>
@@ -3163,21 +3172,64 @@ sealed class Dumper(string root, string outDir, string? filter)
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"  material {name}: {ex.Message}");
+                string? viaHeader = null;
+                try
+                {
+                    if (node is null && (overridePath ?? MaterialPath(name)) is string matPath)
+                        viaHeader = RegisterFromHeader(name, matPath);
+                }
+                catch { /* no header either: stays textureless */ }
+                Console.Error.WriteLine(viaHeader is null
+                    ? $"  material {name}: {ex.Message}"
+                    : $"  material {name}: body unreadable ({ex.Message.Split('\n')[0].TrimEnd()}); diffuse from its header references: {Path.GetFileName(viaHeader)}");
             }
         }
         return name;
     }
 
-    private CPlugMaterial? LoadMaterial(string name)
+    private CPlugMaterial? LoadMaterial(string name) =>
+        MaterialPath(name) is string path ? Gbx.ParseNode(path) as CPlugMaterial : null;
+
+    private string? MaterialPath(string name)
     {
         foreach (var folder in new[] { "Material", "Material_BlockCustom" })
         {
             var path = Fs.Fix(Path.Combine(root, "Media", folder, name + ".Material.Gbx"));
-            if (File.Exists(path))
-                return Gbx.ParseNode(path) as CPlugMaterial;
+            if (File.Exists(path)) return path;
         }
         return null;
+    }
+
+    /// <summary>A material whose body GBX.NET cannot read (the layered ice decals,
+    /// `DecalSponsor1x1BigAOnRoadIce`: an unknown unskippable chunk) still carries its
+    /// references in the header: the engine shader and every texture file. The diffuse is the
+    /// `_D` texture named after the material — the longest stem that prefixes the material's
+    /// name (`DecalSponsor1x1BigA_D` for `DecalSponsor1x1BigAOnRoadIce`, over the base
+    /// `RoadIce_D` of the layered shader) — else the first `_D`. Returns the image, or null.</summary>
+    private string? RegisterFromHeader(string name, string path)
+    {
+        var header = Gbx.ParseHeader(path);
+        var files = header.RefTable?.Files.Select(f => f.FilePath).ToList() ?? [];
+        var level = header.RefTable?.AncestorLevel ?? 0;
+        var shader = files.FirstOrDefault(f => f.EndsWith(".Material.gbx", StringComparison.OrdinalIgnoreCase));
+        if (shader is not null) materialShader[name] = Path.GetFileName(shader.Replace('\\', '/'));
+        string? best = null;
+        var bestLen = -1;
+        foreach (var f in files)
+        {
+            var stem = Path.GetFileName(f);
+            var dot = stem.IndexOf('.');
+            if (dot > 0) stem = stem[..dot];
+            if (!stem.EndsWith("_D", StringComparison.OrdinalIgnoreCase)) continue;
+            var baseName = stem[..^2];
+            var len = name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase) ? baseName.Length : 0;
+            if (len > bestLen) { bestLen = len; best = f; }
+        }
+        if (best is null) return null;
+        var image = ImageOfTextureFile(RefPaths.Resolve(path, level, best));
+        if (image is null) return null;
+        materialImages[name] = image;
+        return image;
     }
 
     private static string? FindSlotImage(CPlugMaterial? node, Func<string?, bool> match)
