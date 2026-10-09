@@ -19,7 +19,8 @@
     "capfit": "python tools/cap_fit_check.py",
     "clipgeom": "python tools/clip_geometry_check.py",
     "blockaudit": "python tools/block_audit.py",
-    "huemasks": "python tools/hue_masks.py"
+    "huemasks": "python tools/hue_masks.py",
+    "mapsheets": "python tools/map_sheets.py"
   },
   "dependencies": {
     "three": "^0.168.0"

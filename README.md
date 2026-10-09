@@ -775,6 +775,12 @@ by the texture's brightness. `npm run huemasks` rewrites the mask PNGs of an exi
 import with their alpha (`--stats` lists what each mask holds); the debug inspector
 reports each painted texture's mean colour (`canvasMean`).
 
+`npm run mapsheets [-- --map <id>]` renders one tile per block and item TYPE the open
+map uses (its first placement, isolated, from the game's icon camera) beside the game's
+own icon, into `sheets/map_<id>/` with contact sheets; `python tools/icon_match.py
+sheets/map_<id> sheets/icons` then ranks the types whose silhouette least resembles the
+game's render — the way to sweep a whole map's vocabulary in minutes.
+
 ### Inspecting rendering problems
 
 Select a block and click **Frame** in the status bar to move the camera around
