@@ -1512,6 +1512,8 @@ sealed class Dumper(string root, string outDir, string? filter)
                 // Variant blocks (PlatformDirt*, *SpecialFragile*, …) share the
                 // base mesh and swap materials through terrain modifiers.
                 SetModifiers(info.MaterialModifierFile?.FilePath, info.MaterialModifier2File?.FilePath);
+                if (Environment.GetEnvironmentVariable("MESHDUMP_MOD_PROBE") is not null)
+                    Console.Error.WriteLine($"  modprobe {name}: mod1={info.MaterialModifierFile?.FilePath ?? "-"} mod2={info.MaterialModifier2File?.FilePath ?? "-"} active={string.Join(",", activeModifiers.Select(m => m.Tag))}");
                 string? air, ground;
                 // A placed block names one VARIANT of its block (flags bits
                 // 21+): the base, "InPillar" (stacked inside a pillar), or a
@@ -2955,13 +2957,32 @@ sealed class Dumper(string root, string outDir, string? filter)
         }
     }
 
+    /// <summary>A file reference as a game node records it, on disk. A node's references are
+    /// relative to the ancestor its ref table names: usually the Stadium folder
+    /// ("Media\Modifier\Reset.TerrainModifier.Gbx"), but a block that also references another
+    /// pack (the special gates name Effects\Media\Material\CollisionTurbo) climbs to GameData,
+    /// and then every reference carries the "Stadium\" prefix — resolved against the Stadium
+    /// root that file does not exist, and the block's modifier silently swapped nothing
+    /// (every GateSpecial* BLOCK drew the Turbo sheet and sign, NOTES 5w). Try the root,
+    /// then its parent.</summary>
+    private string ResolveGameRef(string rel)
+    {
+        var local = rel.Replace('\\', Path.DirectorySeparatorChar);
+        var path = Fs.Fix(Path.Combine(root, local));
+        if (File.Exists(path)) return path;
+        var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)));
+        if (parent is null) return path;
+        var above = Fs.Fix(Path.Combine(parent, local));
+        return File.Exists(above) ? above : path;
+    }
+
     private TerrainModifier? LoadModifier(string rel)
     {
         if (modifierCache.TryGetValue(rel, out var cached)) return cached;
         TerrainModifier? result = null;
         try
         {
-            var path = Fs.Fix(Path.Combine(root, rel.Replace('\\', Path.DirectorySeparatorChar)));
+            var path = ResolveGameRef(rel);
             if (File.Exists(path))
             {
                 // GBX.NET can't parse CPlugGameSkinAndFolder, but the body is
@@ -2971,6 +2992,11 @@ sealed class Dumper(string root, string outDir, string? filter)
                 var (skin, folder) = TerrainModifiers.ParseBody(Encoding.Latin1.GetString(body.ToArray()));
                 var tag = folder ?? TerrainModifiers.TagFromFileName(path);
                 var dir = Fs.Fix(Path.Combine(Path.GetDirectoryName(path)!, tag));
+                // A modifier file parked in a sub-folder (Media\Modifier\Deprecated\Boost.TerrainModifier.Gbx,
+                // the older non-oriented boost gates) still names the replacement folder beside the
+                // live ones (Media\Modifier\Boost): look one level up when nothing sits beside it.
+                if (!Directory.Exists(dir) && Path.GetDirectoryName(Path.GetDirectoryName(path)) is string up)
+                    dir = Fs.Fix(Path.Combine(up, tag));
                 if (Directory.Exists(dir))
                     result = new TerrainModifier(tag, dir, SkinSlots(skin));
             }
@@ -3223,12 +3249,14 @@ sealed class Dumper(string root, string outDir, string? filter)
             var previous = json[name]?["source"]?.GetValue<string>();
             // Opacity-masked materials always regenerate: the mask must be
             // baked into the PNG's alpha (decal lettering, cut-outs).
-            if (!File.Exists(pngPath) || opacity is not null || previous != source)
+            var additive = materialShader.GetValueOrDefault(name)?.Contains("TAdd", StringComparison.OrdinalIgnoreCase) == true;
+            if (!File.Exists(pngPath) || opacity is not null || additive || previous != source)
             {
                 try
                 {
                     ConvertDds(image, pngPath);
                     if (opacity is not null) BakeOpacity(pngPath, opacity);
+                    if (additive) BakeGlowAlpha(pngPath);
                     converted++;
                 }
                 catch (Exception ex)
@@ -3316,6 +3344,27 @@ sealed class Dumper(string root, string outDir, string? filter)
         {
             if (File.Exists(tmp)) File.Delete(tmp);
         }
+    }
+
+    /* A TAdd (additive) material's image is an emission: the game ADDS it to whatever is
+     * behind (gate sheets, booster glow strips, torch flames) — black texels are invisible,
+     * bright ones glow. Additive blending in the editor saturates to white against its bright
+     * sky, so the glow is rebaked as an ordinary translucent layer: a texel's brightness
+     * becomes its alpha and its colour is normalised to full strength. Dark backgrounds
+     * still vanish, a green Reset sheet stays green over the sky (NOTES 5w). */
+    private static void BakeGlowAlpha(string pngPath)
+    {
+        using var png = SixLabors.ImageSharp.Image.Load<Rgba32>(pngPath);
+        for (var y = 0; y < png.Height; y++)
+            for (var x = 0; x < png.Width; x++)
+            {
+                var p = png[x, y];
+                var peak = Math.Max(p.R, Math.Max(p.G, p.B));
+                if (peak == 0) { png[x, y] = new Rgba32(0, 0, 0, 0); continue; }
+                var k = 255f / peak;
+                png[x, y] = new Rgba32((byte)Math.Min(255, p.R * k), (byte)Math.Min(255, p.G * k), (byte)Math.Min(255, p.B * k), peak);
+            }
+        png.SaveAsPng(pngPath);
     }
 
     private static string? FindHueMask(string imagePath)

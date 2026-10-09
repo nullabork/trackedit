@@ -1,5 +1,4 @@
 import {
-  AdditiveBlending,
   CanvasTexture,
   DoubleSide,
   Group,
@@ -248,11 +247,21 @@ export class MeshProvider implements GeometryProvider {
           side: DoubleSide,
         });
       } else if (texture && entry?.blend === "add") {
-        // Glow strips (turbo/boost FX): additive, never occlude anything.
+        // Glow sheets and strips (gate panels, booster FX, torch flames): the
+        // game ADDS these emissive images to the scene. The exporter bakes
+        // that glow into the PNG's alpha (brightness = opacity, colour at
+        // full strength), so an unlit translucent layer gives the same look
+        // over dark ground without saturating to white against the sky, as
+        // true additive blending did. Never occludes anything.
+        // Unlit: the image is an emission, so it goes through the emissive
+        // slot (black diffuse) and the map slot only supplies the alpha.
+        const glow = this.loadTexture(this.baseUrl + texture);
         mat = new MeshLambertMaterial({
-          map: this.loadTexture(this.baseUrl + texture),
+          map: glow,
+          color: 0x000000,
+          emissive: 0xffffff,
+          emissiveMap: glow,
           transparent: true,
-          blending: AdditiveBlending,
           depthWrite: false,
           side: DoubleSide,
         });

@@ -824,6 +824,31 @@ on the number stickers) never loaded and drew in a flat stand-in grey — and th
 never wrote its materials at all. It now uses the extract root (`TRACKEDIT_EXTRACT_ROOT`,
 else the default Openplanet extract) and writes what it registered.
 
+## 5w. Glow sheets and the gates' own modifier (tmx-359075, continued)
+
+**White panels.** The sheet filling a gameplay gate, the strips on boosters and a torch's
+flame are `TAdd` materials: the game ADDS their image to the frame. The editor drew them
+with true additive blending, which over its bright sky saturates to white — the green Reset
+sheet, the blue checkpoint sheet, all white. The exporter now bakes the glow into the PNG:
+a texel's brightness becomes its alpha and its colour is normalised to full strength
+(`BakeGlowAlpha`, always rerun for `TAdd` materials), and the renderer draws the layer as an
+ordinary unlit translucent surface (emissive slot, black diffuse, no depth write). Dark
+texels still vanish, as under addition; bright ones keep their hue over any background.
+Game icons are no help here — they render the ring without its sheet.
+
+**Reset gate blocks drew Turbo.** The items were fixed in 5v; the BLOCKS (`GateSpecialReset`
+etc.) still named `SpecialFXTurbo`/`SpecialSignTurbo`. Their block info does carry
+`MaterialModifierFile`, but as `Stadium\Media\Modifier\Reset.TerrainModifier .Gbx`: a node's
+references are relative to the ancestor its ref table names, and these blocks also reference
+`Effects\Media\Material\CollisionTurbo`, so their table climbs to GameData and every
+reference gains the `Stadium\` prefix. Resolved against the Stadium root that file does not
+exist and the modifier silently swapped nothing. `ResolveGameRef` now tries the root, then
+its parent (`meshdump refs <file>` shows a node's references as recorded). The older
+non-oriented `GateSpecialBoost`/`Boost2` name a modifier parked in `Media\Modifier\Deprecated\`
+whose replacement folder still lives beside the live ones; the loader now looks one level up
+when no folder sits beside the file. `MESHDUMP_MOD_PROBE=1` prints every block's modifier
+files and the modifiers that actually loaded.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

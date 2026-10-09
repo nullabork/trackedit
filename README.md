@@ -238,8 +238,11 @@ How the materials are resolved (the parts that go wrong when skipped):
 - **Decals** (`DecalGeom` shaders) are flagged `decal` in `materials.json`.
   They sit exactly on the surface they mark; the renderer draws them with
   a depth bias and alpha blending so they don't z-fight the base surface
-  (the "half the top face is grey" symptom). `TAdd` glow strips are
-  flagged `blend: "add"`.
+  (the "half the top face is grey" symptom). `TAdd` glow sheets and strips
+  (gate panels, booster FX, torch flames) are flagged `blend: "add"`: the
+  game adds their image to the frame, so the exporter bakes brightness into
+  the PNG's alpha and the renderer draws them unlit and translucent — true
+  additive blending turned them white against the sky.
 - **Projected textures** (`Py*`/`Pxz*` slots) ignore mesh UVs; UVs are
   synthesised from world position with the bitmap's `DefaultTexCoordScale`
   (1/32 = one tile per grid cell; plastic and canopy tile at 1/8).
