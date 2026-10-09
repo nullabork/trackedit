@@ -912,6 +912,41 @@ flagged, down from 23 — the 38 "flat" findings on the ice roads went with the 
 remains is the 5 surface-rule name limits and the two Stage top plates. `capfit` 1,980/2,074
 known caps (95.5%), `clipgeom` 1,482 of 147,649 clips without geometry (1.0%), both unchanged.
 
+## 5y. A stage support's bottom plate crossing its walls (tmx-359075): the game's cap direction for free blocks too
+
+**Report.** Four `StageSupportCurve1In` free blocks in a ring: "look at the bottom of the
+block, it's not in line with the top". The quarter-ring bottom plate sat a quarter turn from
+the curved walls and the top plate.
+
+**Why.** The block has no body of its own (`mobilinfo`: no mobil, air or ground) — it is its
+clips: two concentric curved walls, two end panels, a plate on top and one underneath. Its
+caps were not in the harvested direction table, so the shape fit decided. For the top plate
+the fit was decisive (0.22 against 5.8); for the bottom plate every quarter turn scored 0.01 —
+a flat plate under thin walls meets them equally whichever way it turns — and the
+ratio rule ("a turn must beat no turn by 15 %") picked turn 1 out of float noise.
+
+**Two fixes, one of them the rule the user asked for.**
+
+1. The fit's tie-break has an absolute floor: a turn must beat no turn by 5 cm as well as by
+   the ratio. Measured against the 2,074 caps whose direction the game has shown, it changes
+   two decisions and both for the better; the StageSupport plates come out unturned, which is
+   what the game bakes.
+2. The game's own direction now covers FREE blocks' caps. A free block's top or bottom clip
+   is baked into the map as a free block of its own, at the unit's origin corner carried
+   through the block's rotation, with the yaw the game gave it — so `cliptruth --harvest`
+   reads it like a grid cap's (a game direction k is a yaw of -k x 90 degrees, the editor's own
+   convention) into the same `cap_turns.json`. On Joels Odyssey 1 alone that is 240 caps the
+   grid harvest could not see, including every stage support and expandable gate on the map;
+   where a cap had been seen on grid blocks too, the two agree on 234 of 235.
+
+**The rule, stated once.** A cap's orientation comes from the game wherever the game has
+shown it — the baked clip blocks of every cached map, grid and free — and from the shape fit
+only for caps no map has shown. Each map loaded into the editor lands in `maps/gbx`, so
+`npm run cliptruth -- --harvest` followed by a rebuild and re-extraction grows the known
+share; the cap report (`MESHDUMP_CAP_REPORT`) and `npm run capfit` say how much the fit is
+still trusted with. The game's block definitions themselves carry no cap direction GBX.NET
+can read (5o), which is why the maps are the source.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes

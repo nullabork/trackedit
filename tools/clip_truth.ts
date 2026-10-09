@@ -35,6 +35,7 @@ import type { GridCoord } from "../src/core/math";
 import { baseTypeOf } from "../src/core/mapbase";
 import { importDump, type MapDump } from "../src/io/trackoJson";
 import { FACE_NORMAL, cellKey, clipHiddenBy, clipPartName, faceToward, hiddenClipParts, occupiedCells, rotateByDir, unitCell, wallSegments, withClipDefs } from "../src/render/clipAdjacency";
+import { CELL, quatFromGameRot, quatRotate } from "../src/core/math";
 import type { BlockClipInfo, ClipDefs, ClipSubject, UnitClip } from "../src/render/clipAdjacency";
 import { ClipFaceIndex, freeClipFaces, gridClipFaces, hiddenClipFaces } from "../src/render/clipFaces";
 import type { ClipFace } from "../src/render/clipFaces";
@@ -111,6 +112,7 @@ const work = mkdtempSync(join(tmpdir(), "trackedit-truth-"));
 let doc: MapDocument;
 let truth: Truth;
 const bakedFree = new Map<string, number>();
+const bakedFreeClips: Array<{ name: string; absPos: [number, number, number]; yaw: number; claimed?: boolean }> = [];
 try {
   const dumpPath = join(work, "dump.json");
   execFileSync(MESHDUMP, ["map", mapPath, dumpPath], { stdio: "ignore" });
@@ -119,7 +121,12 @@ try {
   const baked = JSON.parse(readFileSync(bakedPath, "utf-8")) as { mapName: string; baked: Array<{ name: string; coord: GridCoord; dir: number; isGhost: boolean; isFree: boolean; variant: number; isGround: boolean }> };
   // Clips of free blocks are baked without a cell: compared by name and count further down.
   truth = { mapName: baked.mapName, clips: baked.baked.filter((b) => !b.isFree).map((b) => ({ name: b.name, coord: b.coord, dir: b.dir, ghost: b.isGhost, variant: b.variant, ground: b.isGround })) };
-  for (const b of baked.baked) if (b.isFree) bakedFree.set(b.name, (bakedFree.get(b.name) ?? 0) + 1);
+  for (const b of baked.baked) if (b.isFree) {
+    bakedFree.set(b.name, (bakedFree.get(b.name) ?? 0) + 1);
+    // A free block's baked clip carries its own position and yaw: the game's direction for
+    // that cap, readable just like a grid cap's (harvested further down).
+    bakedFreeClips.push({ name: b.name, absPos: b.absPos, yaw: b.yawPitchRoll[0] });
+  }
   doc = new MapDocument();
   const imported = importDump(JSON.parse(readFileSync(dumpPath, "utf-8")) as MapDump);
   doc.reset(imported.layers, { name: imported.name, decoration: imported.decoration });
@@ -327,6 +334,40 @@ if (freeFaces.size || bakedFree.size) {
   console.log(`  free blocks: ${freeFaces.size} with clips, ${freeTotal} clip pieces; the game baked ${gameTotal}`);
   console.log(`     off by ${alone.diff} when free clips join each other only (the editor's rule), by ${mixed.diff} if they joined grid blocks too, by ${Math.abs(freeTotal - gameTotal)} if nothing joined`);
   for (const r of alone.rows.sort().slice(0, brief ? 4 : 20)) console.log(`       ${r}`);
+}
+
+// --- free blocks' caps: the game's direction, read off their baked clip blocks ---
+// A free block's top/bottom clip is baked as a free block of its own, at the unit's origin
+// corner (the block's corner pivot carried through the block's rotation) and with the yaw
+// the game gave it. Its turn relative to the block is the same quantity the grid harvest
+// records (a game direction k is a yaw of -k * 90 degrees), so the observations go into the
+// same table: this is how body-less and free-only blocks (stage supports, expandable gates)
+// get the game's word on their caps instead of a shape fit.
+let freeCapsMatched = 0, freeCapsUnmatched = 0;
+if (bakedFreeClips.length) {
+  const byName = new Map<string, typeof bakedFreeClips>();
+  for (const b of bakedFreeClips) (byName.get(b.name) ?? byName.set(b.name, []).get(b.name)!).push(b);
+  const turnOf = (yaw: number) => ((Math.round(-yaw / (Math.PI / 2)) % 4) + 4) % 4;
+  for (const layer of doc.layers) for (const p of layer.placements.values()) {
+    if (p.kind !== "free" || p.isItem) continue;
+    const variant = placementVariant(p, stadium);
+    const info = clipInfo(p.block, variant);
+    if (!info) continue;
+    const q = quatFromGameRot(p.rot);
+    for (const clip of info.clips) {
+      if (clip.face !== "top" && clip.face !== "bottom") continue;
+      const w = quatRotate(q, [clip.u[0] * CELL[0], clip.u[1] * CELL[1], clip.u[2] * CELL[2]]);
+      const ax = p.pos[0] + w[0], az = p.pos[2] + w[2];
+      const hit = (byName.get(clip.id) ?? []).find((b) => !b.claimed && Math.abs(b.absPos[0] - ax) < 1 && Math.abs(b.absPos[2] - az) < 1);
+      if (!hit) { freeCapsUnmatched++; continue; }
+      hit.claimed = true;
+      freeCapsMatched++;
+      const rel = ((turnOf(hit.yaw) - turnOf(p.rot[0])) % 4 + 4) % 4;
+      const exact = `${p.block}|${variant}|${clip.id}|${clip.face}|${clip.u.join(",")}`;
+      (capObservations[exact] ??= [0, 0, 0, 0])[rel]++;
+    }
+  }
+  console.log(`  free blocks' caps: ${freeCapsMatched} matched to the game's baked clip blocks by name and corner, ${freeCapsUnmatched} not found`);
 }
 
 const unclaimed = new Map<string, number>();

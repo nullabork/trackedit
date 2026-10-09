@@ -2503,7 +2503,11 @@ sealed class Dumper(string root, string outDir, string? filter)
                                 Quaternion.CreateFromAxisAngle(Vector3.UnitY, deg * MathF.PI / 180f), q);
                             var e = Err(cand);
                             errs[(int)(deg / 90f)] = e;
-                            if (e < bestErr) { bestErr = e; best = cand; bestTurn = (int)(deg / 90f); }
+                            // …and by a measurable margin, not a ratio alone: a shell of walls
+                            // under a flat plate scores every turn the same (StageSupport curves:
+                            // 0.01 all round), where the ratio rule picked a turn out of float
+                            // noise and the bottom plate came out crossing the walls (NOTES 5y).
+                            if (e < bestErr && unturned - e >= 0.05f) { bestErr = e; best = cand; bestTurn = (int)(deg / 90f); }
                         }
                         q = best;
                         fitTurn = bestTurn;
