@@ -951,6 +951,11 @@ share; the cap report (`MESHDUMP_CAP_REPORT`) and `npm run capfit` say how much 
 still trusted with. The game's block definitions themselves carry no cap direction GBX.NET
 can read (5o), which is why the maps are the source.
 
+**Measured after the re-harvest and full re-extraction** (105 maps): 1,826 caps with a known
+direction (1,740 before), 2,193 caps placed by the game's word (2,077 before); where the game
+is known the fit as shipped now agrees on 2,108 of 2,190 (96.3%, was 95.5%). `blockaudit` 5
+blocks flagged, `cliptruth` 99.48% over 105 maps — both unchanged.
+
 ## 6. Lessons
 
 - Get a reference before judging. The icons settled arguments in minutes
